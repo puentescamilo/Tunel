@@ -25,6 +25,8 @@ impl LockScreen {
         }
     }
 
+    /// Solo lo usan los ganchos de desarrollo (`TUNEL_DEV_*`).
+    #[cfg(debug_assertions)]
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }

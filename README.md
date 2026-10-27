@@ -85,6 +85,33 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 ## Instalación
 
+### macOS
+
+Descarga `Túnel_<versión>_universal.dmg` desde [Releases](https://github.com/puentescamilo/Tunel/releases).
+Funciona en Macs con Apple Silicon e Intel, con macOS 11 o posterior. Abre el `.dmg` y
+arrastra **Túnel** a **Aplicaciones**.
+
+La app está firmada de forma local (ad hoc) pero no notarizada por Apple, así que la primera
+vez macOS la bloquea. Para abrirla:
+
+1. Intenta abrir Túnel y cierra el aviso.
+2. Ve a **Ajustes del Sistema → Privacidad y seguridad** y pulsa **Abrir igualmente** junto al
+   mensaje sobre Túnel.
+
+También puedes quitar la marca de cuarentena desde la terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Túnel.app
+```
+
+Para Mosh hace falta `mosh` instalado en tu equipo y en el servidor.
+
+### Windows y Linux
+
+Aún no hay paquetes; se puede compilar desde el código.
+
+### Desde el código
+
 Hace falta [Rust](https://rustup.rs/) 1.89 o superior.
 
 ```bash
@@ -94,7 +121,7 @@ cargo run --release -p tunel-app
 ```
 
 En Linux se necesitan además las cabeceras de GTK, X11 o Wayland que usan `eframe` y `rfd`,
-y `libudev-dev` para el puerto serie. Para Mosh, instala `mosh` en tu equipo y en el servidor.
+y `libudev-dev` para el puerto serie.
 
 La bóveda se guarda en el directorio de datos del usuario; en macOS es
 `~/Library/Application Support/dev.tunel.tunel/vault.json`. Para usar otra ruta:
@@ -102,6 +129,19 @@ La bóveda se guarda en el directorio de datos del usuario; en macOS es
 ```bash
 TUNEL_VAULT=/ruta/vault.json cargo run --release -p tunel-app
 ```
+
+### Generar el `.dmg`
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+cargo install cargo-packager --locked
+./scripts/package-macos.sh
+```
+
+El script compila para Apple Silicon e Intel, une ambos en un binario universal, lo empaqueta
+con [cargo-packager](https://github.com/crabnebula-dev/cargo-packager), comprueba dentro del
+`.dmg` que el ejecutable es universal y deja el resultado y su `SHA256SUMS.txt` en `dist/`.
+El icono se regenera con `swift crates/tunel-app/assets/icons/generar-icono.swift icon-1024.png`.
 
 ## Seguridad
 

@@ -22,3 +22,19 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 directories.workspace = true
 zeroize.workspace = true
+
+# Empaquetado con cargo-packager (ver scripts/package-macos.sh).
+[package.metadata.packager]
+product-name = "Túnel"
+identifier = "dev.tunel.tunel"
+description = "Cliente SSH multiplataforma"
+homepage = "https://github.com/puentescamilo/Tunel"
+authors = ["Camilo Puentes"]
+category = "DeveloperTool"
+binaries = [{ path = "tunel", main = true }]
+icons = ["assets/icons/icon.icns", "assets/icons/icon.ico", "assets/icons/256x256.png", "assets/icons/128x128.png", "assets/icons/32x32.png"]
+out-dir = "../../dist"
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+signing-identity = "-"
