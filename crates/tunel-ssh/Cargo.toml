@@ -1,0 +1,15 @@
+[package]
+name = "tunel-ssh"
+description = "Cliente SSH de Túnel: sesiones, autenticación, jump hosts, túneles y SFTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tunel-core.workspace = true
+russh.workspace = true
+russh-sftp.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+base64.workspace = true

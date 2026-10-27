@@ -1,0 +1,17 @@
+[package]
+name = "tunel-term"
+description = "Emulador de terminal y backends (local, Telnet, serie, Mosh) de Túnel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tunel-core.workspace = true
+alacritty_terminal.workspace = true
+portable-pty.workspace = true
+serialport.workspace = true
+plist.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

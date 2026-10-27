@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = ["crates/tunel-core", "crates/tunel-ssh", "crates/tunel-term", "crates/tunel-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/puentescamilo/Tunel"
+
+[workspace.dependencies]
+tunel-core = { path = "crates/tunel-core" }
+tunel-ssh = { path = "crates/tunel-ssh" }
+tunel-term = { path = "crates/tunel-term" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1.29", features = ["v4", "serde"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+argon2 = "0.6"
+chacha20poly1305 = "0.11"
+rand = "0.9"
+zeroize = { version = "1", features = ["derive"] }
+base64 = "0.22"
+directories = "6"
+russh = "0.65"
+russh-sftp = "3.0"
+alacritty_terminal = "0.26"
+portable-pty = "0.9"
+serialport = "4.10"
+eframe = "0.37"
+egui = "0.37"
+rfd = "0.17"
+keyring = "4.2"
+tempfile = "3"
+plist = "1.10"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

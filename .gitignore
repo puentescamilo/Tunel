@@ -1,0 +1,4 @@
+/target
+*.log
+vault.json
+vault.tmp

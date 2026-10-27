@@ -1,0 +1,24 @@
+[package]
+name = "tunel-app"
+description = "Túnel: cliente SSH multiplataforma"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tunel"
+path = "src/main.rs"
+
+[dependencies]
+tunel-core.workspace = true
+tunel-ssh.workspace = true
+tunel-term.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+directories.workspace = true
+zeroize.workspace = true
