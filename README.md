@@ -208,9 +208,10 @@ Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_
 `TUNEL_DEV_THEME=<id de tema>` y `TUNEL_DEV_CURSOR=bloque|barra|subrayado`. No existen en
 compilaciones `--release`.
 
-El análisis de Termius que sirvió de referencia para la lista de funciones está en
-[docs/ANALISIS_TERMIUS.md](docs/ANALISIS_TERMIUS.md). Túnel no reutiliza código, recursos ni
-marcas de Termius.
+## Licencia
+
+Túnel se distribuye bajo la licencia [MIT](LICENSE-MIT) o la [Apache 2.0](LICENSE-APACHE), a
+tu elección.
 
 ## Créditos
 
