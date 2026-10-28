@@ -145,6 +145,9 @@ pub struct Group {
     pub parent: Option<GroupId>,
     pub identity: Option<IdentityId>,
     pub port: Option<u16>,
+    /// Tema de la terminal para los hosts del grupo que no tengan uno propio.
+    #[serde(default)]
+    pub terminal_theme: Option<String>,
 }
 
 impl Group {

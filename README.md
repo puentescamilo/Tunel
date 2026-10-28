@@ -49,7 +49,8 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 - **13 temas incluidos**: Túnel Oscuro y Claro, Dracula, Nord, Tokyo Night, Catppuccin
   Mocha y Latte, One Dark, Gruvbox, Solarized Oscuro y Claro, Monokai y GitHub Claro.
 - **Importa temas** de iTerm2 (`.itermcolors`) y Windows Terminal (`.json`).
-- **Tema por host**, por ejemplo uno rojo para producción.
+- **Tema por host o por grupo**, por ejemplo uno distinto para producción. Los hosts sin tema
+  propio usan el de su grupo y, si tampoco lo tiene, el general.
 - Cursor en bloque, barra o subrayado. Los programas como vim pueden cambiarlo mientras se ejecutan.
 
 ![Terminal con el tema Túnel Oscuro](docs/screenshots/terminal.png)

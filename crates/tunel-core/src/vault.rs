@@ -270,6 +270,24 @@ impl VaultData {
         .collect()
     }
 
+    /// Primer tema definido subiendo desde `group`, con el grupo que lo define.
+    pub fn inherited_terminal_theme(&self, group: Option<GroupId>) -> Option<(&Group, &str)> {
+        self.group_chain(group)
+            .into_iter()
+            .find_map(|g| g.terminal_theme.as_deref().map(|theme| (g, theme)))
+    }
+
+    /// Id del tema de la terminal de un host: el suyo, el heredado de su grupo o el general.
+    pub fn terminal_theme_id(&self, id: HostId) -> &str {
+        let host = self.host(id);
+        host.and_then(|h| h.terminal_theme.as_deref())
+            .or_else(|| {
+                let group = host.and_then(|h| h.group);
+                self.inherited_terminal_theme(group).map(|(_, theme)| theme)
+            })
+            .unwrap_or(&self.settings.theme)
+    }
+
     pub fn resolve(&self, id: HostId) -> Result<ResolvedHost, ResolveError> {
         let host = self.host(id).ok_or(ResolveError::HostNotFound)?;
         let chain = self.group_chain(host.group);
@@ -432,6 +450,75 @@ mod tests {
         let resolved = vault.resolve(host).unwrap();
         assert_eq!(resolved.port, 2200);
         assert_eq!(resolved.identity.unwrap().id, identity);
+    }
+
+    fn with_group_theme(vault: VaultData, group: GroupId, theme: Option<&str>) -> VaultData {
+        let updated = Group {
+            terminal_theme: theme.map(String::from),
+            ..vault.group(group).unwrap().clone()
+        };
+        vault.with_group(updated)
+    }
+
+    fn with_host_theme(vault: VaultData, host: HostId, theme: Option<&str>) -> VaultData {
+        let updated = Host {
+            terminal_theme: theme.map(String::from),
+            ..vault.host(host).unwrap().clone()
+        };
+        vault.with_host(updated)
+    }
+
+    #[test]
+    fn terminal_theme_defaults_to_general_setting() {
+        let (vault, host, _, _) = sample();
+        assert_eq!(vault.terminal_theme_id(host), vault.settings.theme);
+        assert_eq!(
+            vault.inherited_terminal_theme(vault.host(host).unwrap().group),
+            None
+        );
+    }
+
+    #[test]
+    fn terminal_theme_is_inherited_from_group_chain() {
+        let (vault, host, group, _) = sample();
+        let child = Group {
+            parent: Some(group),
+            ..Group::new("Web")
+        };
+        let moved = Host {
+            group: Some(child.id),
+            ..vault.host(host).unwrap().clone()
+        };
+        let child_id = child.id;
+        let vault = with_group_theme(
+            vault.with_group(child).with_host(moved),
+            group,
+            Some("nord"),
+        );
+        assert_eq!(vault.terminal_theme_id(host), "nord");
+        let (source, theme) = vault.inherited_terminal_theme(Some(child_id)).unwrap();
+        assert_eq!((source.name.as_str(), theme), ("Producción", "nord"));
+    }
+
+    #[test]
+    fn host_theme_overrides_group_theme() {
+        let (vault, host, group, _) = sample();
+        let vault = with_group_theme(vault, group, Some("nord"));
+        let vault = with_host_theme(vault, host, Some("dracula"));
+        assert_eq!(vault.terminal_theme_id(host), "dracula");
+    }
+
+    #[test]
+    fn terminal_theme_of_unknown_host_is_general_setting() {
+        let vault = VaultData::default();
+        assert_eq!(vault.terminal_theme_id(HostId::new()), vault.settings.theme);
+    }
+
+    #[test]
+    fn group_without_theme_field_still_deserializes() {
+        let json = r#"{"id":"00000000-0000-0000-0000-000000000001","name":"G","parent":null,"identity":null,"port":null}"#;
+        let group: Group = serde_json::from_str(json).unwrap();
+        assert_eq!(group.terminal_theme, None);
     }
 
     #[test]

@@ -57,6 +57,51 @@ fn paint_preview(painter: &egui::Painter, rect: Rect, theme: &Theme) {
     }
 }
 
+/// Tema que usa un host o un grupo cuando no define uno propio.
+pub struct InheritedTheme<'a> {
+    /// Grupo del que se hereda; `None` es el tema general de ajustes.
+    pub group: Option<&'a str>,
+    pub theme_id: &'a str,
+}
+
+/// Selector de tema de un host o un grupo, con la vista previa del tema que se usará.
+pub fn theme_picker(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    value: &mut Option<String>,
+    inherited: &InheritedTheme,
+    custom: &[Theme],
+) {
+    let inherited_theme = palette::find(inherited.theme_id, custom);
+    let inherit_label = match inherited.group {
+        Some(group) => format!("Del grupo «{group}» ({})", inherited_theme.name),
+        None => format!("El general ({})", inherited_theme.name),
+    };
+    let effective = value
+        .as_deref()
+        .map_or(inherited_theme, |id| palette::find(id, custom));
+    let selected = if value.is_some() {
+        effective.name.clone()
+    } else {
+        inherit_label.clone()
+    };
+    ui.vertical(|ui| {
+        egui::ComboBox::from_id_salt(id_salt)
+            .selected_text(selected)
+            .width(CARD_WIDTH)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(value, None, inherit_label);
+                ui.separator();
+                for theme in custom.iter().chain(palette::builtin()) {
+                    ui.selectable_value(value, Some(theme.id.clone()), &theme.name);
+                }
+            });
+        let size = Vec2::new(CARD_WIDTH, PREVIEW_HEIGHT);
+        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+        paint_preview(ui.painter(), rect, effective);
+    });
+}
+
 /// Tarjeta seleccionable de un tema. Devuelve (seleccionar, eliminar).
 fn theme_card(ui: &mut egui::Ui, theme: &Theme, selected: bool) -> (bool, bool) {
     let p = ui::pal(ui);

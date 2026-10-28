@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = Identity::new("root", "root");
     let prod = Group {
         identity: Some(deploy.id),
+        terminal_theme: Some("dracula".into()),
         ..Group::new("Producción")
     };
     let staging = Group {

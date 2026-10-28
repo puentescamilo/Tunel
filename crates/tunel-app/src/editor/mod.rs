@@ -3,7 +3,7 @@
 mod host;
 
 use crate::app::TunelApp;
-use host::{HostForm, host_form, parse_port};
+use host::{HostForm, host_form, inherited_theme, parse_port};
 use tunel_core::*;
 
 const MODAL_WIDTH: f32 = 520.0;
@@ -209,6 +209,15 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                             .map(|g| (g.id, g.name.clone()))
                             .collect();
                         combo(ui, "grupo-padre", &mut group.parent, &parents, "(raíz)");
+                        ui.label("Tema de la terminal para sus hosts");
+                        let inherited = inherited_theme(&data, group.parent);
+                        crate::views::themes::theme_picker(
+                            ui,
+                            "tema-grupo",
+                            &mut group.terminal_theme,
+                            &inherited,
+                            &data.settings.custom_themes,
+                        );
                     }
                     Editor::Identity(identity) => identity_form(ui, identity, &data),
                     Editor::Key(key) => key_form(ui, key),

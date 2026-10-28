@@ -1,6 +1,7 @@
 //! Formulario de host y validación de sus campos.
 
 use super::combo;
+use crate::views::themes::{InheritedTheme, theme_picker};
 use std::collections::BTreeMap;
 use tunel_core::*;
 
@@ -253,28 +254,18 @@ impl HostForm {
     }
 }
 
-const GENERAL_THEME: &str = "Usar el tema general";
-
-/// Tema propio del host; `None` usa el de ajustes.
-fn theme_selector(ui: &mut egui::Ui, value: &mut Option<String>, data: &VaultData) {
-    let custom = &data.settings.custom_themes;
-    let selected = value
-        .as_deref()
-        .map(|id| tunel_term::palette::find(id, custom).name.clone())
-        .unwrap_or_else(|| GENERAL_THEME.into());
-    ui.horizontal(|ui| {
-        ui.label("Tema de la terminal");
-        egui::ComboBox::from_id_salt("tema-host")
-            .selected_text(selected)
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(value, None, GENERAL_THEME);
-                ui.separator();
-                for theme in custom.iter().chain(tunel_term::palette::builtin()) {
-                    ui.selectable_value(value, Some(theme.id.clone()), &theme.name);
-                }
-            });
-    });
+/// Tema que usaría un host o grupo colgado de `group` si no define uno propio.
+pub(super) fn inherited_theme(data: &VaultData, group: Option<GroupId>) -> InheritedTheme<'_> {
+    match data.inherited_terminal_theme(group) {
+        Some((source, theme_id)) => InheritedTheme {
+            group: Some(&source.name),
+            theme_id,
+        },
+        None => InheritedTheme {
+            group: None,
+            theme_id: &data.settings.theme,
+        },
+    }
 }
 
 pub(super) fn host_form(ui: &mut egui::Ui, form: &mut HostForm, data: &VaultData) {
@@ -380,6 +371,20 @@ pub(super) fn host_form(ui: &mut egui::Ui, form: &mut HostForm, data: &VaultData
                     .desired_width(FIELD_WIDTH),
             );
             ui.end_row();
+            // Arriba, alineada con el desplegable y no con el centro de la vista previa.
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.add_space(3.0);
+                ui.label("Tema");
+            });
+            let inherited = inherited_theme(data, form.host.group);
+            theme_picker(
+                ui,
+                "tema-host",
+                &mut form.host.terminal_theme,
+                &inherited,
+                &data.settings.custom_themes,
+            );
+            ui.end_row();
         });
 
     ui.collapsing("Avanzado", |ui| {
@@ -387,7 +392,6 @@ pub(super) fn host_form(ui: &mut egui::Ui, form: &mut HostForm, data: &VaultData
             crate::ui::toggle(ui, &mut form.host.agent_forwarding);
             ui.label("Reenvío del agente SSH");
         });
-        theme_selector(ui, &mut form.host.terminal_theme, data);
         ui.label("Saltar a través de (jump hosts, en orden):");
         for other in data.hosts.iter().filter(|h| h.id != form.host.id) {
             let mut on = form.host.jump_hosts.contains(&other.id);

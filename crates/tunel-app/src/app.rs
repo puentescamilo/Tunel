@@ -249,16 +249,13 @@ impl TunelApp {
         self.vault.as_ref().map(|v| &v.data)
     }
 
-    /// Tema de terminal de un host: el suyo propio o, si no tiene, el general de ajustes.
+    /// Tema de terminal de un host: el suyo, el heredado de su grupo o el general de ajustes.
     pub fn terminal_theme(&self, host: Option<HostId>) -> Theme {
         let Some(data) = self.data() else {
             return palette::default_theme().clone();
         };
-        let id = host
-            .and_then(|h| data.host(h))
-            .and_then(|h| h.terminal_theme.clone())
-            .unwrap_or_else(|| data.settings.theme.clone());
-        palette::find(&id, &data.settings.custom_themes).clone()
+        let id = host.map_or(data.settings.theme.as_str(), |h| data.terminal_theme_id(h));
+        palette::find(id, &data.settings.custom_themes).clone()
     }
 
     /// Aplica a la interfaz la paleta del modo elegido (o la que pide el tema de la terminal).
