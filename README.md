@@ -28,6 +28,8 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 - **SSH** con autenticación por clave, certificado, agente SSH (Unix y Windows), contraseña
   y keyboard-interactive (2FA).
+- **Llaves de seguridad FIDO2** (claves `sk-ed25519` y `sk-ecdsa` de OpenSSH, como una YubiKey)
+  en macOS y Linux: Túnel pide que toques la llave y, si la clave lo exige, el PIN.
 - **Verificación de la clave del servidor**: pide confirmación la primera vez y avisa en rojo
   si la clave cambia, aunque sea de otro algoritmo.
 - **Jump hosts encadenados** (ProxyJump) y conexión a través de **proxy SOCKS5 o HTTP**.
@@ -117,7 +119,7 @@ Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puente
 e instálalo con:
 
 ```bash
-sudo apt install ./tunel_0.1.0_amd64.deb
+sudo apt install ./tunel_0.2.0_amd64.deb
 ```
 
 Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
@@ -224,7 +226,7 @@ cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` e
 | Telnet, puerto serie, terminal local | ✅ |
 | Mosh | ✅ con el `mosh-client` del sistema |
 | Tema por grupo, reenvío X11 | ✅ |
-| Llaves FIDO2 (`sk-*`) | ⏳ fase 2 |
+| Llaves FIDO2 (`sk-*`) | ✅ macOS y Linux · ⏳ Windows |
 | Cliente Mosh propio | ⏳ más adelante |
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
 | Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
@@ -245,11 +247,12 @@ cargo fmt --all                                         # formato
 | `tunel-term` | Emulador de terminal, temas incluidos e importadores, teclado, terminal local, Telnet, serie |
 | `tunel-app` | Interfaz `egui` y sistema de diseño (`src/ui`) |
 
-**Pruebas:** 171 unitarias y 12 de punta a punta contra un servidor SSH que arranca el propio
+**Pruebas:** 190 unitarias y 16 de punta a punta contra un servidor SSH que arranca el propio
 test (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de
-host nueva y cambiada, shell, túnel local, SOCKS5, jump hosts y reenvío X11. Las claves de
+host nueva y cambiada, shell, túnel local, SOCKS5, jump hosts, reenvío X11 y llaves FIDO2
+(con una llave simulada). Las claves de
 `crates/tunel-ssh/tests/fixtures` son solo para esas pruebas. Aún no tienen pruebas automáticas
-el SFTP contra un servidor real, el túnel remoto, Mosh, Telnet, el puerto serie ni la interfaz.
+el SFTP contra un servidor real, Mosh, Telnet, el puerto serie ni la interfaz.
 
 **Capturas y pruebas manuales:** en compilaciones de depuración, unas variables de entorno
 abren la app directamente en una pantalla con datos de ejemplo:
