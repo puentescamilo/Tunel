@@ -10,6 +10,7 @@ pub struct SshConfigHost {
     pub identity_files: Vec<String>,
     pub proxy_jump: Vec<String>,
     pub forward_agent: bool,
+    pub forward_x11: bool,
 }
 
 impl SshConfigHost {
@@ -79,6 +80,7 @@ pub fn parse(text: &str) -> Vec<SshConfigHost> {
                         .collect();
                 }
                 "forwardagent" => host.forward_agent = value.eq_ignore_ascii_case("yes"),
+                "forwardx11" => host.forward_x11 = value.eq_ignore_ascii_case("yes"),
                 _ => {}
             }
         }
@@ -143,6 +145,7 @@ pub fn import_into(
             port: entry.port,
             identity: identity.as_ref().map(|i| i.id),
             agent_forwarding: entry.forward_agent,
+            x11_forwarding: entry.forward_x11,
             tags: vec!["ssh-config".into()],
             ..Host::new(entry.alias.clone(), entry.address())
         };
@@ -255,6 +258,17 @@ Match host x
     #[test]
     fn address_falls_back_to_alias() {
         assert_eq!(parse("Host solo-alias\n")[0].address(), "solo-alias");
+    }
+
+    #[test]
+    fn forward_x11_is_parsed_and_imported() {
+        let entries = parse("Host grafico\n    ForwardX11 yes\n\nHost texto\n    ForwardX11 no\n");
+        assert!(entries[0].forward_x11);
+        assert!(!entries[1].forward_x11);
+        let (vault, _) = import_into(&crate::vault::VaultData::default(), &entries, |_| None);
+        let host = |label: &str| vault.hosts.iter().find(|h| h.label == label).unwrap();
+        assert!(host("grafico").x11_forwarding);
+        assert!(!host("texto").x11_forwarding);
     }
 
     #[test]

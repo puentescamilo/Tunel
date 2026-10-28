@@ -1,6 +1,7 @@
 //! Conexión SSH: verificación de clave de host, autenticación y cadenas de jump hosts.
 
 use crate::proxy;
+use crate::x11::X11Forwarding;
 use russh::client::{self, ChannelOpenHandle, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{
     Certificate, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate, decode_secret_key,
@@ -41,6 +42,8 @@ pub enum SshError {
     Agent(String),
     #[error("E/S: {0}")]
     Io(#[from] std::io::Error),
+    #[error("X11: {0}")]
+    X11(#[from] crate::x11::X11Error),
 }
 
 /// Pregunta que la conexión necesita que responda el usuario.
@@ -68,12 +71,16 @@ pub type HostKeyLookup = Arc<dyn Fn(&str, u16, &str, &str) -> HostKeyStatus + Se
 /// Destinos locales de los reenvíos remotos (`-R`), por (dirección, puerto) del servidor.
 pub type RemoteForwardTargets = Arc<Mutex<HashMap<(String, u32), (String, u16)>>>;
 
+/// Reenvío X11 activo en la conexión; vacío mientras ninguna shell lo haya pedido.
+pub type X11Slot = Arc<Mutex<Option<Arc<X11Forwarding>>>>;
+
 pub struct ClientHandler {
     host: String,
     port: u16,
     lookup: HostKeyLookup,
     interactions: mpsc::UnboundedSender<Interaction>,
     remote_targets: RemoteForwardTargets,
+    x11: X11Slot,
 }
 
 fn describe_key(key: &PublicKeyOrCertificate) -> (String, String) {
@@ -156,6 +163,29 @@ impl client::Handler for ClientHandler {
         });
         Ok(())
     }
+
+    /// Solo se aceptan canales X11 si una shell de esta conexión pidió el reenvío; la cookie
+    /// de cada conexión X11 se comprueba después, en [`X11Forwarding::serve`].
+    async fn server_channel_open_x11(
+        &mut self,
+        channel: Channel<client::Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let forwarding = self.x11.lock().ok().and_then(|slot| slot.clone());
+        let Some(forwarding) = forwarding else {
+            tracing::warn!(host = self.host, "canal X11 no solicitado; rechazado");
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(forwarding.serve(channel));
+        Ok(())
+    }
 }
 
 /// Sesión SSH autenticada, con los saltos intermedios que la mantienen viva.
@@ -163,6 +193,7 @@ pub struct SshConnection {
     handle: Arc<Handle<ClientHandler>>,
     _hops: Vec<Arc<Handle<ClientHandler>>>,
     remote_targets: RemoteForwardTargets,
+    x11: X11Slot,
     pub label: String,
 }
 
@@ -201,14 +232,21 @@ impl SshConnection {
         target: &ResolvedHost,
     ) -> Result<Self, SshError> {
         let remote_targets: RemoteForwardTargets = Arc::default();
+        let x11: X11Slot = Arc::default();
+        let hops: Vec<&ResolvedHost> = jumps.iter().chain(std::iter::once(target)).collect();
+        // Solo el destino final recibe canales X11; los saltos intermedios nunca los aceptan.
         let handler = |h: &ResolvedHost| ClientHandler {
             host: h.host.address.clone(),
             port: h.port,
             lookup: ctx.lookup.clone(),
             interactions: ctx.interactions.clone(),
             remote_targets: remote_targets.clone(),
+            x11: if std::ptr::eq(h, target) {
+                x11.clone()
+            } else {
+                Arc::default()
+            },
         };
-        let hops: Vec<&ResolvedHost> = jumps.iter().chain(std::iter::once(target)).collect();
         let first = hops[0];
         let stream =
             proxy::connect(first.host.proxy.as_ref(), &first.host.address, first.port).await?;
@@ -236,6 +274,7 @@ impl SshConnection {
             handle: Arc::new(handle),
             _hops: previous,
             remote_targets,
+            x11,
             label: target.host.display_name().to_string(),
         })
     }
@@ -246,6 +285,13 @@ impl SshConnection {
 
     pub(crate) fn remote_targets(&self) -> &RemoteForwardTargets {
         &self.remote_targets
+    }
+
+    /// Activa el reenvío X11 de la conexión; sustituye al anterior si lo había.
+    pub(crate) fn set_x11(&self, forwarding: Arc<X11Forwarding>) {
+        if let Ok(mut slot) = self.x11.lock() {
+            *slot = Some(forwarding);
+        }
     }
 
     pub fn is_closed(&self) -> bool {

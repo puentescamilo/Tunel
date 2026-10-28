@@ -29,6 +29,49 @@ struct TestServer {
     client_key: PublicKey,
     /// Canales con shell abierta: solo ellos usan la "shell" de prueba.
     shells: Arc<std::sync::Mutex<std::collections::HashSet<ChannelId>>>,
+    /// Cookie recibida en `x11-req`; al abrir la shell el servidor abre un canal X11 con ella.
+    x11_cookie: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+/// Mensaje de inicio de conexión X11 (orden de bytes little-endian).
+fn x11_setup(name: &[u8], data: &[u8]) -> Vec<u8> {
+    let pad = |len: usize| len.div_ceil(4) * 4;
+    let mut msg = vec![b'l', 0, 11, 0, 0, 0];
+    msg.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    msg.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    msg.extend_from_slice(&[0, 0]);
+    for part in [name, data] {
+        msg.extend_from_slice(part);
+        msg.resize(msg.len() + pad(part.len()) - part.len(), 0);
+    }
+    msg
+}
+
+fn decode_hex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+        .collect()
+}
+
+/// Como haría una aplicación gráfica en el servidor: abre un canal X11, se presenta con la
+/// cookie y escribe en la shell lo que contesta el servidor X (o que el cliente lo rechazó).
+async fn open_x11_from_server(handle: server::Handle, shell: ChannelId, cookie: Option<String>) {
+    let report = match handle.channel_open_x11("127.0.0.1", 6010).await {
+        Err(_) => "x11:rechazado".to_string(),
+        Ok(channel) => {
+            let mut stream = channel.into_stream();
+            let cookie = cookie.as_deref().map(decode_hex).unwrap_or_default();
+            let setup = x11_setup(b"MIT-MAGIC-COOKIE-1", &cookie);
+            stream.write_all(&setup).await.unwrap();
+            let mut reply = [0u8; 6];
+            match stream.read_exact(&mut reply).await {
+                Ok(_) => format!("x11:{}", String::from_utf8_lossy(&reply)),
+                Err(_) => "x11:sin-respuesta".to_string(),
+            }
+        }
+    };
+    let _ = handle.data(shell, report.into_bytes()).await;
 }
 
 impl server::Server for TestServer {
@@ -115,6 +158,22 @@ impl server::Handler for TestServer {
         self.shells.lock().unwrap().insert(channel);
         session.channel_success(channel)?;
         session.data(channel, b"bienvenida\r\n".to_vec())?;
+        let cookie = self.x11_cookie.lock().unwrap().clone();
+        tokio::spawn(open_x11_from_server(session.handle(), channel, cookie));
+        Ok(())
+    }
+
+    async fn x11_request(
+        &mut self,
+        channel: ChannelId,
+        _single_connection: bool,
+        _protocol: &str,
+        cookie: &str,
+        _screen: u32,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        *self.x11_cookie.lock().unwrap() = Some(cookie.to_string());
+        session.channel_success(channel)?;
         Ok(())
     }
 
@@ -190,6 +249,7 @@ async fn start_server() -> u16 {
         let mut server = TestServer {
             client_key,
             shells: Arc::default(),
+            x11_cookie: Arc::default(),
         };
         let _ = server.run_on_socket(config, &listener).await;
     });
@@ -400,6 +460,7 @@ async fn interactive_shell_round_trip_and_exit_status() {
         rows: 24,
         env: Default::default(),
         agent_forwarding: false,
+        x11_display: None,
         startup_script: None,
     };
     let shell = tokio::spawn(async move { run_shell(&conn, options, backend).await });
@@ -547,4 +608,63 @@ async fn jump_host_chain_reaches_target() {
     drop(conn);
     // Una confirmación de clave por salto.
     assert_eq!(answers.await.unwrap().len(), 2);
+}
+
+/// Abre una shell y devuelve la salida acumulada en cuanto contiene `needle`.
+async fn shell_output_until(f: &Fixture, x11_display: Option<String>, needle: &str) -> String {
+    let (tx, _answers) = auto_answer(None);
+    let conn = connect(f, tx).await.unwrap();
+    let (mut session, backend) = session_pair();
+    let options = ShellOptions {
+        cols: 80,
+        rows: 24,
+        env: Default::default(),
+        agent_forwarding: false,
+        x11_display,
+        startup_script: None,
+    };
+    tokio::spawn(async move { run_shell(&conn, options, backend).await });
+    let mut received = Vec::new();
+    tokio::time::timeout(TIMEOUT, async {
+        while let Some(SessionOutput::Data(d)) = session.output.recv().await {
+            received.extend(d);
+            let text = String::from_utf8_lossy(&received).to_string();
+            if text.contains(needle) {
+                return text;
+            }
+        }
+        panic!("la shell terminó sin «{needle}»");
+    })
+    .await
+    .expect("tiempo agotado esperando la salida")
+}
+
+#[tokio::test]
+async fn x11_forwarding_reaches_local_display_with_cookie_replaced() {
+    let display = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let display_number = display.local_addr().unwrap().port() - 6000;
+    // Servidor X local falso: anota con qué autenticación se presentó la conexión.
+    let local_x = tokio::spawn(async move {
+        let (mut conn, _) = display.accept().await.unwrap();
+        let mut header = [0u8; 12];
+        conn.read_exact(&mut header).await.unwrap();
+        let name_len = u16::from_le_bytes([header[6], header[7]]);
+        let data_len = u16::from_le_bytes([header[8], header[9]]);
+        conn.write_all(b"hola-x").await.unwrap();
+        (name_len, data_len)
+    });
+    let port = start_server().await;
+    let f = fixture(port, password_identity());
+    let output = shell_output_until(&f, Some(format!("127.0.0.1:{display_number}")), "x11:").await;
+    assert!(output.contains("x11:hola-x"), "{output}");
+    // Sin cookie de xauth para esta pantalla, la cookie falsa se quita en lugar de reenviarla.
+    assert_eq!(local_x.await.unwrap(), (0, 0));
+}
+
+#[tokio::test]
+async fn unrequested_x11_channel_is_rejected() {
+    let port = start_server().await;
+    let f = fixture(port, password_identity());
+    let output = shell_output_until(&f, None, "x11:").await;
+    assert!(output.contains("x11:rechazado"), "{output}");
 }

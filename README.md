@@ -33,6 +33,10 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 - **Jump hosts encadenados** (ProxyJump) y conexión a través de **proxy SOCKS5 o HTTP**.
 - **Mosh** (usa el `mosh-client` del sistema), **Telnet** y **puerto serie**.
 - **Terminal local** del sistema.
+- **Reenvío X11**: las aplicaciones gráficas del servidor se abren en tu equipo. Hace falta un
+  servidor X local (XQuartz en macOS, VcXsrv en Windows; en Linux ya viene con el escritorio).
+  Al servidor se le envía una cookie falsa, como hace OpenSSH, y la real no sale de tu equipo.
+  Úsalo solo con servidores de confianza.
 - Reenvío del agente SSH, variables de entorno y snippet de inicio por host.
 
 <p>
@@ -219,7 +223,9 @@ cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` e
 | Túneles local, remoto y SOCKS5 · SFTP · snippets | ✅ |
 | Telnet, puerto serie, terminal local | ✅ |
 | Mosh | ✅ con el `mosh-client` del sistema |
-| Reenvío X11, llaves FIDO2 (`sk-*`), cliente Mosh propio | ⏳ fase 2 |
+| Tema por grupo, reenvío X11 | ✅ |
+| Llaves FIDO2 (`sk-*`) | ⏳ fase 2 |
+| Cliente Mosh propio | ⏳ más adelante |
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
 | Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
 | Sincronización entre equipos, equipos compartidos, sesiones compartidas | ⏳ fase 3 (necesita un servidor propio) |
@@ -239,9 +245,9 @@ cargo fmt --all                                         # formato
 | `tunel-term` | Emulador de terminal, temas incluidos e importadores, teclado, terminal local, Telnet, serie |
 | `tunel-app` | Interfaz `egui` y sistema de diseño (`src/ui`) |
 
-**Pruebas:** 153 unitarias y 10 de punta a punta contra un servidor SSH que arranca el propio
+**Pruebas:** 171 unitarias y 12 de punta a punta contra un servidor SSH que arranca el propio
 test (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de
-host nueva y cambiada, shell, túnel local, SOCKS5 y jump hosts. Las claves de
+host nueva y cambiada, shell, túnel local, SOCKS5, jump hosts y reenvío X11. Las claves de
 `crates/tunel-ssh/tests/fixtures` son solo para esas pruebas. Aún no tienen pruebas automáticas
 el SFTP contra un servidor real, el túnel remoto, Mosh, Telnet, el puerto serie ni la interfaz.
 

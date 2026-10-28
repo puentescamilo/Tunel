@@ -156,6 +156,7 @@ impl Engine {
                     rows,
                     env: host.env.clone(),
                     agent_forwarding: host.agent_forwarding,
+                    x11_display: host.x11_forwarding.then(tunel_ssh::x11::default_display),
                     startup_script: host
                         .startup_snippet
                         .and_then(|s| vault.snippet(s))

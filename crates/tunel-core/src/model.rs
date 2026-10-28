@@ -91,6 +91,8 @@ pub struct Host {
     pub jump_hosts: Vec<HostId>,
     pub proxy: Option<ProxyConfig>,
     pub agent_forwarding: bool,
+    /// Muestra en este equipo las aplicaciones gráficas del servidor (`ssh -X`).
+    pub x11_forwarding: bool,
     pub startup_snippet: Option<SnippetId>,
     pub env: BTreeMap<String, String>,
     pub notes: String,

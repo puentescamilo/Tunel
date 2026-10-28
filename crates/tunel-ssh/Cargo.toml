@@ -13,3 +13,4 @@ tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 base64.workspace = true
+rand.workspace = true

@@ -5004,6 +5004,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -5205,6 +5206,7 @@ name = "tunel-ssh"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "rand 0.9.5",
  "russh",
  "russh-sftp",
  "thiserror 2.0.21",

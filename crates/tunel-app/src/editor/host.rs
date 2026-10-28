@@ -268,6 +268,10 @@ pub(super) fn inherited_theme(data: &VaultData, group: Option<GroupId>) -> Inher
     }
 }
 
+const X11_HINT: &str = "Necesita un servidor X en este equipo: XQuartz en macOS o VcXsrv en \
+Windows; en Linux ya viene con el escritorio. Actívalo solo con servidores de confianza: sus \
+aplicaciones pueden ver lo que escribes en otras ventanas X.";
+
 pub(super) fn host_form(ui: &mut egui::Ui, form: &mut HostForm, data: &VaultData) {
     egui::Grid::new("form-host")
         .num_columns(2)
@@ -392,6 +396,12 @@ pub(super) fn host_form(ui: &mut egui::Ui, form: &mut HostForm, data: &VaultData
             crate::ui::toggle(ui, &mut form.host.agent_forwarding);
             ui.label("Reenvío del agente SSH");
         });
+        ui.horizontal(|ui| {
+            crate::ui::toggle(ui, &mut form.host.x11_forwarding);
+            ui.label("Reenvío X11 (aplicaciones gráficas del servidor)");
+        })
+        .response
+        .on_hover_text(X11_HINT);
         ui.label("Saltar a través de (jump hosts, en orden):");
         for other in data.hosts.iter().filter(|h| h.id != form.host.id) {
             let mut on = form.host.jump_hosts.contains(&other.id);
