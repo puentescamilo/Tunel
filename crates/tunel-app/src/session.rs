@@ -26,6 +26,7 @@ pub struct TerminalSession {
     pub wants_focus: bool,
     io: SessionIo,
     log: Option<std::fs::File>,
+    /// Texto que el servidor pidió copiar (OSC 52); espera a que el usuario lo permita.
     pending_clipboard: Option<String>,
 }
 
@@ -102,8 +103,14 @@ impl TerminalSession {
         }
     }
 
-    pub fn take_clipboard(&mut self) -> Option<String> {
-        self.pending_clipboard.take()
+    /// Petición de copiar al portapapeles que aún no se ha respondido.
+    pub fn clipboard_request(&self) -> Option<&str> {
+        self.pending_clipboard.as_deref()
+    }
+
+    /// Responde a la petición pendiente; devuelve el texto solo si el usuario lo permite.
+    pub fn answer_clipboard(&mut self, allow: bool) -> Option<String> {
+        self.pending_clipboard.take().filter(|_| allow)
     }
 
     pub fn send(&self, bytes: Vec<u8>) {
@@ -235,6 +242,24 @@ mod tests {
         s.stop_log();
         assert_eq!(std::fs::read(&path).unwrap(), b"registro");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn osc52_copy_waits_for_the_user() {
+        let (mut s, backend) = session();
+        let osc52 = b"\x1b]52;c;aG9sYQ==\x07".to_vec();
+        backend
+            .output
+            .send(SessionOutput::Data(osc52.clone()))
+            .unwrap();
+        s.pump();
+        assert_eq!(s.clipboard_request(), Some("hola"));
+        assert_eq!(s.answer_clipboard(false), None);
+        assert_eq!(s.clipboard_request(), None);
+
+        backend.output.send(SessionOutput::Data(osc52)).unwrap();
+        s.pump();
+        assert_eq!(s.answer_clipboard(true).as_deref(), Some("hola"));
     }
 
     #[test]

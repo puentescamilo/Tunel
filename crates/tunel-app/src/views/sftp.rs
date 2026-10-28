@@ -7,7 +7,7 @@ use egui::{Align2, CornerRadius, FontId, Rect, RichText, Sense, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tunel_ssh::SshConnection;
-use tunel_ssh::sftp::{RemoteEntry, SftpClient, join_remote};
+use tunel_ssh::sftp::{RemoteEntry, SftpClient, join_remote, local_target};
 
 pub struct SftpTab {
     pub id: u64,
@@ -480,11 +480,11 @@ fn run_op(app: &mut TunelApp, id: u64, client: Arc<SftpClient>, path: &str, op: 
         }
         Op::Download(entry) => {
             let remote = join_remote(path, &entry.name);
-            let local = local_dir.join(&entry.name);
+            let target = local_target(&local_dir, &entry.name);
             let label = format!("Descargar {}", entry.name);
             let progress_label = label.clone();
             engine.sftp_run(id, client, refresh, label, move |c, events| async move {
-                c.download(&remote, &local, |bytes| {
+                c.download(&remote, &target?, |bytes| {
                     let _ = events.send(AppEvent::SftpProgress {
                         tab: id,
                         label: progress_label.clone(),

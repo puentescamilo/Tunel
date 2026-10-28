@@ -19,6 +19,12 @@ impl Prompts {
         self.queue.push_back(interaction);
     }
 
+    /// Descarta las preguntas pendientes; las conexiones que esperaban respuesta fallan.
+    pub fn clear(&mut self) {
+        self.queue.clear();
+        self.clear_answers();
+    }
+
     fn clear_answers(&mut self) {
         self.answers.iter_mut().for_each(Zeroize::zeroize);
         self.answers.clear();
@@ -63,6 +69,42 @@ fn fingerprint_box(ui: &mut egui::Ui, endpoint: &str, algorithm: &str, fingerpri
         });
 }
 
+/// Vuelve a comprobar la clave de host contra la bóveda actual.
+///
+/// La conexión calculó el estado con la bóveda de cuando empezó; otra pregunta
+/// pudo haber confiado mientras tanto en una clave para el mismo host. Así una
+/// clave distinta de la recién aceptada se muestra como cambio y no como primera
+/// conexión, y la que ya coincide se acepta sin volver a preguntar.
+fn refresh_host_key_status(app: &mut TunelApp) {
+    loop {
+        let Some(Interaction::HostKey {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+            ..
+        }) = app.prompts.queue.front()
+        else {
+            return;
+        };
+        let Some(live) = app
+            .data()
+            .map(|d| d.check_host_key(host, *port, algorithm, fingerprint))
+        else {
+            return;
+        };
+        if live != HostKeyStatus::Trusted {
+            if let Some(Interaction::HostKey { status, .. }) = app.prompts.queue.front_mut() {
+                *status = live;
+            }
+            return;
+        }
+        if let Some(Interaction::HostKey { reply, .. }) = app.prompts.queue.pop_front() {
+            let _ = reply.send(true);
+        }
+    }
+}
+
 /// Cuánto esperar antes de volver a mirar si la llave de seguridad ya firmó.
 const TOUCH_POLL: std::time::Duration = std::time::Duration::from_millis(150);
 
@@ -73,6 +115,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     {
         app.prompts.queue.pop_front();
     }
+    refresh_host_key_status(app);
     let Some(current) = app.prompts.queue.front() else {
         return;
     };

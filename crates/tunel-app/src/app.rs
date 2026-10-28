@@ -289,6 +289,8 @@ impl TunelApp {
     }
 
     pub fn lock_vault(&mut self) {
+        self.engine.cancel_all();
+        self.prompts.clear();
         self.tabs.clear();
         self.active = None;
         self.split = None;
@@ -390,6 +392,8 @@ impl TunelApp {
         }
         while let Ok(event) = self.engine.events.try_recv() {
             match event {
+                // Un túnel que termina de abrirse con la bóveda bloqueada se cierra al soltarlo.
+                AppEvent::ForwardStarted { .. } if self.vault.is_none() => {}
                 AppEvent::ForwardStarted { id, active } => {
                     self.forward_errors.remove(&id);
                     self.notify(format!("Túnel activo: {}", active.rule.describe()));

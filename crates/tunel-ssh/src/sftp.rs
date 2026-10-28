@@ -2,7 +2,7 @@
 
 use crate::client::{SshConnection, SshError};
 use russh_sftp::client::SftpSession;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const CHUNK: usize = 64 * 1024;
@@ -15,6 +15,8 @@ pub enum SftpError {
     Protocol(#[from] russh_sftp::client::error::Error),
     #[error("E/S local: {0}")]
     Io(#[from] std::io::Error),
+    #[error("el servidor envió un nombre de archivo no válido: {0:?}")]
+    UnsafeName(String),
 }
 
 impl From<russh::Error> for SftpError {
@@ -60,6 +62,22 @@ pub fn join_remote(base: &str, name: &str) -> String {
         }
     }
     format!("/{}", parts.join("/"))
+}
+
+/// Ruta local donde guardar una entrada remota dentro de `dir`.
+///
+/// El nombre lo envía el servidor, así que solo se acepta un único componente
+/// normal: nada de separadores, `..`, rutas absolutas ni unidades de Windows.
+pub fn local_target(dir: &Path, name: &str) -> Result<PathBuf, SftpError> {
+    let unsafe_name = || SftpError::UnsafeName(name.to_string());
+    if name.contains(['/', '\\', '\0']) || (cfg!(windows) && name.contains(':')) {
+        return Err(unsafe_name());
+    }
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(part)), None) if part == name => Ok(dir.join(part)),
+        _ => Err(unsafe_name()),
+    }
 }
 
 pub struct SftpClient {
@@ -200,6 +218,38 @@ mod tests {
         assert_eq!(join_remote("/", ".."), "/");
         assert_eq!(join_remote("/home/ana", "/etc"), "/etc");
         assert_eq!(join_remote("/home/ana/", "./a/../b"), "/home/ana/b");
+    }
+
+    #[test]
+    fn local_target_accepts_plain_names() {
+        let dir = Path::new("/descargas");
+        assert_eq!(
+            local_target(dir, "informe.pdf").unwrap(),
+            dir.join("informe.pdf")
+        );
+        assert_eq!(local_target(dir, "..oculto").unwrap(), dir.join("..oculto"));
+    }
+
+    #[test]
+    fn local_target_rejects_names_that_escape_the_folder() {
+        let dir = Path::new("/descargas");
+        for name in [
+            "",
+            ".",
+            "..",
+            "../x",
+            "a/../../x",
+            "/etc/passwd",
+            "a/b",
+            "..\\x",
+            "C:\\x",
+            "a\0b",
+        ] {
+            assert!(
+                matches!(local_target(dir, name), Err(SftpError::UnsafeName(_))),
+                "{name:?}"
+            );
+        }
     }
 
     #[tokio::test]

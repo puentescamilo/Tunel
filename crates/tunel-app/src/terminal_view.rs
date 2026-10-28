@@ -302,6 +302,53 @@ fn paint_cursor(
     }
 }
 
+/// Caracteres del texto pedido que se enseñan en el aviso del portapapeles.
+const CLIPBOARD_PREVIEW_CHARS: usize = 60;
+
+/// Pide permiso antes de que la salida remota (OSC 52) escriba en el portapapeles.
+fn clipboard_banner(ui: &mut egui::Ui, session: &mut TerminalSession) {
+    let Some(text) = session.clipboard_request() else {
+        return;
+    };
+    let chars = text.chars().count();
+    let mut preview: String = text
+        .chars()
+        .take(CLIPBOARD_PREVIEW_CHARS)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if chars > CLIPBOARD_PREVIEW_CHARS {
+        preview.push('…');
+    }
+    let p = crate::ui::pal(ui);
+    let mut answer = None;
+    egui::Frame::new()
+        .fill(ui.visuals().extreme_bg_color)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "El servidor quiere copiar {chars} caracteres al portapapeles:"
+                    ))
+                    .color(p.muted),
+                );
+                ui.label(egui::RichText::new(preview).monospace());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if crate::ui::secondary_button(ui, "Ignorar").clicked() {
+                        answer = Some(false);
+                    }
+                    if crate::ui::primary_button(ui, "Copiar").clicked() {
+                        answer = Some(true);
+                    }
+                });
+            });
+        });
+    if let Some(text) = answer.and_then(|allow| session.answer_clipboard(allow)) {
+        ui.ctx().copy_text(text);
+    }
+}
+
 /// Muestra la terminal ocupando el espacio disponible.
 pub fn show(
     ui: &mut egui::Ui,
@@ -313,6 +360,7 @@ pub fn show(
     session.emulator.set_cursor_style(settings.cursor_style);
     let font = FontId::monospace(settings.font_size);
     let m = metrics(ui.ctx(), &font);
+    clipboard_banner(ui, session);
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     let (cols, rows) = grid_size(rect, m);
     session.resize(cols, rows);
@@ -360,9 +408,6 @@ pub fn show(
         && copy_on_select
         && let Some(text) = session.emulator.selection_text()
     {
-        ui.ctx().copy_text(text);
-    }
-    if let Some(text) = session.take_clipboard() {
         ui.ctx().copy_text(text);
     }
     let screen = session.emulator.screen(theme);
