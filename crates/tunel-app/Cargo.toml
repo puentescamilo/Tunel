@@ -28,6 +28,7 @@ zeroize.workspace = true
 product-name = "Túnel"
 identifier = "dev.tunel.tunel"
 description = "Cliente SSH multiplataforma"
+long-description = "Guarda hosts, claves y contraseñas en una bóveda cifrada y conecta por SSH, Mosh, Telnet o puerto serie, con túneles, SFTP y snippets."
 homepage = "https://github.com/puentescamilo/Tunel"
 authors = ["Camilo Puentes"]
 category = "DeveloperTool"
@@ -38,3 +39,9 @@ out-dir = "../../dist"
 [package.metadata.packager.macos]
 minimum-system-version = "11.0"
 signing-identity = "-"
+
+# El binario solo enlaza libudev; X11, Wayland, OpenGL y Vulkan se cargan al arrancar.
+[package.metadata.packager.deb]
+package-name = "tunel"
+section = "net"
+depends = ["libudev1", "libxkbcommon0", "libegl1", "libgl1"]

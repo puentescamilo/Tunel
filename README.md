@@ -106,7 +106,20 @@ xattr -dr com.apple.quarantine /Applications/Túnel.app
 
 Para Mosh hace falta `mosh` instalado en tu equipo y en el servidor.
 
-### Windows y Linux
+### Linux
+
+Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puentescamilo/Tunel/releases)
+e instálalo con:
+
+```bash
+sudo apt install ./tunel_0.1.0_amd64.deb
+```
+
+Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
+(importar claves o temas) se usa el portal del escritorio (`xdg-desktop-portal`), que ya viene
+en GNOME y KDE.
+
+### Windows
 
 Aún no hay paquetes; se puede compilar desde el código.
 
@@ -120,8 +133,11 @@ cd Tunel
 cargo run --release -p tunel-app
 ```
 
-En Linux se necesitan además las cabeceras de GTK, X11 o Wayland que usan `eframe` y `rfd`,
-y `libudev-dev` para el puerto serie.
+En Linux se necesitan además un compilador de C y `libudev` para el puerto serie:
+
+```bash
+sudo apt install build-essential pkg-config libudev-dev
+```
 
 La bóveda se guarda en el directorio de datos del usuario; en macOS es
 `~/Library/Application Support/dev.tunel.tunel/vault.json`. Para usar otra ruta:
@@ -142,6 +158,17 @@ El script compila para Apple Silicon e Intel, une ambos en un binario universal,
 con [cargo-packager](https://github.com/crabnebula-dev/cargo-packager), comprueba dentro del
 `.dmg` que el ejecutable es universal y deja el resultado y su `SHA256SUMS.txt` en `dist/`.
 El icono se regenera con `swift crates/tunel-app/assets/icons/generar-icono.swift icon-1024.png`.
+
+### Generar el `.deb`
+
+Compílalo en Ubuntu 22.04, con las dependencias de «Desde el código»: un paquete hecho en una
+distribución más nueva no funciona en las anteriores.
+
+```bash
+cargo install cargo-packager --locked
+cargo build --release --locked -p tunel-app
+cargo packager --release -p tunel-app --formats deb
+```
 
 ## Seguridad
 
