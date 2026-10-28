@@ -450,13 +450,13 @@ async fn authenticate_with_agent(
     for identity in identities {
         let key = identity.public_key().into_owned();
         let hash = handle.best_supported_rsa_hash().await?.flatten();
-        if let Ok(result) = handle
+        match handle
             .authenticate_publickey_with(user, key, hash, &mut agent)
             .await
         {
-            if result.success() {
-                return Ok(true);
-            }
+            Ok(result) if result.success() => return Ok(true),
+            Ok(_) => {}
+            Err(e) => tracing::debug!(error = %e, "el agente no pudo firmar"),
         }
     }
     Ok(false)
