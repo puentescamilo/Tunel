@@ -23,6 +23,49 @@ fn is_pattern(alias: &str) -> bool {
     alias.contains(['*', '?', '!'])
 }
 
+/// Comodín de OpenSSH (`*` y `?`), sin distinguir mayúsculas.
+///
+/// Vuelve atrás solo hasta el último `*`, así que el coste es lineal en la práctica
+/// aunque el patrón tenga muchos comodines.
+fn glob_matches(pattern: &[u8], text: &[u8]) -> bool {
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        match pattern.get(p) {
+            Some(b'*') => {
+                star = Some((p, t));
+                p += 1;
+            }
+            Some(&c) if c == b'?' || c.eq_ignore_ascii_case(&text[t]) => {
+                p += 1;
+                t += 1;
+            }
+            _ => match star {
+                Some((star_p, star_t)) => {
+                    p = star_p + 1;
+                    t = star_t + 1;
+                    star = Some((star_p, star_t + 1));
+                }
+                None => return false,
+            },
+        }
+    }
+    pattern[p..].iter().all(|&c| c == b'*')
+}
+
+/// Lista de patrones de una línea `Host`: basta un positivo y ningún `!negado`.
+fn host_matches(patterns: &[String], alias: &str) -> bool {
+    let mut matched = false;
+    for pattern in patterns {
+        match pattern.strip_prefix('!') {
+            Some(negated) if glob_matches(negated.as_bytes(), alias.as_bytes()) => return false,
+            Some(_) => {}
+            None => matched |= glob_matches(pattern.as_bytes(), alias.as_bytes()),
+        }
+    }
+    matched
+}
+
 fn split_directive(line: &str) -> Option<(String, String)> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
@@ -39,53 +82,126 @@ fn split_directive(line: &str) -> Option<(String, String)> {
     Some((key.to_ascii_lowercase(), value))
 }
 
-/// Analiza el archivo. Omite patrones con comodines (`Host *`) porque no son hosts concretos.
-pub fn parse(text: &str) -> Vec<SshConfigHost> {
-    let mut hosts: Vec<SshConfigHost> = Vec::new();
-    let mut current: Vec<usize> = Vec::new();
+/// Bloque `Host` (o `Match`, sin patrones porque no se evalúa) con sus directivas.
+struct Block {
+    patterns: Option<Vec<String>>,
+    directives: Vec<(String, String)>,
+}
+
+fn blocks(text: &str) -> Vec<Block> {
+    // Lo que va antes del primer `Host` se aplica a todos, como un `Host *`.
+    let mut blocks = vec![Block {
+        patterns: Some(vec!["*".into()]),
+        directives: Vec::new(),
+    }];
     for (key, value) in text.lines().filter_map(split_directive) {
-        if key == "host" {
-            current = value
-                .split_whitespace()
-                .filter(|alias| !is_pattern(alias))
-                .map(|alias| {
-                    hosts.push(SshConfigHost {
-                        alias: alias.to_string(),
-                        ..SshConfigHost::default()
-                    });
-                    hosts.len() - 1
-                })
-                .collect();
-            continue;
-        }
-        if key == "match" {
-            current.clear();
-            continue;
-        }
-        for &i in &current {
-            let host = &mut hosts[i];
-            // Como OpenSSH, el primer valor encontrado gana (salvo IdentityFile, que se acumula).
-            match key.as_str() {
-                "hostname" if host.hostname.is_none() => host.hostname = Some(value.clone()),
-                "user" if host.user.is_none() => host.user = Some(value.clone()),
-                "port" if host.port.is_none() => host.port = value.parse().ok(),
-                "identityfile" => host.identity_files.push(value.clone()),
-                "proxyjump"
-                    if host.proxy_jump.is_empty() && !value.eq_ignore_ascii_case("none") =>
-                {
-                    host.proxy_jump = value
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                }
-                "forwardagent" => host.forward_agent = value.eq_ignore_ascii_case("yes"),
-                "forwardx11" => host.forward_x11 = value.eq_ignore_ascii_case("yes"),
-                _ => {}
-            }
+        match key.as_str() {
+            "host" => blocks.push(Block {
+                patterns: Some(value.split_whitespace().map(str::to_string).collect()),
+                directives: Vec::new(),
+            }),
+            "match" => blocks.push(Block {
+                patterns: None,
+                directives: Vec::new(),
+            }),
+            _ => blocks
+                .last_mut()
+                .into_iter()
+                .for_each(|b| b.directives.push((key.clone(), value.clone()))),
         }
     }
-    hosts
+    blocks
+}
+
+fn yes(value: &str) -> bool {
+    value.eq_ignore_ascii_case("yes")
+}
+
+/// Valores de un host mientras se recorren sus bloques; los opcionales guardan el primero.
+#[derive(Default)]
+struct Collected {
+    host: SshConfigHost,
+    forward_agent: Option<bool>,
+    forward_x11: Option<bool>,
+    forward_x11_trusted: Option<bool>,
+}
+
+impl Collected {
+    // Como OpenSSH, el primer valor encontrado gana (salvo IdentityFile, que se acumula).
+    fn apply(&mut self, key: &str, value: &str) {
+        let host = &mut self.host;
+        match key {
+            "hostname" if host.hostname.is_none() => host.hostname = Some(value.to_string()),
+            "user" if host.user.is_none() => host.user = Some(value.to_string()),
+            "port" if host.port.is_none() => host.port = value.parse().ok(),
+            "identityfile" => host.identity_files.push(value.to_string()),
+            "proxyjump" if host.proxy_jump.is_empty() && !value.eq_ignore_ascii_case("none") => {
+                host.proxy_jump = value
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            "forwardagent" => {
+                self.forward_agent.get_or_insert(yes(value));
+            }
+            "forwardx11" => {
+                self.forward_x11.get_or_insert(yes(value));
+            }
+            "forwardx11trusted" => {
+                self.forward_x11_trusted.get_or_insert(yes(value));
+            }
+            _ => {}
+        }
+    }
+
+    fn finish(self) -> SshConfigHost {
+        SshConfigHost {
+            forward_agent: self.forward_agent.unwrap_or(false),
+            // Túnel solo hace X11 de confianza (con la cookie real), así que solo se activa
+            // si OpenSSH también lo haría de confianza; su valor por omisión es `no`.
+            forward_x11: self.forward_x11.unwrap_or(false)
+                && self.forward_x11_trusted.unwrap_or(false),
+            ..self.host
+        }
+    }
+}
+
+/// Analiza el archivo y devuelve los hosts concretos (los alias sin comodines).
+///
+/// A cada alias se le aplican, en orden, todos los bloques `Host` que coinciden con él,
+/// incluidos los de comodines como `Host *`. Los bloques `Match` no se evalúan.
+pub fn parse(text: &str) -> Vec<SshConfigHost> {
+    let blocks = blocks(text);
+    let mut aliases: Vec<&str> = Vec::new();
+    for alias in blocks
+        .iter()
+        .filter_map(|b| b.patterns.as_ref())
+        .flatten()
+        .filter(|alias| !is_pattern(alias))
+    {
+        if !aliases.contains(&alias.as_str()) {
+            aliases.push(alias);
+        }
+    }
+    aliases
+        .into_iter()
+        .map(|alias| {
+            let mut collected = Collected {
+                host: SshConfigHost {
+                    alias: alias.to_string(),
+                    ..SshConfigHost::default()
+                },
+                ..Collected::default()
+            };
+            blocks
+                .iter()
+                .filter(|b| b.patterns.as_ref().is_some_and(|p| host_matches(p, alias)))
+                .flat_map(|b| &b.directives)
+                .for_each(|(key, value)| collected.apply(key, value));
+            collected.finish()
+        })
+        .collect()
 }
 
 /// Resumen de una importación.
@@ -262,13 +378,79 @@ Match host x
 
     #[test]
     fn forward_x11_is_parsed_and_imported() {
-        let entries = parse("Host grafico\n    ForwardX11 yes\n\nHost texto\n    ForwardX11 no\n");
+        let entries = parse(
+            "Host grafico\n    ForwardX11 yes\n    ForwardX11Trusted yes\n\nHost texto\n    ForwardX11 no\n",
+        );
         assert!(entries[0].forward_x11);
         assert!(!entries[1].forward_x11);
         let (vault, _) = import_into(&crate::vault::VaultData::default(), &entries, |_| None);
         let host = |label: &str| vault.hosts.iter().find(|h| h.label == label).unwrap();
         assert!(host("grafico").x11_forwarding);
         assert!(!host("texto").x11_forwarding);
+    }
+
+    #[test]
+    fn wildcard_block_before_host_wins_like_openssh() {
+        let config = "Host *\n ForwardX11 no\n ForwardAgent no\n User todos\n\n\
+                      Host a\n ForwardX11 yes\n ForwardX11Trusted yes\n ForwardAgent yes\n User propio\n";
+        let a = &parse(config)[0];
+        assert!(!a.forward_x11);
+        assert!(!a.forward_agent);
+        assert_eq!(a.user.as_deref(), Some("todos"));
+    }
+
+    #[test]
+    fn wildcard_block_after_host_fills_missing_values() {
+        let a = &parse("Host a\n Port 2200\n\nHost *\n User todos\n Port 22\n")[0];
+        assert_eq!(a.user.as_deref(), Some("todos"));
+        assert_eq!(a.port, Some(2200));
+    }
+
+    #[test]
+    fn directives_before_first_host_apply_to_all() {
+        let a = &parse("ForwardAgent no\nHost a\n ForwardAgent yes\n")[0];
+        assert!(!a.forward_agent);
+    }
+
+    #[test]
+    fn patterns_with_negation_and_question_mark() {
+        let config = "Host web? !web9\n User web\n\nHost web1 web9 db\n";
+        let hosts = parse(config);
+        let user = |alias: &str| {
+            hosts
+                .iter()
+                .find(|h| h.alias == alias)
+                .and_then(|h| h.user.clone())
+        };
+        assert_eq!(user("web1").as_deref(), Some("web"));
+        assert_eq!(user("web9"), None);
+        assert_eq!(user("db"), None);
+    }
+
+    #[test]
+    fn glob_handles_stars_and_many_wildcards() {
+        assert!(glob_matches(b"*.Example.com", b"web.example.COM"));
+        assert!(glob_matches(b"a*b*c", b"axxbyyc"));
+        assert!(!glob_matches(b"a*b*c", b"axxbyy"));
+        assert!(glob_matches(b"*", b""));
+        let many = "*a".repeat(30);
+        assert!(!glob_matches(many.as_bytes(), "a".repeat(29).as_bytes()));
+    }
+
+    #[test]
+    fn untrusted_x11_is_not_imported_as_trusted() {
+        let hosts = parse(
+            "Host por-omision\n ForwardX11 yes\n\nHost no-confiable\n ForwardX11 yes\n ForwardX11Trusted no\n",
+        );
+        assert!(hosts.iter().all(|h| !h.forward_x11));
+    }
+
+    #[test]
+    fn alias_in_several_blocks_is_imported_once() {
+        let hosts = parse("Host a\n User uno\n\nHost a b\n Port 2222\n");
+        let aliases: Vec<&str> = hosts.iter().map(|h| h.alias.as_str()).collect();
+        assert_eq!(aliases, vec!["a", "b"]);
+        assert_eq!(hosts[0].port, Some(2222));
     }
 
     #[test]
