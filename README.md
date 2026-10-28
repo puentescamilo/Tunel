@@ -87,7 +87,7 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 ### macOS
 
-Descarga `Túnel_<versión>_universal.dmg` desde [Releases](https://github.com/puentescamilo/Tunel/releases).
+Descarga `tunel_<versión>_universal.dmg` desde [Releases](https://github.com/puentescamilo/Tunel/releases).
 Funciona en Macs con Apple Silicon e Intel, con macOS 11 o posterior. Abre el `.dmg` y
 arrastra **Túnel** a **Aplicaciones**.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Genera dist/Túnel_<versión>_universal.dmg con un binario universal (Apple Silicon + Intel).
+# Genera dist/tunel_<versión>_universal.dmg con un binario universal (Apple Silicon + Intel).
 # Requisitos: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 #             cargo install cargo-packager --locked
 set -euo pipefail
@@ -37,10 +37,13 @@ if ! package; then
 fi
 
 
-# Nombre final con "universal", sea cual sea el sufijo que ponga cargo-packager.
+# Nombre final sin tilde (GitHub la quita al subirlo) y con "universal", sea cual sea el sufijo
+# que ponga cargo-packager. Así coincide con SHA256SUMS.txt y con los demás paquetes.
 shopt -s nullglob
 for dmg in dist/*.dmg; do
-  [[ "$dmg" == *_universal.dmg ]] || mv "$dmg" "${dmg%_*}_universal.dmg"
+  version=$(basename "$dmg" .dmg | cut -d_ -f2)
+  target="dist/tunel_${version}_universal.dmg"
+  [[ "$dmg" == "$target" ]] || mv "$dmg" "$target"
 done
 # Comprobar dentro del .dmg (lo que se distribuye) que el ejecutable es universal.
 for dmg in dist/*_universal.dmg; do
