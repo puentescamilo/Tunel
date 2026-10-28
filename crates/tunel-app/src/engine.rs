@@ -5,7 +5,7 @@ use anyhow::Context as _;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tunel_core::io::{SessionIo, SessionOutput, session_pair};
 use tunel_core::{ForwardId, HostId, PortForward, Protocol, VaultData};
 use tunel_ssh::forward::{self, ActiveForward};
@@ -59,6 +59,8 @@ pub struct Engine {
     events_tx: mpsc::UnboundedSender<AppEvent>,
     pub events: mpsc::UnboundedReceiver<AppEvent>,
     next_id: u64,
+    /// Cambia de valor al bloquear: las tareas de red en curso se cancelan.
+    generation: watch::Sender<u64>,
 }
 
 fn host_key_lookup(vault: &VaultData) -> HostKeyLookup {
@@ -86,7 +88,27 @@ impl Engine {
             events_tx,
             events,
             next_id: 1,
+            generation: watch::Sender::new(0),
         })
+    }
+
+    /// Lanza una tarea de red que se cancela con [`Engine::cancel_all`].
+    fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) {
+        let mut generation = self.generation.subscribe();
+        self.runtime.spawn(async move {
+            tokio::select! {
+                () = task => {}
+                _ = generation.changed() => {}
+            }
+        });
+    }
+
+    /// Cancela todas las conexiones en curso, incluidas las que aún no terminaron
+    /// de abrirse, y descarta los resultados que ya estaban en cola.
+    pub fn cancel_all(&mut self) {
+        self.generation.send_modify(|g| *g += 1);
+        while self.interactions.try_recv().is_ok() {}
+        while self.events.try_recv().is_ok() {}
     }
 
     fn next_id(&mut self) -> u64 {
@@ -100,7 +122,7 @@ impl Engine {
         let SessionIo { input, mut output } = io;
         let (tx, rx) = mpsc::unbounded_channel();
         let ctx = self.ctx.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             while let Some(msg) = output.recv().await {
                 if tx.send(msg).is_err() {
                     break;
@@ -164,7 +186,7 @@ impl Engine {
                         .map(|s| s.script.clone()),
                 };
                 let output = backend.output.clone();
-                self.runtime.spawn(async move {
+                self.spawn(async move {
                     let result = match connect.await {
                         Ok(conn) => shell::run_shell(&conn, options, backend).await,
                         Err(e) => Err(e),
@@ -178,7 +200,7 @@ impl Engine {
                 let connect = self.connect_task(vault, host_id)?;
                 let address = host.address.clone();
                 let output = backend.output.clone();
-                self.runtime.spawn(async move {
+                self.spawn(async move {
                     let result: anyhow::Result<()> = async {
                         let conn = connect.await?;
                         let server = mosh::start_server(
@@ -201,7 +223,7 @@ impl Engine {
             }
             Protocol::Telnet => {
                 let (address, port) = (host.address.clone(), host.effective_port());
-                self.runtime.spawn(async move {
+                self.spawn(async move {
                     let output = backend.output.clone();
                     if let Err(e) =
                         tunel_term::telnet::run(&address, port, cols, rows, backend).await
@@ -249,7 +271,7 @@ impl Engine {
         let connect = self.connect_task(vault, host)?;
         let tab = self.next_id();
         let events = self.events_tx.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             let result: anyhow::Result<(Arc<SshConnection>, Arc<SftpClient>, String)> = async {
                 let connection = Arc::new(connect.await?);
                 let client = Arc::new(SftpClient::open(&connection).await?);
@@ -276,7 +298,7 @@ impl Engine {
     pub fn sftp_list(&self, tab: u64, client: Arc<SftpClient>, path: String) {
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             let _ = match client.list(&path).await {
                 Ok(entries) => events.send(AppEvent::SftpListing { tab, path, entries }),
                 Err(e) => events.send(AppEvent::SftpFailed {
@@ -302,7 +324,7 @@ impl Engine {
     {
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             let result = op(client.clone(), events.clone()).await;
             let _ = match result {
                 Ok(()) => events.send(AppEvent::SftpDone {
@@ -329,7 +351,7 @@ impl Engine {
         let connect = self.connect_task(vault, rule.host)?;
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             let id = rule.id;
             let result: anyhow::Result<ActiveForward> = async {
                 let conn = Arc::new(connect.await?);
@@ -350,5 +372,36 @@ impl Engine {
 
     pub fn stop_forward(&self, active: ActiveForward) {
         self.runtime.spawn(async move { active.stop().await });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancel_all_stops_pending_tasks_and_drops_queued_events() {
+        let mut engine = Engine::new(egui::Context::default()).unwrap();
+        let (dropped_tx, dropped_rx) = std::sync::mpsc::channel::<()>();
+        engine.spawn(async move {
+            let _guard = dropped_tx;
+            std::future::pending::<()>().await;
+        });
+        engine
+            .events_tx
+            .send(AppEvent::ForwardFailed {
+                id: ForwardId::new(),
+                error: "tarde".into(),
+            })
+            .unwrap();
+
+        engine.cancel_all();
+
+        let cancelled = dropped_rx.recv_timeout(Duration::from_secs(5));
+        assert_eq!(
+            cancelled,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+        );
+        assert!(engine.events.try_recv().is_err());
     }
 }
