@@ -254,18 +254,26 @@ impl SshConnection {
         let remote_targets: RemoteForwardTargets = Arc::default();
         let x11: X11Slot = Arc::default();
         let hops: Vec<&ResolvedHost> = jumps.iter().chain(std::iter::once(target)).collect();
-        // Solo el destino final recibe canales X11; los saltos intermedios nunca los aceptan.
-        let handler = |h: &ResolvedHost| ClientHandler {
-            host: h.host.address.clone(),
-            port: h.port,
-            lookup: ctx.lookup.clone(),
-            interactions: ctx.interactions.clone(),
-            remote_targets: remote_targets.clone(),
-            x11: if std::ptr::eq(h, target) {
-                x11.clone()
-            } else {
-                Arc::default()
-            },
+        // Solo el destino final recibe canales X11 y de reenvíos remotos (`-R`): los saltos
+        // intermedios tienen mapas vacíos propios y rechazan cualquier canal de ese tipo.
+        let handler = |h: &ResolvedHost| {
+            let is_target = std::ptr::eq(h, target);
+            ClientHandler {
+                host: h.host.address.clone(),
+                port: h.port,
+                lookup: ctx.lookup.clone(),
+                interactions: ctx.interactions.clone(),
+                remote_targets: if is_target {
+                    remote_targets.clone()
+                } else {
+                    Arc::default()
+                },
+                x11: if is_target {
+                    x11.clone()
+                } else {
+                    Arc::default()
+                },
+            }
         };
         let first = hops[0];
         let stream =

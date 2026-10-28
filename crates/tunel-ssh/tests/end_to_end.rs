@@ -32,6 +32,10 @@ struct TestServer {
     shells: Arc<std::sync::Mutex<std::collections::HashSet<ChannelId>>>,
     /// Cookie recibida en `x11-req`; al abrir la shell el servidor abre un canal X11 con ella.
     x11_cookie: Arc<std::sync::Mutex<Option<String>>>,
+    /// Sesiones que pidieron un reenvío remoto (`tcpip-forward`).
+    forward_sessions: Arc<std::sync::Mutex<Vec<server::Handle>>>,
+    /// Sesiones que abrieron un canal `direct-tcpip`, como hace un bastión.
+    tunnel_sessions: Arc<std::sync::Mutex<Vec<server::Handle>>>,
 }
 
 /// Mensaje de inicio de conexión X11 (orden de bytes little-endian).
@@ -225,8 +229,9 @@ impl server::Handler for TestServer {
         _origin: &str,
         _origin_port: u32,
         reply: server::ChannelOpenHandle,
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.tunnel_sessions.lock().unwrap().push(session.handle());
         let Ok(mut tcp) = tokio::net::TcpStream::connect((host, port as u16)).await else {
             return Ok(());
         };
@@ -237,9 +242,24 @@ impl server::Handler for TestServer {
         });
         Ok(())
     }
+
+    async fn tcpip_forward(
+        &mut self,
+        _address: &str,
+        _port: &mut u32,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        self.forward_sessions.lock().unwrap().push(session.handle());
+        Ok(true)
+    }
 }
 
 async fn start_server() -> u16 {
+    start_server_with_state().await.0
+}
+
+/// Arranca el servidor y devuelve también su estado compartido para inspeccionarlo.
+async fn start_server_with_state() -> (u16, TestServer) {
     let key = decode_secret_key(HOST_KEY, None).unwrap();
     let config = Arc::new(server::Config {
         keys: vec![key],
@@ -250,19 +270,22 @@ async fn start_server() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let client_key = PublicKey::from_openssh(CLIENT_PUB.trim()).unwrap();
+    let state = TestServer {
+        client_key,
+        security_key: SoftSecurityKey::new()
+            .private_key(0x01)
+            .public_key()
+            .clone(),
+        shells: Arc::default(),
+        x11_cookie: Arc::default(),
+        forward_sessions: Arc::default(),
+        tunnel_sessions: Arc::default(),
+    };
+    let mut server = state.clone();
     tokio::spawn(async move {
-        let mut server = TestServer {
-            client_key,
-            security_key: SoftSecurityKey::new()
-                .private_key(0x01)
-                .public_key()
-                .clone(),
-            shells: Arc::default(),
-            x11_cookie: Arc::default(),
-        };
         let _ = server.run_on_socket(config, &listener).await;
     });
-    port
+    (port, state)
 }
 
 struct Fixture {
@@ -588,10 +611,8 @@ async fn dynamic_forward_acts_as_socks5_proxy() {
     assert_eq!(&buf, b"socks");
 }
 
-#[tokio::test]
-async fn jump_host_chain_reaches_target() {
-    // El mismo servidor hace de bastión y de destino: el segundo salto viaja dentro del primero.
-    let port = start_server().await;
+/// Bastión y destino en el mismo servidor: el segundo salto viaja dentro del primero.
+fn jump_fixture(port: u16) -> Fixture {
     let identity = password_identity();
     let bastion = Host {
         port: Some(port),
@@ -609,16 +630,61 @@ async fn jump_host_chain_reaches_target() {
         .with_identity(identity)
         .with_host(bastion)
         .with_host(target);
-    let f = Fixture {
+    Fixture {
         vault,
         target: target_id,
-    };
+    }
+}
+
+#[tokio::test]
+async fn jump_host_chain_reaches_target() {
+    let f = jump_fixture(start_server().await);
     let (tx, answers) = auto_answer(None);
     let conn = connect(&f, tx).await.unwrap();
     assert_eq!(conn.exec("hostname").await.unwrap().0, b"eco:hostname");
     drop(conn);
     // Una confirmación de clave por salto.
     assert_eq!(answers.await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn jump_host_cannot_open_the_targets_remote_forward() {
+    let (port, server) = start_server_with_state().await;
+    let echo = echo_server().await;
+    let f = jump_fixture(port);
+    let (tx, _answers) = auto_answer(None);
+    let conn = Arc::new(connect(&f, tx).await.unwrap());
+    let rule = PortForward {
+        kind: ForwardKind::Remote,
+        bind_address: "127.0.0.1".into(),
+        ..PortForward::local(f.target, 9000, "127.0.0.1", echo)
+    };
+    let active = forward::start(conn, rule).await.unwrap();
+
+    let bastion = server.tunnel_sessions.lock().unwrap()[0].clone();
+    let target = server.forward_sessions.lock().unwrap()[0].clone();
+    let from_bastion = bastion
+        .channel_open_forwarded_tcpip("127.0.0.1", 9000, "10.0.0.1", 4000)
+        .await;
+    assert!(
+        from_bastion.is_err(),
+        "el bastión no debe llegar al servicio local"
+    );
+
+    // El destino sí puede usar su propio reenvío.
+    let channel = target
+        .channel_open_forwarded_tcpip("127.0.0.1", 9000, "10.0.0.1", 4000)
+        .await
+        .unwrap();
+    let mut stream = channel.into_stream();
+    stream.write_all(b"remoto").await.unwrap();
+    let mut buf = [0u8; 6];
+    tokio::time::timeout(TIMEOUT, stream.read_exact(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&buf, b"remoto");
+    active.stop().await;
 }
 
 /// Abre una shell y devuelve la salida acumulada en cuanto contiene `needle`.
