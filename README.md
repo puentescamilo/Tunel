@@ -261,7 +261,7 @@ TUNEL_VAULT=/tmp/demo.json TUNEL_DEV_PASSWORD=demo-password TUNEL_DEV_SECTION=se
 ```
 
 Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_RUN=<comando>`),
-`TUNEL_DEV_QUICK=<texto>`, `TUNEL_DEV_EDIT=<host>`, `TUNEL_DEV_PROMPT=cambio|nuevo`,
+`TUNEL_DEV_QUICK=<texto>`, `TUNEL_DEV_EDIT=<host>`, `TUNEL_DEV_PROMPT=cambio|nuevo|llave`,
 `TUNEL_DEV_THEME=<id de tema>` y `TUNEL_DEV_CURSOR=bloque|barra|subrayado`. No existen en
 compilaciones `--release`.
 

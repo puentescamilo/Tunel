@@ -114,14 +114,23 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             ui::empty_state(ui, icons::KEY, "Sin claves", "Importa una clave privada con «Clave». Se guarda cifrada en la bóveda.");
         }
         for key in &data.keys {
-            let mut detail = key_kind(&key.private_key).to_string();
+            let security_key = tunel_ssh::fido::is_security_key(&key.private_key);
+            let mut detail = if security_key {
+                "Llave de seguridad FIDO2".to_string()
+            } else {
+                key_kind(&key.private_key).to_string()
+            };
             if key.passphrase.is_some() {
                 detail.push_str(" · con frase de paso");
             }
             if key.certificate.is_some() {
                 detail.push_str(" · con certificado");
             }
-            let icon = if key.certificate.is_some() { icons::CERTIFICATE } else { icons::KEY };
+            let icon = match (security_key, key.certificate.is_some()) {
+                (true, _) => icons::USB,
+                (false, true) => icons::CERTIFICATE,
+                (false, false) => icons::KEY,
+            };
             let (edit, delete) = item_row(ui, key.id, icon, &key.label, &detail);
             if edit {
                 app.editor = Some(Editor::Key(key.clone()));

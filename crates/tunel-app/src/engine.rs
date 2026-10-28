@@ -117,6 +117,7 @@ impl Engine {
             lookup: host_key_lookup(vault),
             interactions: self.interactions_tx.clone(),
             keepalive: (seconds > 0).then(|| Duration::from_secs(u64::from(seconds))),
+            security_key: None,
         }
     }
 

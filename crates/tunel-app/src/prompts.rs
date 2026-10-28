@@ -63,7 +63,16 @@ fn fingerprint_box(ui: &mut egui::Ui, endpoint: &str, algorithm: &str, fingerpri
         });
 }
 
+/// Cuánto esperar antes de volver a mirar si la llave de seguridad ya firmó.
+const TOUCH_POLL: std::time::Duration = std::time::Duration::from_millis(150);
+
 pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
+    // El aviso de tocar la llave se cierra solo cuando la firma termina.
+    if let Some(Interaction::TouchSecurityKey { finished, .. }) = app.prompts.queue.front()
+        && finished.load(std::sync::atomic::Ordering::Acquire)
+    {
+        app.prompts.queue.pop_front();
+    }
     let Some(current) = app.prompts.queue.front() else {
         return;
     };
@@ -119,6 +128,21 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                         }
                     }
                 });
+            }
+            Interaction::TouchSecurityKey { host, .. } => {
+                header(ui, icons::USB, p.accent, "Toca tu llave de seguridad");
+                ui.label(
+                    RichText::new(format!(
+                        "Para entrar en {host}, toca la llave de seguridad cuando parpadee."
+                    ))
+                    .color(p.muted),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Esperando a la llave…").color(p.muted));
+                });
+                ctx.request_repaint_after(TOUCH_POLL);
             }
             Interaction::KeyboardInteractive { host, instructions, prompts, .. } => {
                 header(ui, icons::KEYBOARD, p.accent, &format!("Autenticación en {host}"));

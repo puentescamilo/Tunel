@@ -170,7 +170,14 @@ impl TunelApp {
                 .and_then(|d| d.groups.iter().find(|g| g.name == name))
                 .map(|g| g.id);
         }
-        if let Ok(kind) = std::env::var("TUNEL_DEV_PROMPT") {
+        if let Ok(kind) = std::env::var("TUNEL_DEV_PROMPT")
+            && kind == "llave"
+        {
+            self.prompts.push(tunel_ssh::Interaction::TouchSecurityKey {
+                host: "bastion.ejemplo.com".into(),
+                finished: std::sync::Arc::default(),
+            });
+        } else if let Ok(kind) = std::env::var("TUNEL_DEV_PROMPT") {
             let (reply, _) = tokio::sync::oneshot::channel();
             let status = if kind == "cambio" {
                 tunel_core::HostKeyStatus::Mismatch {

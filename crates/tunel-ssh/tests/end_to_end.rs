@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tunel_core::io::{SessionInput, SessionOutput, session_pair};
 use tunel_core::*;
 use tunel_ssh::shell::{ShellOptions, run_shell};
-use tunel_ssh::{ConnectContext, Interaction, SshConnection, forward};
+use tunel_ssh::{ConnectContext, Interaction, SshConnection, fido, forward};
 
 const USER: &str = "ana";
 const PASSWORD: &str = "contraseña-correcta";
@@ -27,6 +27,7 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Clone)]
 struct TestServer {
     client_key: PublicKey,
+    security_key: PublicKey,
     /// Canales con shell abierta: solo ellos usan la "shell" de prueba.
     shells: Arc<std::sync::Mutex<std::collections::HashSet<ChannelId>>>,
     /// Cookie recibida en `x11-req`; al abrir la shell el servidor abre un canal X11 con ella.
@@ -98,7 +99,11 @@ impl server::Handler for TestServer {
         key: VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
         Ok(
-            if user == USER && key.public_key.key_data() == self.client_key.key_data() {
+            if user == USER
+                && [&self.client_key, &self.security_key]
+                    .iter()
+                    .any(|k| key.public_key.key_data() == k.key_data())
+            {
                 Auth::Accept
             } else {
                 Auth::reject()
@@ -248,6 +253,10 @@ async fn start_server() -> u16 {
     tokio::spawn(async move {
         let mut server = TestServer {
             client_key,
+            security_key: SoftSecurityKey::new()
+                .private_key(0x01)
+                .public_key()
+                .clone(),
             shells: Arc::default(),
             x11_cookie: Arc::default(),
         };
@@ -296,6 +305,7 @@ fn auto_answer(
                     seen.push(fingerprint);
                     let _ = reply.send(true);
                 }
+                Interaction::TouchSecurityKey { .. } => seen.push("tocar-llave".into()),
                 Interaction::KeyboardInteractive { prompts, reply, .. } => {
                     seen.push(format!("prompt:{}", prompts[0].0));
                     let _ = reply.send(otp.map(|o| vec![o.to_string()]));
@@ -313,6 +323,7 @@ fn context(vault: &VaultData, interactions: mpsc::UnboundedSender<Interaction>) 
         lookup: Arc::new(move |h, p, a, f| snapshot.check_host_key(h, p, a, f)),
         interactions,
         keepalive: None,
+        security_key: None,
     }
 }
 
@@ -667,4 +678,134 @@ async fn unrequested_x11_channel_is_rejected() {
     let f = fixture(port, password_identity());
     let output = shell_output_until(&f, None, "x11:").await;
     assert!(output.contains("x11:rechazado"), "{output}");
+}
+
+/// Llave de seguridad simulada: firma como una llave FIDO2 real (sk-ssh-ed25519).
+struct SoftSecurityKey {
+    signing: ed25519_dalek::SigningKey,
+    key_handle: Vec<u8>,
+}
+
+impl SoftSecurityKey {
+    fn new() -> Self {
+        Self {
+            signing: ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
+            key_handle: vec![7; 64],
+        }
+    }
+
+    fn private_key(&self, flags: u8) -> russh::keys::PrivateKey {
+        use russh::keys::ssh_key::private::{KeypairData, SkEd25519};
+        use russh::keys::ssh_key::public::{self, Ed25519PublicKey};
+        let public = public::SkEd25519::new(
+            Ed25519PublicKey(self.signing.verifying_key().to_bytes()),
+            "ssh:",
+        );
+        let keypair = SkEd25519::new(public, flags, self.key_handle.clone()).unwrap();
+        russh::keys::PrivateKey::new(KeypairData::SkEd25519(keypair), "llave").unwrap()
+    }
+}
+
+impl fido::Authenticator for SoftSecurityKey {
+    fn get_assertion(
+        &self,
+        request: &fido::AssertionRequest,
+    ) -> Result<fido::Assertion, fido::FidoError> {
+        use ed25519_dalek::Signer as _;
+        use sha2::{Digest, Sha256};
+        assert_eq!(request.key_handle, self.key_handle);
+        if request.pin.is_some_and(|pin| pin != "2468") {
+            return Err(fido::FidoError::Device("PIN incorrecto".into()));
+        }
+        let mut auth_data = Sha256::digest(request.application.as_bytes()).to_vec();
+        auth_data.push(u8::from(request.user_presence));
+        auth_data.extend_from_slice(&3u32.to_be_bytes());
+        let signed = [auth_data.as_slice(), &Sha256::digest(request.message)].concat();
+        Ok(fido::Assertion {
+            auth_data,
+            signature: self.signing.sign(&signed).to_bytes().to_vec(),
+        })
+    }
+}
+
+fn security_key_fixture(port: u16, flags: u8) -> Fixture {
+    let private = SoftSecurityKey::new()
+        .private_key(flags)
+        .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+        .unwrap();
+    let key = SshKey::new("yubikey", private.to_string());
+    let identity = Identity {
+        key: Some(key.id),
+        ..Identity::new("ana", USER)
+    };
+    let mut f = fixture(port, identity);
+    f.vault = f.vault.with_key(key);
+    f
+}
+
+/// Conecta con la llave simulada. Las interacciones vistas se leen con el `JoinHandle` una vez
+/// cerrada la conexión (hasta entonces el canal de interacciones sigue abierto).
+async fn connect_with_security_key(
+    f: &Fixture,
+    otp: Option<&'static str>,
+) -> (
+    Result<SshConnection, tunel_ssh::SshError>,
+    tokio::task::JoinHandle<Vec<String>>,
+) {
+    let (tx, answers) = auto_answer(otp);
+    let ctx = ConnectContext {
+        security_key: Some(Arc::new(SoftSecurityKey::new())),
+        ..context(&f.vault, tx)
+    };
+    let target = f.vault.resolve(f.target).unwrap();
+    let result = tokio::time::timeout(TIMEOUT, SshConnection::connect(&ctx, &[], &target))
+        .await
+        .expect("la conexión no terminó a tiempo");
+    (result, answers)
+}
+
+async fn seen_after_closing(
+    conn: SshConnection,
+    answers: tokio::task::JoinHandle<Vec<String>>,
+) -> Vec<String> {
+    conn.disconnect().await;
+    drop(conn);
+    tokio::time::timeout(TIMEOUT, answers)
+        .await
+        .expect("el canal de interacciones no se cerró")
+        .unwrap()
+}
+
+#[tokio::test]
+async fn security_key_signs_authentication_after_touch() {
+    let port = start_server().await;
+    let f = security_key_fixture(port, fido::FLAG_USER_PRESENCE);
+    let (conn, answers) = connect_with_security_key(&f, None).await;
+    let conn = conn.unwrap();
+    let (output, _) = conn.exec("hola").await.unwrap();
+    assert_eq!(output, b"eco:hola");
+    let seen = seen_after_closing(conn, answers).await;
+    assert!(seen.contains(&"tocar-llave".to_string()), "{seen:?}");
+}
+
+#[tokio::test]
+async fn security_key_with_verification_asks_for_pin() {
+    let port = start_server().await;
+    let flags = fido::FLAG_USER_PRESENCE | fido::FLAG_USER_VERIFICATION;
+    let f = security_key_fixture(port, flags);
+    let (conn, answers) = connect_with_security_key(&f, Some("2468")).await;
+    let seen = seen_after_closing(conn.unwrap(), answers).await;
+    assert!(
+        seen.contains(&"prompt:PIN de la llave".to_string()),
+        "{seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn security_key_without_pin_answer_fails_clearly() {
+    let port = start_server().await;
+    let f = security_key_fixture(port, fido::FLAG_USER_VERIFICATION);
+    let (conn, _) = connect_with_security_key(&f, None).await;
+    let err = conn.err().expect("no debería conectar sin PIN");
+    assert!(err.to_string().contains("PIN"), "{err}");
 }

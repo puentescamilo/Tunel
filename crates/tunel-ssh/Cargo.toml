@@ -14,3 +14,12 @@ thiserror.workspace = true
 tracing.workspace = true
 base64.workspace = true
 rand.workspace = true
+
+# Llaves FIDO2 por USB. En Windows el acceso directo por HID está bloqueado (hace falta la API
+# WebAuthn del sistema), así que allí no se usa.
+[target.'cfg(not(windows))'.dependencies]
+ctap-hid-fido2 = { version = "3.6.0", default-features = false, features = ["aws-lc-rs"] }
+
+[dev-dependencies]
+ed25519-dalek = "3.0.0"
+sha2 = "0.11.1"

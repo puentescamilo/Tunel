@@ -1,5 +1,6 @@
 //! Conexión SSH: verificación de clave de host, autenticación y cadenas de jump hosts.
 
+use crate::fido::{self, SkKey, SkSigner};
 use crate::proxy;
 use crate::x11::X11Forwarding;
 use russh::client::{self, ChannelOpenHandle, Handle, KeyboardInteractiveAuthResponse};
@@ -8,6 +9,7 @@ use russh::keys::{
 };
 use russh::{Channel, Disconnect};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -44,6 +46,17 @@ pub enum SshError {
     Io(#[from] std::io::Error),
     #[error("X11: {0}")]
     X11(#[from] crate::x11::X11Error),
+    #[error(transparent)]
+    SecurityKey(#[from] fido::FidoError),
+}
+
+impl From<fido::SkSignError> for SshError {
+    fn from(error: fido::SkSignError) -> Self {
+        match error {
+            fido::SkSignError::Fido(e) => Self::SecurityKey(e),
+            fido::SkSignError::Send(_) => Self::InteractionClosed,
+        }
+    }
 }
 
 /// Pregunta que la conexión necesita que responda el usuario.
@@ -62,6 +75,11 @@ pub enum Interaction {
         instructions: String,
         prompts: Vec<(String, bool)>,
         reply: oneshot::Sender<Option<Vec<String>>>,
+    },
+    /// Hay que tocar la llave de seguridad; `finished` pasa a `true` al terminar la firma.
+    TouchSecurityKey {
+        host: String,
+        finished: Arc<AtomicBool>,
     },
 }
 
@@ -201,6 +219,8 @@ pub struct ConnectContext {
     pub lookup: HostKeyLookup,
     pub interactions: mpsc::UnboundedSender<Interaction>,
     pub keepalive: Option<Duration>,
+    /// Llave de seguridad para las claves `sk-*`; `None` usa la del sistema.
+    pub security_key: Option<Arc<dyn fido::Authenticator>>,
 }
 
 fn config(keepalive: Option<Duration>) -> Arc<client::Config> {
@@ -252,7 +272,7 @@ impl SshConnection {
             proxy::connect(first.host.proxy.as_ref(), &first.host.address, first.port).await?;
         let mut handle =
             client::connect_stream(config(ctx.keepalive), stream, handler(first)).await?;
-        authenticate(&mut handle, first, &ctx.interactions).await?;
+        authenticate(&mut handle, first, ctx).await?;
 
         let mut previous = Vec::new();
         for hop in &hops[1..] {
@@ -267,7 +287,7 @@ impl SshConnection {
             let mut next =
                 client::connect_stream(config(ctx.keepalive), channel.into_stream(), handler(hop))
                     .await?;
-            authenticate(&mut next, hop, &ctx.interactions).await?;
+            authenticate(&mut next, hop, ctx).await?;
             previous.push(Arc::new(std::mem::replace(&mut handle, next)));
         }
         Ok(Self {
@@ -330,12 +350,110 @@ impl SshConnection {
     }
 }
 
+/// Clave privada en el equipo, con certificado OpenSSH si lo hay.
+async fn authenticate_with_key(
+    handle: &mut Handle<ClientHandler>,
+    user: &str,
+    private: russh::keys::PrivateKey,
+    certificate: Option<Certificate>,
+) -> Result<bool, SshError> {
+    let private = Arc::new(private);
+    let result = match certificate {
+        Some(cert) => {
+            handle
+                .authenticate_openssh_cert(user.to_string(), private, cert)
+                .await?
+        }
+        None => {
+            let hash = handle.best_supported_rsa_hash().await?.flatten();
+            handle
+                .authenticate_publickey(user.to_string(), PrivateKeyWithHashAlg::new(private, hash))
+                .await?
+        }
+    };
+    Ok(result.success())
+}
+
+/// Clave `sk-*`: firma la llave de seguridad. Pide el PIN si la clave lo exige y avisa de
+/// que hay que tocarla mientras espera.
+async fn authenticate_with_security_key(
+    handle: &mut Handle<ClientHandler>,
+    target: &ResolvedHost,
+    ctx: &ConnectContext,
+    key: SkKey,
+    certificate: Option<Certificate>,
+) -> Result<bool, SshError> {
+    let identity = target.identity.as_ref().ok_or(SshError::MissingUsername)?;
+    let user = identity.username.clone();
+    let authenticator = match &ctx.security_key {
+        Some(authenticator) => authenticator.clone(),
+        None => fido::system_authenticator()?,
+    };
+    let host = target.host.address.clone();
+    let pin = if key.needs_pin() {
+        Some(ask_security_key_pin(&ctx.interactions, &host).await?)
+    } else {
+        None
+    };
+    let finished = Arc::new(AtomicBool::new(false));
+    if key.needs_touch() {
+        ctx.interactions
+            .send(Interaction::TouchSecurityKey {
+                host,
+                finished: finished.clone(),
+            })
+            .map_err(|_| SshError::InteractionClosed)?;
+    }
+    let public = key.public.clone();
+    let mut signer = SkSigner {
+        key,
+        authenticator,
+        pin,
+    };
+    let result = match certificate {
+        Some(cert) => {
+            handle
+                .authenticate_certificate_with(user, cert, None, &mut signer)
+                .await
+        }
+        None => {
+            handle
+                .authenticate_publickey_with(user, public, None, &mut signer)
+                .await
+        }
+    };
+    finished.store(true, Ordering::Release);
+    Ok(result?.success())
+}
+
+async fn ask_security_key_pin(
+    interactions: &mpsc::UnboundedSender<Interaction>,
+    host: &str,
+) -> Result<String, SshError> {
+    let (reply, answer) = oneshot::channel();
+    interactions
+        .send(Interaction::KeyboardInteractive {
+            host: host.to_string(),
+            instructions: "Esta clave necesita el PIN de tu llave de seguridad.".into(),
+            prompts: vec![("PIN de la llave".into(), false)],
+            reply,
+        })
+        .map_err(|_| SshError::InteractionClosed)?;
+    answer
+        .await
+        .map_err(|_| SshError::InteractionClosed)?
+        .and_then(|answers| answers.into_iter().next())
+        .filter(|pin| !pin.is_empty())
+        .ok_or(fido::FidoError::PinRequired.into())
+}
+
 /// Prueba, en orden: clave (con certificado si lo hay), agente, contraseña y keyboard-interactive.
 async fn authenticate(
     handle: &mut Handle<ClientHandler>,
     target: &ResolvedHost,
-    interactions: &mpsc::UnboundedSender<Interaction>,
+    ctx: &ConnectContext,
 ) -> Result<(), SshError> {
+    let interactions = &ctx.interactions;
     let identity = target.identity.as_ref().ok_or(SshError::MissingUsername)?;
     let user = identity.username.clone();
     if user.trim().is_empty() {
@@ -345,25 +463,17 @@ async fn authenticate(
     if let Some(key) = &target.key {
         let private = decode_secret_key(&key.private_key, key.passphrase.as_deref())
             .map_err(|e| SshError::Key(e.to_string()))?;
-        let private = Arc::new(private);
-        let ok = match &key.certificate {
-            Some(cert_text) => {
-                let cert = Certificate::from_openssh(cert_text.trim())
-                    .map_err(|e| SshError::Certificate(e.to_string()))?;
-                handle
-                    .authenticate_openssh_cert(user.clone(), private, cert)
-                    .await?
-                    .success()
+        let certificate = key
+            .certificate
+            .as_deref()
+            .map(|text| Certificate::from_openssh(text.trim()))
+            .transpose()
+            .map_err(|e| SshError::Certificate(e.to_string()))?;
+        if let Some(sk) = SkKey::from_private(&private) {
+            if authenticate_with_security_key(handle, target, ctx, sk, certificate).await? {
+                return Ok(());
             }
-            None => {
-                let hash = handle.best_supported_rsa_hash().await?.flatten();
-                handle
-                    .authenticate_publickey(user.clone(), PrivateKeyWithHashAlg::new(private, hash))
-                    .await?
-                    .success()
-            }
-        };
-        if ok {
+        } else if authenticate_with_key(handle, &user, private, certificate).await? {
             return Ok(());
         }
     }
