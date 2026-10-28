@@ -23,7 +23,11 @@ tracing-subscriber.workspace = true
 directories.workspace = true
 zeroize.workspace = true
 
-# Empaquetado con cargo-packager (ver scripts/package-macos.sh).
+# Incrusta el icono y los datos de versión en el .exe de Windows.
+[build-dependencies]
+winresource.workspace = true
+
+# Empaquetado con cargo-packager (ver scripts/package-macos.sh y el README).
 [package.metadata.packager]
 product-name = "Túnel"
 identifier = "dev.tunel.tunel"
@@ -31,6 +35,7 @@ description = "Cliente SSH multiplataforma"
 long-description = "Guarda hosts, claves y contraseñas en una bóveda cifrada y conecta por SSH, Mosh, Telnet o puerto serie, con túneles, SFTP y snippets."
 homepage = "https://github.com/puentescamilo/Tunel"
 authors = ["Camilo Puentes"]
+publisher = "Camilo Puentes"
 category = "DeveloperTool"
 binaries = [{ path = "tunel", main = true }]
 icons = ["assets/icons/icon.icns", "assets/icons/icon.ico", "assets/icons/256x256.png", "assets/icons/128x128.png", "assets/icons/32x32.png"]
@@ -45,3 +50,11 @@ signing-identity = "-"
 package-name = "tunel"
 section = "net"
 depends = ["libudev1", "libxkbcommon0", "libegl1", "libgl1"]
+
+# Instaladores de Windows: .msi (WiX) y .exe (NSIS, se instala para el usuario sin pedir administrador).
+[package.metadata.packager.wix]
+languages = ["es-ES"]
+
+[package.metadata.packager.nsis]
+languages = ["Spanish"]
+installer-icon = "assets/icons/icon.ico"

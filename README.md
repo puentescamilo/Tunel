@@ -121,7 +121,16 @@ en GNOME y KDE.
 
 ### Windows
 
-Aún no hay paquetes; se puede compilar desde el código.
+Descarga uno de los dos instaladores desde [Releases](https://github.com/puentescamilo/Tunel/releases).
+Ambos son para Windows 10 y 11 de 64 bits:
+
+- `tunel_<versión>_x64-setup.exe`: se instala solo para tu usuario y no pide permisos de administrador.
+- `tunel_<versión>_x64_es-ES.msi`: se instala para todo el equipo; es el indicado para
+  distribuirlo en una empresa.
+
+Los instaladores no están firmados, así que Windows SmartScreen avisa la primera vez. Pulsa
+**Más información → Ejecutar de todas formas**. Túnel funciona también en equipos y máquinas
+virtuales sin tarjeta gráfica: en ese caso dibuja por software.
 
 ### Desde el código
 
@@ -169,6 +178,20 @@ cargo install cargo-packager --locked
 cargo build --release --locked -p tunel-app
 cargo packager --release -p tunel-app --formats deb
 ```
+
+### Generar los instaladores de Windows
+
+Hacen falta las Build Tools de Visual Studio 2022 con el compilador de C++. La librería de
+criptografía necesita NASM, salvo que uses los objetos ya compilados que trae:
+
+```powershell
+cargo install cargo-packager --locked
+$env:AWS_LC_SYS_PREBUILT_NASM = "1"
+cargo build --release --locked -p tunel-app
+cargo packager --release -p tunel-app --formats wix,nsis
+```
+
+cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` en `dist/`.
 
 ## Seguridad
 

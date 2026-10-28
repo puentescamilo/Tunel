@@ -38,6 +38,7 @@ rfd = "0.17"
 keyring = "4.2"
 tempfile = "3"
 plist = "1.10"
+winresource = "0.1.34"
 
 [profile.release]
 lto = "thin"

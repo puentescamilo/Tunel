@@ -1,5 +1,8 @@
 //! Túnel: cliente SSH multiplataforma.
 
+// Sin esto, Windows abre una consola junto a la ventana.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod chrome;
 mod editor;
@@ -16,6 +19,8 @@ use anyhow::Context as _;
 
 const APP_NAME: &str = "Túnel";
 const VAULT_FILE: &str = "vault.json";
+/// Coincide con el nombre del `.desktop` del paquete de Linux, para que Wayland asocie la ventana.
+const APP_ID: &str = "tunel";
 
 fn vault_path() -> anyhow::Result<std::path::PathBuf> {
     if let Some(path) = std::env::var_os("TUNEL_VAULT") {
@@ -24,6 +29,20 @@ fn vault_path() -> anyhow::Result<std::path::PathBuf> {
     let dirs = directories::ProjectDirs::from("dev", "tunel", "tunel")
         .context("no se encontró el directorio de datos del usuario")?;
     Ok(dirs.data_dir().join(VAULT_FILE))
+}
+
+/// Icono de la barra de tareas en Windows y Linux. En macOS se usa el del paquete `.app`.
+fn window_icon(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
+    if cfg!(target_os = "macos") {
+        return viewport;
+    }
+    match eframe::icon_data::from_png_bytes(include_bytes!("../assets/icons/256x256.png")) {
+        Ok(icon) => viewport.with_icon(icon),
+        Err(err) => {
+            tracing::warn!("no se pudo cargar el icono de la ventana: {err}");
+            viewport
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -35,10 +54,13 @@ fn main() -> anyhow::Result<()> {
         .init();
     let path = vault_path()?;
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(APP_NAME)
-            .with_inner_size([1200.0, 780.0])
-            .with_min_inner_size([720.0, 420.0]),
+        viewport: window_icon(
+            egui::ViewportBuilder::default()
+                .with_title(APP_NAME)
+                .with_app_id(APP_ID)
+                .with_inner_size([1200.0, 780.0])
+                .with_min_inner_size([720.0, 420.0]),
+        ),
         ..Default::default()
     };
     eframe::run_native(
