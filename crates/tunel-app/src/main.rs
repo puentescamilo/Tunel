@@ -34,6 +34,20 @@ fn vault_path() -> anyhow::Result<std::path::PathBuf> {
 }
 
 /// Icono de la barra de tareas en Windows y Linux. En macOS se usa el del paquete `.app`.
+/// Solo en depuración: `TUNEL_DEV_POSITION=x,y` abre la ventana en esa posición, por ejemplo
+/// en la pantalla Retina para que las capturas salgan a doble resolución.
+fn dev_position(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
+    #[cfg(debug_assertions)]
+    if let Some((x, y)) = std::env::var("TUNEL_DEV_POSITION")
+        .ok()
+        .and_then(|v| v.split_once(',').map(|(x, y)| (x.parse(), y.parse())))
+        .and_then(|(x, y)| Some((x.ok()?, y.ok()?)))
+    {
+        return viewport.with_position([x, y]);
+    }
+    viewport
+}
+
 fn window_icon(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
     if cfg!(target_os = "macos") {
         return viewport;
@@ -55,14 +69,13 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
     let path = vault_path()?;
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(APP_NAME)
+        .with_app_id(APP_ID)
+        .with_inner_size([1200.0, 780.0])
+        .with_min_inner_size([720.0, 420.0]);
     let options = eframe::NativeOptions {
-        viewport: window_icon(
-            egui::ViewportBuilder::default()
-                .with_title(APP_NAME)
-                .with_app_id(APP_ID)
-                .with_inner_size([1200.0, 780.0])
-                .with_min_inner_size([720.0, 420.0]),
-        ),
+        viewport: window_icon(dev_position(viewport)),
         ..Default::default()
     };
     eframe::run_native(

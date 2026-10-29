@@ -4,3 +4,4 @@ vault.json
 vault.tmp
 /dist
 .DS_Store
+/crates/tunel-server/.env
