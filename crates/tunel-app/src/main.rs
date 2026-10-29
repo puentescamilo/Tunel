@@ -11,6 +11,7 @@ mod lock;
 mod prompts;
 mod quick_connect;
 mod session;
+mod sync;
 mod terminal_view;
 mod ui;
 mod views;

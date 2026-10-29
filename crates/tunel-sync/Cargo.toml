@@ -1,0 +1,23 @@
+[package]
+name = "tunel-sync"
+description = "Cliente de sincronización de Túnel: cuentas y sincronización cifrada con el servidor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tunel-core.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+base64.workspace = true
+zeroize.workspace = true
+uuid.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tunel-server.workspace = true
+axum.workspace = true

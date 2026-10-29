@@ -13,6 +13,7 @@ path = "src/main.rs"
 tunel-core.workspace = true
 tunel-ssh.workspace = true
 tunel-term.workspace = true
+tunel-sync.workspace = true
 eframe.workspace = true
 egui.workspace = true
 rfd.workspace = true
@@ -22,6 +23,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 directories.workspace = true
 zeroize.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
 
 # Incrusta el icono y los datos de versión en el .exe de Windows.
 [build-dependencies]

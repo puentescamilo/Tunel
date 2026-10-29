@@ -124,6 +124,7 @@ pub struct TunelApp {
     pub password_change: crate::views::settings::PasswordChange,
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     pub notices: Vec<(Instant, String)>,
+    pub sync: crate::sync::SyncController,
 }
 
 impl TunelApp {
@@ -148,6 +149,23 @@ impl TunelApp {
         match UnlockedVault::unlock(self.lock.path().to_path_buf(), &password) {
             Ok(vault) => self.vault = Some(vault),
             Err(e) => return self.notify(format!("TUNEL_DEV_PASSWORD: {e}")),
+        }
+        crate::sync::on_unlock(self);
+        // `TUNEL_DEV_SYNC=crear|servidor|correo|contraseña` (o `entrar|…`) une el equipo
+        // a una cuenta al arrancar, para probar la sincronización sin rellenar el formulario.
+        if let Ok(spec) = std::env::var("TUNEL_DEV_SYNC")
+            && let [how, server, email, password] = spec.splitn(4, '|').collect::<Vec<_>>()[..]
+        {
+            self.sync.form.server = server.into();
+            self.sync.form.email = email.into();
+            self.sync.form.password = password.into();
+            self.sync.form.confirm = password.into();
+            let how = if how == "crear" {
+                crate::engine::LinkAccount::Create
+            } else {
+                crate::engine::LinkAccount::SignIn
+            };
+            crate::sync::link(self, how);
         }
         self.apply_theme(ctx);
         self.section = match std::env::var("TUNEL_DEV_SECTION").as_deref() {
@@ -249,6 +267,7 @@ impl TunelApp {
             password_change: Default::default(),
             quick_connect: None,
             notices: Vec::new(),
+            sync: Default::default(),
         })
     }
 
@@ -272,13 +291,23 @@ impl TunelApp {
         crate::ui::theme::apply(ctx, crate::ui::theme::for_mode(mode, dark_terminal));
     }
 
-    /// Guarda una nueva versión de la bóveda y avisa si falla.
+    /// Guarda una nueva versión de la bóveda, la anota para sincronizarla y avisa si falla.
     pub fn commit(&mut self, data: VaultData) {
         let Some(vault) = self.vault.as_mut() else {
             return;
         };
-        if let Err(e) = vault.commit(data) {
-            self.notify(format!("No se pudo guardar la bóveda: {e}"));
+        let old = vault.data.clone();
+        match vault.commit(data.clone()) {
+            Ok(()) => crate::sync::after_commit(self, &old, &data),
+            Err(e) => self.notify(format!("No se pudo guardar la bóveda: {e}")),
+        }
+    }
+
+    /// Guarda lo que llegó por sincronización, sin volver a anotarlo como cambio local.
+    pub fn commit_synced(&mut self, data: VaultData) -> Result<(), tunel_core::StoreError> {
+        match self.vault.as_mut() {
+            Some(vault) => vault.commit(data),
+            None => Ok(()),
         }
     }
 
@@ -296,6 +325,7 @@ impl TunelApp {
         self.split = None;
         self.forwards.clear();
         self.editor = None;
+        self.sync = Default::default();
         self.vault = None;
     }
 
@@ -403,9 +433,16 @@ impl TunelApp {
                     self.notify(format!("El túnel falló: {error}"));
                     self.forward_errors.insert(id, error);
                 }
+                AppEvent::SyncFinished { round, result } => {
+                    crate::sync::on_finished(self, round, result)
+                }
+                AppEvent::SyncLinked { round, result } => {
+                    crate::sync::on_linked(self, round, result)
+                }
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }
         }
+        crate::sync::tick(self);
         for tab in &mut self.tabs {
             if let Tab::Terminal(session) = tab {
                 session.pump();
@@ -498,11 +535,15 @@ impl eframe::App for TunelApp {
         if self.vault.is_none() {
             if let Some(vault) = self.lock.show(ui) {
                 self.vault = Some(vault);
+                crate::sync::on_unlock(self);
                 self.apply_theme(&ctx);
             }
             return;
         }
         self.process_background();
+        if let Some(wait) = self.sync.wait() {
+            ctx.request_repaint_after(wait);
+        }
         self.handle_shortcuts(&ctx);
 
         crate::chrome::sidebar(self, ui);

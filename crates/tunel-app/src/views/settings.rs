@@ -1,7 +1,9 @@
-//! Ajustes: apariencia, terminal, importación y seguridad.
+//! Ajustes: apariencia, terminal, sincronización, importación y seguridad.
 
 use super::themes;
 use crate::app::TunelApp;
+use crate::engine::LinkAccount;
+use crate::sync::SyncStatus;
 use crate::ui::{self, icons};
 use egui::{Color32, CornerRadius, FontId, RichText};
 use tunel_core::ssh_config;
@@ -94,11 +96,12 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
     ui::page_header(
         ui,
         "Ajustes",
-        "Apariencia, terminal, importación y seguridad",
+        "Apariencia, terminal, sincronización, importación y seguridad",
         |_| {},
     );
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.set_max_width(760.0);
+        card(ui, icons::REFRESH, "Cuenta y sincronización", |ui| sync_card(app, ui));
         card(ui, icons::PALETTE, "Apariencia", |ui| {
             setting_row(ui, "Interfaz", "En automático sigue al fondo del tema de la terminal", |ui| {
                 themes::ui_mode_selector(ui, &mut settings.ui_theme);
@@ -193,6 +196,149 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             }
         });
     });
+}
+
+/// "hace 3 min", para la última sincronización.
+fn ago(when: std::time::SystemTime) -> String {
+    let secs = when.elapsed().map_or(0, |d| d.as_secs());
+    match secs {
+        0..60 => "hace un momento".into(),
+        60..3600 => format!("hace {} min", secs / 60),
+        _ => format!("hace {} h", secs / 3600),
+    }
+}
+
+fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
+    let p = ui::pal(ui);
+    let status = app.sync.status().clone();
+    let Some((server, email)) = app.sync.account() else {
+        return account_form(app, ui, &status);
+    };
+    let (server, email) = (server.to_string(), email.to_string());
+    ui.label(RichText::new(format!("{email} · {server}")).strong());
+    if server.starts_with("http://") {
+        ui.label(
+            RichText::new("Conexión sin cifrar (HTTP): úsala solo en tu red local.")
+                .size(12.0)
+                .color(p.warning),
+        );
+    }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| match &status {
+        SyncStatus::Running | SyncStatus::Linking => {
+            ui.spinner();
+            ui.label(RichText::new("Sincronizando…").color(p.muted));
+        }
+        SyncStatus::Idle { last: Some(when) } => {
+            ui.label(RichText::new(format!("Sincronizado {}", ago(*when))).color(p.success));
+        }
+        SyncStatus::Idle { last: None } | SyncStatus::Off => {
+            ui.label(RichText::new("Pendiente de sincronizar").color(p.muted));
+        }
+        SyncStatus::Failed { message, retrying } => {
+            let suffix = if *retrying {
+                " Se reintentará automáticamente."
+            } else {
+                ""
+            };
+            ui.label(RichText::new(format!("{message}{suffix}")).color(p.danger));
+        }
+    });
+    let pending = app.sync.pending();
+    if pending > 0 {
+        ui.label(
+            RichText::new(format!("{pending} cambios esperando a subir"))
+                .size(12.0)
+                .color(p.muted),
+        );
+    }
+    ui.add_space(8.0);
+    let busy = app.sync.busy();
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled_ui(!busy, |ui| ui::primary_button(ui, "Sincronizar ahora"))
+            .inner
+            .clicked()
+        {
+            crate::sync::sync_now(app);
+        }
+        if ui
+            .add_enabled_ui(!busy, |ui| {
+                ui::secondary_button(ui, "Desvincular este equipo")
+            })
+            .inner
+            .on_hover_text("Deja de sincronizar este equipo; la bóveda local no se borra")
+            .clicked()
+        {
+            crate::sync::unlink(app);
+        }
+    });
+}
+
+fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
+    let p = ui::pal(ui);
+    ui.label(
+        RichText::new(
+            "Sincroniza la bóveda entre tus equipos a través de tu propio servidor \
+             (tunel-server). Todo viaja cifrado: el servidor no puede leer nada. \
+             La contraseña de la cuenta no se puede recuperar.",
+        )
+        .color(p.muted),
+    );
+    ui.add_space(8.0);
+    if *status == SyncStatus::Linking {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(RichText::new("Preparando las claves y conectando…").color(p.muted));
+        });
+        return;
+    }
+    let form = &mut app.sync.form;
+    let field = |ui: &mut egui::Ui, text: &mut String, hint: &str, password: bool| {
+        ui.add(
+            egui::TextEdit::singleline(text)
+                .hint_text(hint)
+                .password(password)
+                .desired_width(f32::INFINITY),
+        );
+    };
+    field(
+        ui,
+        &mut form.server,
+        "Servidor, por ejemplo https://tunel.tudominio.com",
+        false,
+    );
+    field(ui, &mut form.email, "Correo de la cuenta", false);
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+        ui.add(
+            egui::TextEdit::singleline(&mut form.password)
+                .password(true)
+                .hint_text("Contraseña de la cuenta")
+                .desired_width(width),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut form.confirm)
+                .password(true)
+                .hint_text("Repítela (solo al crear la cuenta)")
+                .desired_width(width),
+        );
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if ui::primary_button(ui, "Iniciar sesión").clicked() {
+            crate::sync::link(app, LinkAccount::SignIn);
+        }
+        if ui::secondary_button(ui, "Crear cuenta").clicked() {
+            crate::sync::link(app, LinkAccount::Create);
+        }
+    });
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("Lo que ya tengas en este equipo se combina con la bóveda de la cuenta.")
+            .size(12.0)
+            .color(p.muted),
+    );
 }
 
 fn log_controls(app: &mut TunelApp, ui: &mut egui::Ui) {

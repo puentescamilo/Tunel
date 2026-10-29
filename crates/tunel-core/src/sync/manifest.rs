@@ -76,12 +76,16 @@ impl Manifest {
 
     /// Comprueba que el equipo, con el estado `state`, tiene todo lo que el manifiesto
     /// dice que existe, en su última versión o una posterior, y que el manifiesto no es
-    /// más antiguo que el último visto. `ignored` son registros apartados a propósito.
+    /// más antiguo que el último visto.
+    ///
+    /// `ignored` son registros auténticos que el equipo apartó, con la versión que vio. Solo
+    /// justifican la ausencia si esa versión es la del manifiesto o una posterior; si no,
+    /// el servidor podría reenviar una versión vieja apartada para ocultar la nueva.
     pub fn verify(
         &self,
         state: &SyncState,
         vault: &VaultKey,
-        ignored: &[String],
+        ignored: &[(String, Hlc)],
     ) -> Result<(), ManifestError> {
         if self.version < state.manifest_version {
             return Err(ManifestError::Rollback {
@@ -98,7 +102,10 @@ impl Manifest {
             .entries
             .iter()
             .filter(|(id, hlc)| {
-                !ignored.contains(id) && local.get(*id).is_none_or(|have| have < *hlc)
+                let set_aside = ignored
+                    .iter()
+                    .any(|(ignored_id, seen)| ignored_id == *id && seen >= *hlc);
+                !set_aside && local.get(*id).is_none_or(|have| have < *hlc)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -182,9 +189,31 @@ mod tests {
     #[test]
     fn ignored_records_do_not_count_as_missing() {
         let (_, manifest, vault) = synced();
-        let ignored: Vec<String> = manifest.entries.keys().cloned().collect();
+        let ignored: Vec<(String, Hlc)> = manifest
+            .entries
+            .iter()
+            .map(|(id, hlc)| (id.clone(), *hlc))
+            .collect();
         let fresh = SyncState::new(device(2));
         assert_eq!(manifest.verify(&fresh, &vault, &ignored), Ok(()));
+    }
+
+    #[test]
+    fn an_older_set_aside_version_does_not_excuse_a_newer_record() {
+        let (_, manifest, vault) = synced();
+        let older: Vec<(String, Hlc)> = manifest
+            .entries
+            .iter()
+            .map(|(id, hlc)| {
+                let earlier = Hlc {
+                    millis: hlc.millis - 1,
+                    ..*hlc
+                };
+                (id.clone(), earlier)
+            })
+            .collect();
+        let fresh = SyncState::new(device(2));
+        assert!(manifest.verify(&fresh, &vault, &older).is_err());
     }
 
     #[test]
