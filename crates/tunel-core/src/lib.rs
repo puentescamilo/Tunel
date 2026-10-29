@@ -5,6 +5,7 @@ pub mod io;
 pub mod model;
 pub mod ssh_config;
 pub mod store;
+pub mod sync;
 pub mod theme;
 pub mod vault;
 

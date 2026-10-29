@@ -55,7 +55,7 @@ const MAX_KDF_MEMORY_KIB: u32 = 1024 * 1024;
 const MAX_KDF_ITERATIONS: u32 = 10;
 const MAX_KDF_PARALLELISM: u32 = 8;
 
-fn kdf_within_limits(kdf: KdfParams) -> bool {
+pub(crate) fn kdf_within_limits(kdf: KdfParams) -> bool {
     kdf.memory_kib <= MAX_KDF_MEMORY_KIB
         && (1..=MAX_KDF_ITERATIONS).contains(&kdf.iterations)
         && (1..=MAX_KDF_PARALLELISM).contains(&kdf.parallelism)

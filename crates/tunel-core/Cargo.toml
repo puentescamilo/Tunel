@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Permite derivar claves de cuenta con parámetros baratos en las pruebas de otros crates.
+test-kdf = []
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
@@ -15,6 +19,9 @@ chacha20poly1305.workspace = true
 rand.workspace = true
 zeroize.workspace = true
 base64.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tempfile.workspace = true
 
