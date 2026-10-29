@@ -125,6 +125,7 @@ pub struct TunelApp {
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
+    pub updates: crate::updates::UpdateChecker,
 }
 
 impl TunelApp {
@@ -268,6 +269,7 @@ impl TunelApp {
             quick_connect: None,
             notices: Vec::new(),
             sync: Default::default(),
+            updates: Default::default(),
         })
     }
 
@@ -443,6 +445,13 @@ impl TunelApp {
             }
         }
         crate::sync::tick(self);
+        let engine = &self.engine;
+        if let Some(update) = self.updates.tick(|| engine.check_updates()) {
+            self.notify(format!(
+                "Hay una versión nueva de Túnel: {}",
+                update.version
+            ));
+        }
         for tab in &mut self.tabs {
             if let Tab::Terminal(session) = tab {
                 session.pump();
@@ -541,9 +550,8 @@ impl eframe::App for TunelApp {
             return;
         }
         self.process_background();
-        if let Some(wait) = self.sync.wait() {
-            ctx.request_repaint_after(wait);
-        }
+        let wait = self.updates.wait();
+        ctx.request_repaint_after(self.sync.wait().map_or(wait, |w| w.min(wait)));
         self.handle_shortcuts(&ctx);
 
         crate::chrome::sidebar(self, ui);

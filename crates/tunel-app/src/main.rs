@@ -14,6 +14,7 @@ mod session;
 mod sync;
 mod terminal_view;
 mod ui;
+mod updates;
 mod views;
 
 use anyhow::Context as _;

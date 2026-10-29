@@ -92,6 +92,11 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 ## Instalación
 
+Túnel muestra su versión al pie del menú lateral. Cada 12 horas pregunta a GitHub si hay
+una versión nueva y, si la hay, avisa con un botón **Descargar** que abre en el navegador el
+instalador de tu sistema. Un clic sobre la versión vuelve a comprobarlo. Túnel no instala nada
+por su cuenta: la actualización se hace abriendo el instalador descargado.
+
 ### macOS
 
 Descarga `tunel_<versión>_universal.dmg` desde [Releases](https://github.com/puentescamilo/Tunel/releases).
@@ -296,7 +301,7 @@ cargo fmt --all                                         # formato
 | `tunel-sync` | Cliente de sincronización: cuentas y rondas de sincronización con el servidor |
 | `tunel-server` | Servidor de sincronización (axum + SQLite): cuentas, sesiones y registros cifrados |
 
-**Pruebas:** 285 en total.
+**Pruebas:** 298 en total.
 
 - **SSH:** 16 de punta a punta contra un servidor SSH que arranca el propio test
   (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de

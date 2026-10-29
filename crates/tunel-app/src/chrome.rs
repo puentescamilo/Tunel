@@ -2,6 +2,7 @@
 
 use crate::app::{Section, TabState, TunelApp};
 use crate::ui::{self, icons};
+use crate::updates::{Update, UpdateStatus, current_version};
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense, Stroke, Vec2};
 
 const SIDEBAR_WIDTH: f32 = 220.0;
@@ -85,6 +86,18 @@ fn rail(app: &mut TunelApp, ui: &mut egui::Ui) {
                 if ui::rail_item(ui, icons::LOCK, "Bloquear bóveda", false).clicked() {
                     app.lock_vault();
                 }
+                if let Some(update) = app.updates.available().cloned() {
+                    let tooltip = format!("Versión {} disponible: descargar", update.version);
+                    let response = ui::rail_item(ui, icons::DOWNLOAD, &tooltip, false);
+                    ui::status_dot(
+                        ui,
+                        response.rect.center() + Vec2::new(10.0, -10.0),
+                        p.accent,
+                    );
+                    if response.clicked() {
+                        download(app, ui.ctx(), &update);
+                    }
+                }
             });
         });
 }
@@ -112,6 +125,11 @@ pub fn sidebar(app: &mut TunelApp, ui: &mut egui::Ui) {
         .resizable(false)
         .frame(frame)
         .show(ui, |ui| {
+            egui::Panel::bottom("menu-pie")
+                .frame(egui::Frame::NONE)
+                .resizable(false)
+                .show_separator_line(false)
+                .show(ui, |ui| sidebar_footer(app, ui));
             logo(ui);
             ui.add_space(18.0);
             let width = ui.available_width();
@@ -146,12 +164,106 @@ pub fn sidebar(app: &mut TunelApp, ui: &mut egui::Ui) {
             {
                 app.open_local();
             }
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                if ui::nav_item(ui, icons::LOCK, "Bloquear bóveda", false, None).clicked() {
-                    app.lock_vault();
-                }
-            });
         });
+}
+
+/// Pie del menú: aviso de versión nueva, versión instalada y bloqueo de la bóveda.
+fn sidebar_footer(app: &mut TunelApp, ui: &mut egui::Ui) {
+    ui.add_space(8.0);
+    if let Some(update) = app.updates.available().cloned() {
+        update_card(app, ui, &update);
+        ui.add_space(8.0);
+    }
+    version_row(app, ui);
+    if ui::nav_item(ui, icons::LOCK, "Bloquear bóveda", false, None).clicked() {
+        app.lock_vault();
+    }
+}
+
+fn update_card(app: &mut TunelApp, ui: &mut egui::Ui, update: &Update) {
+    let p = ui::pal(ui);
+    ui::card_frame(ui, true).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(icons::ARROW_UP)
+                    .font(ui::icon_font(15.0))
+                    .color(p.accent),
+            );
+            ui.label(RichText::new(format!("Versión {} disponible", update.version)).strong());
+        });
+        ui.label(
+            RichText::new(format!("Tienes la {}", current_version()))
+                .size(12.0)
+                .color(p.muted),
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui::primary_button(ui, &ui::with_icon(icons::DOWNLOAD, "Descargar"))
+                .on_hover_text("Descarga el instalador para este equipo")
+                .clicked()
+            {
+                download(app, ui.ctx(), update);
+            }
+            if ui
+                .link(RichText::new("Novedades").size(12.0).color(p.accent))
+                .clicked()
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(&update.notes_url));
+            }
+        });
+    });
+}
+
+/// Abre la descarga en el navegador: el usuario ejecuta el instalador por su cuenta.
+fn download(app: &mut TunelApp, ctx: &egui::Context, update: &Update) {
+    ctx.open_url(egui::OpenUrl::new_tab(&update.download_url));
+    app.notify("Abre el instalador descargado para actualizar Túnel");
+}
+
+/// Versión instalada y estado de la última comprobación; un clic vuelve a comprobar.
+fn version_row(app: &mut TunelApp, ui: &mut egui::Ui) {
+    let p = ui::pal(ui);
+    let (status, color) = match &app.updates.status {
+        UpdateStatus::NotChecked | UpdateStatus::Available(_) => ("", p.muted),
+        UpdateStatus::Checking => ("Buscando…", p.muted),
+        UpdateStatus::UpToDate => ("Al día", p.success),
+        UpdateStatus::Failed(_) => ("Sin comprobar", p.muted),
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(6), p.surface_hover);
+    }
+    painter.text(
+        rect.left_center() + Vec2::new(14.0, 0.0),
+        Align2::LEFT_CENTER,
+        format!("Túnel {}", current_version()),
+        FontId::proportional(12.0),
+        p.muted,
+    );
+    painter.text(
+        rect.right_center() - Vec2::new(10.0, 0.0),
+        Align2::RIGHT_CENTER,
+        status,
+        FontId::proportional(12.0),
+        color,
+    );
+    let hover = match &app.updates.status {
+        UpdateStatus::Failed(error) => {
+            format!("No se pudo comprobar: {error}\nClic para reintentar")
+        }
+        _ => "Buscar actualizaciones".to_string(),
+    };
+    if response
+        .on_hover_text(hover)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        let engine = &app.engine;
+        app.updates.check_now(|| engine.check_updates());
+    }
 }
 
 fn state_color(p: &ui::Palette, state: TabState) -> Color32 {
