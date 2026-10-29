@@ -436,6 +436,19 @@ impl Engine {
         });
     }
 
+    /// Pregunta a GitHub por la última versión. No se cancela al bloquear la bóveda.
+    pub fn check_updates(
+        &self,
+    ) -> tokio::sync::oneshot::Receiver<Result<Option<crate::updates::Update>, String>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn(async move {
+            let _ = tx.send(crate::updates::fetch_latest().await);
+            ctx.request_repaint();
+        });
+        rx
+    }
+
     pub fn stop_forward(&self, active: ActiveForward) {
         self.runtime.spawn(async move { active.stop().await });
     }
