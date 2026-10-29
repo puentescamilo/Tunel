@@ -66,6 +66,21 @@ impl MasterKey {
         Ok(Self(key))
     }
 
+    /// Clave aleatoria, para las que no salen de una contraseña.
+    pub fn random() -> Self {
+        let mut key = Zeroizing::new([0u8; KEY_LEN]);
+        rand::rng().fill_bytes(key.as_mut());
+        Self(key)
+    }
+
+    pub(crate) fn from_bytes(bytes: Zeroizing<[u8; KEY_LEN]>) -> Self {
+        Self(bytes)
+    }
+
+    pub(crate) fn as_bytes(&self) -> &[u8; KEY_LEN] {
+        &self.0
+    }
+
     fn cipher(&self) -> XChaCha20Poly1305 {
         XChaCha20Poly1305::new_from_slice(self.0.as_ref()).expect("la clave siempre mide KEY_LEN")
     }
