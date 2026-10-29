@@ -200,6 +200,32 @@ cargo packager --release -p tunel-app --formats wix,nsis
 
 cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` en `dist/`.
 
+### Servidor de sincronización
+
+> En desarrollo: el servidor ya funciona, pero la aplicación todavía no se conecta a él.
+
+`tunel-server` guarda las bóvedas cifradas de extremo a extremo: solo recibe datos cifrados
+y nunca la contraseña maestra, así que quien lo administre no puede leer hosts, contraseñas
+ni claves. Para alojarlo con Docker Compose, desde la raíz del repositorio:
+
+```bash
+docker compose -f crates/tunel-server/compose.yaml up -d
+```
+
+El [`compose.yaml`](crates/tunel-server/compose.yaml) lo arranca sin privilegios, con el
+sistema de archivos de solo lectura, y escuchando solo en `127.0.0.1:8080`.
+
+- **HTTPS:** el servidor habla HTTP sin cifrar. Publícalo siempre a través de un proxy con
+  HTTPS (Caddy, nginx, Traefik) y limita allí las peticiones por IP.
+- **Cuentas:** solo se puede crear la primera. Para permitir más, añade
+  `TUNEL_REGISTRO_ABIERTO=1`.
+- **Copias de seguridad:** la base de datos SQLite está en el volumen `tunel-datos`. Cópiala
+  para hacer copias de seguridad.
+
+El servidor limita los intentos de inicio de sesión por cuenta y las peticiones sin sesión.
+También limita el tamaño de las peticiones y el espacio de cada cuenta (20 000 registros y
+256 MiB).
+
 ## Seguridad
 
 - La contraseña maestra no se guarda. Si la olvidas, la bóveda no se puede recuperar.
@@ -230,7 +256,8 @@ cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` e
 | Cliente Mosh propio | ⏳ más adelante |
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
 | Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
-| Sincronización entre equipos, equipos compartidos, sesiones compartidas | ⏳ fase 3 (necesita un servidor propio) |
+| Sincronización entre equipos | 🚧 fase 3: núcleo y servidor listos, falta el cliente |
+| Equipos compartidos, sesiones compartidas | ⏳ fase 3 |
 
 ## Desarrollo
 
@@ -242,10 +269,11 @@ cargo fmt --all                                         # formato
 
 | Crate | Contenido |
 |---|---|
-| `tunel-core` | Modelos, bóveda cifrada, temas guardados, importación de `~/.ssh/config` |
+| `tunel-core` | Modelos, bóveda cifrada, temas guardados, importación de `~/.ssh/config`, núcleo de la sincronización |
 | `tunel-ssh` | Cliente `russh`: autenticación, claves de host, jump hosts, proxys, shell, túneles, SFTP, Mosh |
 | `tunel-term` | Emulador de terminal, temas incluidos e importadores, teclado, terminal local, Telnet, serie |
 | `tunel-app` | Interfaz `egui` y sistema de diseño (`src/ui`) |
+| `tunel-server` | Servidor de sincronización (axum + SQLite): cuentas, sesiones y registros cifrados |
 
 **Pruebas:** 190 unitarias y 16 de punta a punta contra un servidor SSH que arranca el propio
 test (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de

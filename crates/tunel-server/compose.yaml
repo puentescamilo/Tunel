@@ -1,0 +1,27 @@
+# Ejemplo para alojar el servidor con Docker Compose, desde la raíz del repositorio:
+#   docker compose -f crates/tunel-server/compose.yaml up -d
+#
+# Solo escucha en 127.0.0.1: publícalo a través de un proxy con HTTPS (Caddy, nginx,
+# Traefik) y limita allí también las peticiones por IP. Nunca expongas el puerto 8080
+# directamente: los tokens y las claves de acceso viajarían sin cifrar.
+services:
+  tunel-server:
+    build:
+      context: ../..
+      dockerfile: crates/tunel-server/Dockerfile
+    image: tunel-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - tunel-datos:/datos
+    # environment:
+    #   TUNEL_REGISTRO_ABIERTO: "1"   # permite crear más de una cuenta
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 256
+
+volumes:
+  tunel-datos:

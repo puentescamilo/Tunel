@@ -1,0 +1,10 @@
+target
+dist
+.git
+.claude
+.env*
+*.db
+*.db-*
+*.pem
+*.key
+*.dmg
