@@ -44,6 +44,9 @@ pub struct SyncState {
     pub pending: BTreeSet<RecordKey>,
     /// Posición en el historial del servidor hasta la que ya se trajeron cambios.
     pub cursor: u64,
+    /// Versión más alta del manifiesto que ha visto este equipo; una menor es un retroceso.
+    #[serde(default)]
+    pub manifest_version: u64,
 }
 
 impl SyncState {
@@ -54,6 +57,7 @@ impl SyncState {
             versions: BTreeMap::new(),
             pending: BTreeSet::new(),
             cursor: 0,
+            manifest_version: 0,
         }
     }
 

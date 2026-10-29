@@ -36,7 +36,7 @@ pub const MAX_RECORD_CIPHERTEXT: usize = 1024 * 1024;
 /// servidor la longitud exacta de cada registro.
 const PADDING_BLOCK: usize = 256;
 /// Un identificador de registro es un HMAC-SHA256 en hexadecimal.
-const RECORD_ID_LEN: usize = 64;
+pub const RECORD_ID_LEN: usize = 64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncCryptoError {
@@ -68,7 +68,9 @@ pub struct AccountKeys {
     context: Vec<u8>,
 }
 
-fn kdf_is_strong(salt: &[u8], params: KdfParams) -> bool {
+/// Parámetros de Argon2id y sal aceptables para una cuenta: ni por debajo de los mínimos
+/// ni tan altos que derivar la clave agote la memoria.
+pub fn kdf_is_strong(salt: &[u8], params: KdfParams) -> bool {
     salt.len() >= MIN_SALT_LEN
         && params.memory_kib >= MIN_KDF_MEMORY_KIB
         && params.iterations >= MIN_KDF_ITERATIONS
@@ -213,6 +215,23 @@ impl VaultKey {
         let mut bytes = Zeroizing::new([0u8; KEY_LEN]);
         bytes.copy_from_slice(&plain);
         Ok(Self(MasterKey::from_bytes(bytes)))
+    }
+
+    /// Cifra datos sueltos de la bóveda sincronizada, como el manifiesto.
+    pub(crate) fn seal_blob(
+        &self,
+        plain: &[u8],
+        aad: &[u8],
+    ) -> Result<SealedBlob, SyncCryptoError> {
+        Ok(SealedBlob::from_sealed(&crypto::seal(&self.0, plain, aad)?))
+    }
+
+    pub(crate) fn open_blob(
+        &self,
+        blob: &SealedBlob,
+        aad: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, SyncCryptoError> {
+        Ok(crypto::open(&self.0, &blob.to_sealed()?, aad)?)
     }
 
     /// Identificador opaco y estable de un registro.
