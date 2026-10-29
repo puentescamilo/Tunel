@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/tunel-core", "crates/tunel-ssh", "crates/tunel-term", "crates/tunel-app"]
+members = [
+    "crates/tunel-core",
+    "crates/tunel-ssh",
+    "crates/tunel-term",
+    "crates/tunel-app",
+    "crates/tunel-server",
+]
 
 [workspace.package]
 version = "0.2.0"
@@ -42,6 +48,12 @@ keyring = "4.2"
 tempfile = "3"
 plist = "1.10"
 winresource = "0.1.34"
+axum = "0.8.9"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+subtle = "2.6"
+tower = { version = "0.5.3", features = ["util", "limit"] }
+tower-http = { version = "0.7.1", features = ["timeout", "set-header"] }
+http-body-util = "0.1.5"
 
 [profile.release]
 lto = "thin"

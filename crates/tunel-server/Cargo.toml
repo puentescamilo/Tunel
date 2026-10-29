@@ -1,0 +1,32 @@
+[package]
+name = "tunel-server"
+description = "Servidor de sincronización de Túnel: guarda bóvedas cifradas de extremo a extremo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tunel-core.workspace = true
+axum.workspace = true
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+argon2.workspace = true
+rand.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+
+[dev-dependencies]
+tunel-core = { workspace = true, features = ["test-kdf"] }
+http-body-util.workspace = true
+uuid.workspace = true
