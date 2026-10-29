@@ -1,0 +1,82 @@
+//! Cliente de sincronización de Túnel.
+//!
+//! Crea o abre una cuenta en un servidor `tunel-server` y sincroniza con él la bóveda
+//! local. Todo lo que sale del equipo va cifrado: el servidor solo ve registros con
+//! identificadores opacos y una clave de acceso derivada de la contraseña.
+
+pub mod account;
+pub mod api;
+pub mod run;
+
+pub use account::{create_account, sign_in, sign_out};
+pub use api::{ServerUrl, check_server_url};
+pub use run::{SyncOutcome, sync_once};
+
+use tunel_core::sync::{ManifestError, SyncCryptoError};
+
+#[derive(Debug, thiserror::Error)]
+pub enum SyncError {
+    #[error("servidor no válido: {0}")]
+    InvalidServer(String),
+    #[error("no se pudo conectar con el servidor: {0}")]
+    Network(#[source] reqwest::Error),
+    #[error("correo o contraseña incorrectos")]
+    Unauthorized,
+    #[error("ya existe una cuenta con ese correo en este servidor")]
+    AccountExists,
+    #[error("este servidor no admite cuentas nuevas")]
+    RegistrationClosed,
+    #[error("demasiados intentos; espera unos minutos")]
+    TooManyAttempts,
+    #[error("el servidor está ocupado; se reintentará")]
+    Busy,
+    #[error("la cuenta alcanzó su espacio máximo en el servidor")]
+    QuotaExceeded,
+    #[error("conflicto con el servidor: {0}")]
+    Conflict(String),
+    #[error("el servidor respondió con un error ({status}): {message}")]
+    Server { status: u16, message: String },
+    #[error("el servidor pidió parámetros de cifrado más débiles de lo permitido")]
+    WeakKdf,
+    #[error("no se pudieron descifrar los datos: {0}")]
+    Crypto(#[from] SyncCryptoError),
+    #[error("el servidor devolvió datos incompletos o antiguos: {0}")]
+    Integrity(#[from] ManifestError),
+    #[error("datos de la bóveda no válidos: {0}")]
+    Data(#[from] serde_json::Error),
+    #[error("otros equipos suben cambios sin parar; se reintentará")]
+    TooManyConflicts,
+    #[error("el servidor respondió de forma incoherente: {0}")]
+    Misbehaving(&'static str),
+    #[error("la sincronización tardó demasiado; se reintentará")]
+    Timeout,
+    #[error("error interno: {0}")]
+    Internal(String),
+}
+
+impl SyncError {
+    /// Merece la pena reintentar más tarde sin que el usuario haga nada.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Network(_)
+                | Self::Busy
+                | Self::TooManyConflicts
+                | Self::TooManyAttempts
+                | Self::Timeout
+        ) || matches!(self, Self::Server { status, .. } if *status >= 500)
+    }
+}
+
+impl From<tunel_core::crypto::CryptoError> for SyncError {
+    fn from(e: tunel_core::crypto::CryptoError) -> Self {
+        Self::Crypto(SyncCryptoError::Crypto(e))
+    }
+}
+
+/// Hora actual en milisegundos desde 1970, para el reloj de la sincronización.
+pub(crate) fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}

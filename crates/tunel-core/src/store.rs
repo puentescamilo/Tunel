@@ -1,6 +1,7 @@
 //! Persistencia de la bóveda en un único archivo JSON cifrado.
 
 use crate::crypto::{self, CryptoError, KdfParams, MasterKey, NONCE_LEN, SALT_LEN, Sealed};
+use crate::sync::SyncLocal;
 use crate::vault::VaultData;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 const FORMAT_VERSION: u32 = 1;
 const AAD: &[u8] = b"tunel-vault-v1";
+const SYNC_AAD: &[u8] = b"tunel-sync-local-v1";
 pub const MIN_PASSWORD_LEN: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +30,14 @@ pub enum StoreError {
     AlreadyExists(PathBuf),
     #[error("la bóveda ya está abierta en otra ventana de Túnel")]
     Locked,
+}
+
+/// Configuración de sincronización cifrada, en un archivo junto a la bóveda.
+#[derive(Serialize, Deserialize)]
+struct SyncFile {
+    version: u32,
+    nonce: String,
+    ciphertext: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -79,6 +89,15 @@ fn lock_path(path: &Path) -> PathBuf {
         .map(|n| n.to_os_string())
         .unwrap_or_default();
     name.push(".lock");
+    path.with_file_name(name)
+}
+
+fn sync_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(".sync");
     path.with_file_name(name)
 }
 
@@ -177,11 +196,54 @@ impl UnlockedVault {
         validate_password(new_password)?;
         let salt = crypto::random_salt();
         let key = MasterKey::derive(new_password.as_bytes(), &salt, self.kdf)?;
-        // Guardar primero con la clave nueva; solo si funciona se adopta en memoria.
+        // Una configuración de sincronización ilegible no impide cambiar la contraseña:
+        // se pierde (habrá que volver a unir el equipo), pero la bóveda es lo importante.
+        let sync = self.load_sync().unwrap_or_else(|e| {
+            eprintln!("aviso: se descarta la configuración de sincronización ilegible: {e}");
+            None
+        });
+        // Guardar primero con la clave nueva; solo si funciona se adopta en memoria, y desde
+        // ese momento, para que memoria y disco usen siempre la misma clave.
         write_sealed(&self.path, &self.data, &key, &salt, self.kdf)?;
         self.key = key;
         self.salt = salt;
-        Ok(())
+        match &sync {
+            Some(sync) => write_sync(&self.path, sync, &self.key),
+            None => self.delete_sync(),
+        }
+    }
+
+    /// Configuración de sincronización de este equipo, si está unido a una cuenta.
+    pub fn load_sync(&self) -> Result<Option<SyncLocal>, StoreError> {
+        let raw = match std::fs::read(sync_path(&self.path)) {
+            Ok(raw) => raw,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let file: SyncFile = serde_json::from_slice(&raw).map_err(|_| StoreError::Corrupt)?;
+        if file.version != FORMAT_VERSION {
+            return Err(StoreError::UnsupportedVersion(file.version));
+        }
+        let nonce: [u8; NONCE_LEN] = decode(&file.nonce)?;
+        let ciphertext = B64
+            .decode(&file.ciphertext)
+            .map_err(|_| StoreError::Corrupt)?;
+        let plaintext = crypto::open(&self.key, &Sealed { nonce, ciphertext }, SYNC_AAD)?;
+        serde_json::from_slice(&plaintext)
+            .map(Some)
+            .map_err(|_| StoreError::Corrupt)
+    }
+
+    pub fn save_sync(&self, sync: &SyncLocal) -> Result<(), StoreError> {
+        write_sync(&self.path, sync, &self.key)
+    }
+
+    /// Desvincula el equipo de la cuenta; la bóveda local no cambia.
+    pub fn delete_sync(&self) -> Result<(), StoreError> {
+        match std::fs::remove_file(sync_path(&self.path)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        }
     }
 
     fn save(&self) -> Result<(), StoreError> {
@@ -210,6 +272,19 @@ fn write_sealed(
         let json = serde_json::to_vec_pretty(&file).map_err(|_| StoreError::Corrupt)?;
         write_atomically(path, &json)
     }
+}
+
+fn write_sync(path: &Path, sync: &SyncLocal, key: &MasterKey) -> Result<(), StoreError> {
+    let plaintext =
+        zeroize::Zeroizing::new(serde_json::to_vec(sync).map_err(|_| StoreError::Corrupt)?);
+    let sealed = crypto::seal(key, &plaintext, SYNC_AAD)?;
+    let file = SyncFile {
+        version: FORMAT_VERSION,
+        nonce: B64.encode(sealed.nonce),
+        ciphertext: B64.encode(&sealed.ciphertext),
+    };
+    let json = serde_json::to_vec_pretty(&file).map_err(|_| StoreError::Corrupt)?;
+    write_atomically(&sync_path(path), &json)
 }
 
 /// Escribe en un archivo temporal privado, lo sincroniza a disco y lo renombra,
@@ -328,6 +403,47 @@ mod tests {
         drop(vault);
         assert!(UnlockedVault::unlock(vault_path(&dir), PW).is_err());
         assert!(UnlockedVault::unlock(vault_path(&dir), "nueva-contraseña").is_ok());
+    }
+
+    fn sync_config() -> SyncLocal {
+        SyncLocal {
+            server: "https://tunel.ejemplo.com".into(),
+            email: "ana@ejemplo.com".into(),
+            auth: zeroize::Zeroizing::new("clave".into()),
+            vault_key: crate::sync::VaultKey::generate(),
+            token: None,
+            state: crate::sync::SyncState::new(uuid::Uuid::from_u128(1)),
+        }
+    }
+
+    #[test]
+    fn sync_config_is_saved_encrypted_and_survives_password_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault =
+            UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
+        assert!(vault.load_sync().unwrap().is_none());
+        vault.save_sync(&sync_config()).unwrap();
+        let raw = std::fs::read_to_string(sync_path(&vault_path(&dir))).unwrap();
+        assert!(!raw.contains("ana@ejemplo.com"));
+
+        vault.change_password("nueva-contraseña").unwrap();
+        drop(vault);
+        let vault = UnlockedVault::unlock(vault_path(&dir), "nueva-contraseña").unwrap();
+        assert_eq!(vault.load_sync().unwrap().unwrap().email, "ana@ejemplo.com");
+
+        vault.delete_sync().unwrap();
+        assert!(vault.load_sync().unwrap().is_none());
+        vault.delete_sync().unwrap();
+    }
+
+    #[test]
+    fn a_corrupt_sync_config_does_not_block_a_password_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault =
+            UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
+        std::fs::write(sync_path(&vault_path(&dir)), b"{basura").unwrap();
+        vault.change_password("nueva-contraseña").unwrap();
+        assert!(vault.load_sync().unwrap().is_none());
     }
 
     #[test]

@@ -7,12 +7,15 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, watch};
 use tunel_core::io::{SessionIo, SessionOutput, session_pair};
+use tunel_core::sync::SyncLocal;
 use tunel_core::{ForwardId, HostId, PortForward, Protocol, VaultData};
 use tunel_ssh::forward::{self, ActiveForward};
 use tunel_ssh::sftp::{RemoteEntry, SftpClient};
 use tunel_ssh::shell::{self, ShellOptions};
 use tunel_ssh::{ConnectContext, HostKeyLookup, Interaction, SshConnection, mosh};
+use tunel_sync::{ServerUrl, SyncError, SyncOutcome};
 use tunel_term::local::{self, CommandSpec};
+use zeroize::Zeroizing;
 
 /// Resultados de operaciones en segundo plano que la interfaz debe aplicar.
 pub enum AppEvent {
@@ -49,6 +52,22 @@ pub enum AppEvent {
         id: ForwardId,
         error: String,
     },
+    /// Terminó la ronda de sincronización `round`.
+    SyncFinished {
+        round: u64,
+        result: Result<Box<SyncOutcome>, SyncError>,
+    },
+    /// El equipo se unió a una cuenta (creándola o iniciando sesión) en la tarea `round`.
+    SyncLinked {
+        round: u64,
+        result: Result<Box<SyncLocal>, SyncError>,
+    },
+}
+
+/// Unir el equipo a una cuenta nueva o a una que ya existe.
+pub enum LinkAccount {
+    Create,
+    SignIn,
 }
 
 pub struct Engine {
@@ -368,6 +387,53 @@ impl Engine {
             ctx.request_repaint();
         });
         Ok(())
+    }
+
+    /// Lanza una ronda de sincronización sobre una copia de la bóveda.
+    pub fn sync(&self, round: u64, local: SyncLocal, data: VaultData) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result = tunel_sync::sync_once(&local, &data).await.map(Box::new);
+            let _ = events.send(AppEvent::SyncFinished { round, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Crea una cuenta o inicia sesión en una existente con la bóveda actual.
+    pub fn link_account(
+        &self,
+        round: u64,
+        how: LinkAccount,
+        server: ServerUrl,
+        email: String,
+        password: Zeroizing<String>,
+        data: VaultData,
+    ) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result = match how {
+                LinkAccount::Create => {
+                    tunel_sync::create_account(&server, &email, password, &data).await
+                }
+                LinkAccount::SignIn => tunel_sync::sign_in(&server, &email, password, &data).await,
+            };
+            let _ = events.send(AppEvent::SyncLinked {
+                round,
+                result: result.map(Box::new),
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Cierra la sesión en el servidor; si no hay conexión no importa, el token caduca.
+    pub fn sign_out(&self, local: SyncLocal) {
+        self.runtime.spawn(async move {
+            if let Err(e) = tunel_sync::sign_out(&local).await {
+                tracing::info!(error = %e, "no se pudo cerrar la sesión en el servidor");
+            }
+        });
     }
 
     pub fn stop_forward(&self, active: ActiveForward) {

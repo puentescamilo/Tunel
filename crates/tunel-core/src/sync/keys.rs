@@ -130,6 +130,38 @@ impl AccountKeys {
 /// Clave aleatoria que cifra los registros de la bóveda sincronizada.
 pub struct VaultKey(MasterKey);
 
+impl Clone for VaultKey {
+    fn clone(&self) -> Self {
+        Self(MasterKey::from_bytes(Zeroizing::new(*self.0.as_bytes())))
+    }
+}
+
+/// Solo para guardarla en la configuración local, que va cifrada con la clave maestra.
+impl Serialize for VaultKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let text = Zeroizing::new(B64.encode(self.0.as_bytes()));
+        serializer.serialize_str(&text)
+    }
+}
+
+impl<'de> Deserialize<'de> for VaultKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = Zeroizing::new(String::deserialize(deserializer)?);
+        let bytes = Zeroizing::new(
+            B64.decode(text.as_bytes())
+                .map_err(serde::de::Error::custom)?,
+        );
+        if bytes.len() != KEY_LEN {
+            return Err(serde::de::Error::custom(
+                "clave de bóveda de longitud incorrecta",
+            ));
+        }
+        let mut key = Zeroizing::new([0u8; KEY_LEN]);
+        key.copy_from_slice(&bytes);
+        Ok(Self(MasterKey::from_bytes(key)))
+    }
+}
+
 /// Datos cifrados tal como los guarda el servidor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedBlob {

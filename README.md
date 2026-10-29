@@ -200,9 +200,29 @@ cargo packager --release -p tunel-app --formats wix,nsis
 
 cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` en `dist/`.
 
-### Servidor de sincronización
+### Sincronización entre equipos
 
-> En desarrollo: el servidor ya funciona, pero la aplicación todavía no se conecta a él.
+Túnel sincroniza la bóveda entre tus equipos a través de tu propio servidor (`tunel-server`,
+más abajo). La bóveda local sigue siendo la principal:
+
+- **Sin conexión:** funciona igual. Los cambios esperan en una cola cifrada hasta que el
+  servidor responde.
+- **Conflictos:** si editas lo mismo en dos equipos, gana la última edición.
+- **Qué se sincroniza:** hosts, grupos, identidades, claves, snippets, túneles y claves de
+  host conocidas. Los ajustes (fuente, tema general, cursor) son de cada equipo.
+
+En **Ajustes → Cuenta y sincronización**, escribe la dirección del servidor, tu correo y una
+contraseña para la cuenta:
+
+- **Crear cuenta**, en el primer equipo.
+- **Iniciar sesión**, en los demás. Lo que ya tuvieras en ese equipo se combina con la bóveda
+  de la cuenta.
+
+La contraseña de la cuenta no sale del equipo: de ella se derivan una clave para cifrar y otra
+para identificarse ante el servidor. Si la olvidas, los datos de la cuenta no se pueden
+recuperar, pero la bóveda local de cada equipo sigue intacta.
+
+### Servidor de sincronización
 
 `tunel-server` guarda las bóvedas cifradas de extremo a extremo: solo recibe datos cifrados
 y nunca la contraseña maestra, así que quien lo administre no puede leer hosts, contraseñas
@@ -256,7 +276,7 @@ También limita el tamaño de las peticiones y el espacio de cada cuenta (20 000
 | Cliente Mosh propio | ⏳ más adelante |
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
 | Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
-| Sincronización entre equipos | 🚧 fase 3: núcleo y servidor listos, falta el cliente |
+| Sincronización entre equipos (servidor propio, cifrado de extremo a extremo) | ✅ |
 | Equipos compartidos, sesiones compartidas | ⏳ fase 3 |
 
 ## Desarrollo
@@ -273,14 +293,23 @@ cargo fmt --all                                         # formato
 | `tunel-ssh` | Cliente `russh`: autenticación, claves de host, jump hosts, proxys, shell, túneles, SFTP, Mosh |
 | `tunel-term` | Emulador de terminal, temas incluidos e importadores, teclado, terminal local, Telnet, serie |
 | `tunel-app` | Interfaz `egui` y sistema de diseño (`src/ui`) |
+| `tunel-sync` | Cliente de sincronización: cuentas y rondas de sincronización con el servidor |
 | `tunel-server` | Servidor de sincronización (axum + SQLite): cuentas, sesiones y registros cifrados |
 
-**Pruebas:** 190 unitarias y 16 de punta a punta contra un servidor SSH que arranca el propio
-test (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de
-host nueva y cambiada, shell, túnel local, SOCKS5, jump hosts, reenvío X11 y llaves FIDO2
-(con una llave simulada). Las claves de
-`crates/tunel-ssh/tests/fixtures` son solo para esas pruebas. Aún no tienen pruebas automáticas
-el SFTP contra un servidor real, Mosh, Telnet, el puerto serie ni la interfaz.
+**Pruebas:** 285 en total.
+
+- **SSH:** 16 de punta a punta contra un servidor SSH que arranca el propio test
+  (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de
+  host nueva y cambiada, shell, túnel local, SOCKS5, jump hosts, reenvío X11 y llaves FIDO2
+  (con una llave simulada). Las claves de `crates/tunel-ssh/tests/fixtures` son solo para
+  esas pruebas.
+- **Sincronización:**
+  - las de la API del servidor (`crates/tunel-server/tests/api.rs`);
+  - las de varios equipos contra un `tunel-server` real, incluido uno que intenta ocultar
+    datos (`crates/tunel-sync/tests/sync.rs`).
+
+Aún no tienen pruebas automáticas el SFTP contra un servidor real, Mosh, Telnet, el puerto
+serie ni la interfaz.
 
 **Capturas y pruebas manuales:** en compilaciones de depuración, unas variables de entorno
 abren la app directamente en una pantalla con datos de ejemplo:

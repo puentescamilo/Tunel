@@ -21,6 +21,8 @@ pub const MAX_CLOCK_DRIFT_MILLIS: u64 = 24 * 60 * 60 * 1000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rejected {
     pub key: RecordKey,
+    /// Versión del registro apartado.
+    pub hlc: Hlc,
     pub reason: String,
 }
 
@@ -136,6 +138,7 @@ impl SyncState {
             if envelope.hlc.millis > horizon {
                 rejected.push(Rejected {
                     key: envelope.key.clone(),
+                    hlc: envelope.hlc,
                     reason: "marca de tiempo demasiado adelantada".into(),
                 });
                 continue;
@@ -154,6 +157,7 @@ impl SyncState {
             if let Err(e) = record::validate(&change) {
                 rejected.push(Rejected {
                     key: envelope.key.clone(),
+                    hlc: envelope.hlc,
                     reason: e.to_string(),
                 });
                 continue;
