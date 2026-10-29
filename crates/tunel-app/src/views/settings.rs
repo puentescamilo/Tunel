@@ -125,9 +125,18 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                     ui.label(text.color(Color32::from_rgb(fr, fg, fb)));
                 });
         });
+        // Solo en depuración: `TUNEL_DEV_SCROLL=temas` baja hasta los temas al abrir, para capturas.
+        #[cfg(debug_assertions)]
+        if std::env::var("TUNEL_DEV_SCROLL").as_deref() == Ok("temas") {
+            let id = egui::Id::unique("dev-scroll-temas");
+            if !ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+                ui.ctx().data_mut(|d| d.insert_temp(id, true));
+                ui.scroll_to_cursor(Some(egui::Align::Min));
+            }
+        }
         card(ui, icons::TERMINAL, "Tema de la terminal", |ui| {
             ui.horizontal(|ui| {
-                let help = "Cada host puede tener su propio tema (en su ficha, sección Avanzado).";
+                let help = "Cada host o grupo puede tener su propio tema, que se elige en su ficha.";
                 ui.label(RichText::new(help).color(ui::pal(ui).muted));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     import_theme = ui::secondary_button(ui, &ui::with_icon(icons::DOWNLOAD, "Importar…"))

@@ -205,10 +205,10 @@ cargo packager --release -p tunel-app --formats wix,nsis
 
 cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` en `dist/`.
 
-### Sincronización entre equipos
+## Sincronización entre equipos
 
-Túnel sincroniza la bóveda entre tus equipos a través de tu propio servidor (`tunel-server`,
-más abajo). La bóveda local sigue siendo la principal:
+Túnel sincroniza la bóveda entre tus equipos a través de tu propio servidor, `tunel-server`.
+Más abajo se explica cómo montarlo. La bóveda local sigue siendo la principal:
 
 - **Sin conexión:** funciona igual. Los cambios esperan en una cola cifrada hasta que el
   servidor responde.
@@ -216,40 +216,160 @@ más abajo). La bóveda local sigue siendo la principal:
 - **Qué se sincroniza:** hosts, grupos, identidades, claves, snippets, túneles y claves de
   host conocidas. Los ajustes (fuente, tema general, cursor) son de cada equipo.
 
+![Cuenta y sincronización](docs/screenshots/sincronizacion.png)
+
 En **Ajustes → Cuenta y sincronización**, escribe la dirección del servidor, tu correo y una
-contraseña para la cuenta:
+contraseña para la cuenta (de al menos 12 caracteres):
 
 - **Crear cuenta**, en el primer equipo.
 - **Iniciar sesión**, en los demás. Lo que ya tuvieras en ese equipo se combina con la bóveda
   de la cuenta.
 
+Los cambios se suben unos segundos después de hacerlos y cada equipo descarga lo nuevo cada
+5 minutos, o al pulsar **Sincronizar ahora**.
+
 La contraseña de la cuenta no sale del equipo: de ella se derivan una clave para cifrar y otra
 para identificarse ante el servidor. Si la olvidas, los datos de la cuenta no se pueden
 recuperar, pero la bóveda local de cada equipo sigue intacta.
 
-### Servidor de sincronización
+## Montar el servidor de sincronización con Docker
 
 `tunel-server` guarda las bóvedas cifradas de extremo a extremo: solo recibe datos cifrados
-y nunca la contraseña maestra, así que quien lo administre no puede leer hosts, contraseñas
-ni claves. Para alojarlo con Docker Compose, desde la raíz del repositorio:
+con identificadores opacos, nunca tu contraseña. Quien administre el servidor no puede leer
+hosts, contraseñas ni claves. Es un único binario con una base de datos SQLite.
+
+### Lo que necesitas
+
+- Un equipo o máquina virtual con **Docker** y **Docker Compose 2.24 o posterior**
+  (`docker compose version`). Con 512 MiB de RAM es suficiente. Sirve tanto x86_64 como ARM.
+- Para usarlo fuera de tu red: un **dominio** que apunte a la IP pública del servidor y los
+  puertos **80 y 443** abiertos hacia él (para el certificado de Let's Encrypt).
+
+### 1. Descargar el código
+
+La imagen se compila en el propio servidor, así que sirve para su arquitectura:
 
 ```bash
-docker compose -f crates/tunel-server/compose.yaml up -d
+git clone https://github.com/puentescamilo/Tunel.git
+cd Tunel
 ```
 
-El [`compose.yaml`](crates/tunel-server/compose.yaml) lo arranca sin privilegios, con el
-sistema de archivos de solo lectura, y escuchando solo en `127.0.0.1:8080`.
+### 2. Arrancarlo
 
-- **HTTPS:** el servidor habla HTTP sin cifrar. Publícalo siempre a través de un proxy con
-  HTTPS (Caddy, nginx, Traefik) y limita allí las peticiones por IP.
-- **Cuentas:** solo se puede crear la primera. Para permitir más, añade
-  `TUNEL_REGISTRO_ABIERTO=1`.
-- **Copias de seguridad:** la base de datos SQLite está en el volumen `tunel-datos`. Cópiala
-  para hacer copias de seguridad.
+Elige una de estas tres formas. Todos los comandos se ejecutan desde la raíz del repositorio.
+La primera vez tarda unos minutos en compilar.
 
-El servidor limita los intentos de inicio de sesión por cuenta y las peticiones sin sesión.
-También limita el tamaño de las peticiones y el espacio de cada cuenta (20 000 registros y
-256 MiB).
+**A. Con dominio y HTTPS automático (recomendada).** Caddy obtiene y renueva el certificado,
+redirige HTTP a HTTPS y es lo único que queda expuesto:
+
+```bash
+echo "TUNEL_DOMINIO=tunel.tudominio.com" > crates/tunel-server/.env
+
+docker compose -f crates/tunel-server/compose.yaml \
+  -f crates/tunel-server/compose.https.yaml up -d --build
+```
+
+En Túnel, el servidor es `https://tunel.tudominio.com`.
+
+**B. Detrás de un proxy que ya tienes** (nginx, Traefik, Caddy). El servidor escucha solo en
+`127.0.0.1:8080`; apunta allí tu proxy:
+
+```bash
+docker compose -f crates/tunel-server/compose.yaml up -d --build
+```
+
+Con nginx, por ejemplo:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name tunel.tudominio.com;
+    # ssl_certificate y ssl_certificate_key de tu certificado
+    client_max_body_size 16m;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+```
+
+**C. Solo en tu red local, para probar.** En `crates/tunel-server/compose.yaml`, cambia
+`"127.0.0.1:8080:8080"` por `"8080:8080"` y arranca como en la opción B. En Túnel, el servidor
+es `http://<IP-del-servidor>:8080`. Túnel solo acepta HTTP con direcciones de red local y avisa
+de que la conexión no va cifrada; el contenido sigue cifrado de extremo a extremo, pero no lo
+expongas así a Internet.
+
+### 3. Comprobar que funciona
+
+```bash
+docker compose -f crates/tunel-server/compose.yaml ps   # debe decir (healthy)
+curl https://tunel.tudominio.com/health                  # responde: ok
+```
+
+En la opción B o C, usa `curl http://127.0.0.1:8080/health` en el propio servidor.
+
+### 4. Crear la cuenta
+
+En el primer equipo, abre **Ajustes → Cuenta y sincronización**, escribe la dirección del
+servidor, tu correo y la contraseña de la cuenta, y pulsa **Crear cuenta**. En los demás
+equipos, usa los mismos datos con **Iniciar sesión**.
+
+El servidor solo deja crear **la primera cuenta**, para que nadie más pueda usarlo. Si quieres
+más cuentas (por ejemplo, una por persona), añade a `tunel-server` en `compose.yaml`:
+
+```yaml
+    environment:
+      TUNEL_REGISTRO_ABIERTO: "1"
+```
+
+y vuelve a ejecutar el comando de arranque. Cuando las hayas creado, quítalo de nuevo.
+
+### Mantenimiento
+
+En estos comandos, añade `-f crates/tunel-server/compose.https.yaml` después del primer `-f`
+si usas la opción A.
+
+- **Actualizar** a una versión nueva: `git pull` y el mismo comando de arranque. Los datos se
+  conservan en el volumen `tunel-server_tunel-datos`.
+- **Ver los registros:** `docker compose -f crates/tunel-server/compose.yaml logs -f tunel-server`.
+- **Copia de seguridad:** para el servidor, copia la base de datos del volumen y vuelve a
+  arrancarlo. Deja `tunel.db` en la carpeta actual:
+
+  ```bash
+  docker compose -f crates/tunel-server/compose.yaml stop tunel-server
+  docker run --rm -v tunel-server_tunel-datos:/datos:ro -v "$PWD":/copia \
+    debian:bookworm-slim cp /datos/tunel.db /copia/
+  docker compose -f crates/tunel-server/compose.yaml start tunel-server
+  ```
+
+  El contenido de la copia está cifrado, pero incluye los datos de inicio de sesión de las
+  cuentas: guárdala en un sitio seguro.
+- **Restaurar una copia:** con el servidor parado, copia `tunel.db` de vuelta al volumen:
+
+  ```bash
+  docker compose -f crates/tunel-server/compose.yaml stop tunel-server
+  docker run --rm -v tunel-server_tunel-datos:/datos -v "$PWD":/copia:ro \
+    debian:bookworm-slim sh -c "cp /copia/tunel.db /datos/tunel.db && chown 10001 /datos/tunel.db"
+  docker compose -f crates/tunel-server/compose.yaml start tunel-server
+  ```
+
+  Después, pulsa **Sincronizar ahora** en cada equipo. Si la copia es anterior a la última
+  sincronización, Túnel avisará de que el servidor devuelve datos antiguos: es la protección
+  contra un servidor que retrocede. En ese caso, desvincula el equipo y vuelve a iniciar
+  sesión; su bóveda local se combinará con la de la copia.
+
+### Configuración
+
+| Variable | Para qué sirve | Valor en Docker |
+|---|---|---|
+| `TUNEL_DOMINIO` | Dominio del certificado HTTPS (solo opción A) | — |
+| `TUNEL_REGISTRO_ABIERTO` | `1` permite crear más de una cuenta | sin definir |
+| `TUNEL_DB` | Archivo de la base de datos SQLite | `/datos/tunel.db` |
+| `TUNEL_ESCUCHA` | Dirección y puerto en los que escucha | `0.0.0.0:8080` |
+
+El [`compose.yaml`](crates/tunel-server/compose.yaml) arranca el servidor sin privilegios, con
+el sistema de archivos de solo lectura y un límite de memoria. El servidor limita los intentos
+de inicio de sesión por cuenta y las peticiones sin sesión, el tamaño de las peticiones y el
+espacio de cada cuenta (20 000 registros y 256 MiB).
 
 ## Seguridad
 
@@ -327,8 +447,12 @@ TUNEL_VAULT=/tmp/demo.json TUNEL_DEV_PASSWORD=demo-password TUNEL_DEV_SECTION=se
 
 Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_RUN=<comando>`),
 `TUNEL_DEV_QUICK=<texto>`, `TUNEL_DEV_EDIT=<host>`, `TUNEL_DEV_PROMPT=cambio|nuevo|llave`,
-`TUNEL_DEV_THEME=<id de tema>` y `TUNEL_DEV_CURSOR=bloque|barra|subrayado`. No existen en
-compilaciones `--release`.
+`TUNEL_DEV_THEME=<id de tema>`, `TUNEL_DEV_CURSOR=bloque|barra|subrayado`,
+`TUNEL_DEV_SCROLL=temas` (baja en Ajustes hasta los temas),
+`TUNEL_DEV_SYNC=crear|<servidor>|<correo>|<contraseña>` (o `entrar|…`, une el equipo a una
+cuenta), `TUNEL_DEV_VERSION=<versión>` (simula otra versión instalada para ver el aviso de
+actualización) y `TUNEL_DEV_POSITION=x,y` (posición de la ventana; en un Mac con dos pantallas
+sirve para capturar en la Retina). No existen en compilaciones `--release`.
 
 ## Licencia
 

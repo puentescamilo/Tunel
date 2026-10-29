@@ -1,0 +1,31 @@
+# Servidor con HTTPS automático (certificado de Let's Encrypt gestionado por Caddy).
+# Desde la raíz del repositorio, con el dominio apuntando a este equipo:
+#   TUNEL_DOMINIO=tunel.ejemplo.com docker compose \
+#     -f crates/tunel-server/compose.yaml -f crates/tunel-server/compose.https.yaml up -d
+#
+# tunel-server deja de publicar el puerto 8080: solo Caddy lo alcanza por la red interna.
+services:
+  tunel-server:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on: [tunel-server]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      TUNEL_DOMINIO: ${TUNEL_DOMINIO:?indica el dominio del servidor en TUNEL_DOMINIO}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-datos:/data
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  caddy-datos:
+  caddy-config:
