@@ -332,8 +332,12 @@ compilaciones `--release`.
 
 ## Licencia
 
-Túnel se distribuye bajo la licencia [MIT](LICENSE-MIT) o la [Apache 2.0](LICENSE-APACHE), a
-tu elección.
+Túnel es software libre bajo la [GNU General Public License, versión 3](LICENSE) (solo esa
+versión, `GPL-3.0-only`). Puedes usarlo, estudiarlo, modificarlo y redistribuirlo; si
+distribuyes una versión modificada, debe publicarse con la misma licencia y con su código
+fuente.
+
+Copyright © 2026 Camilo Puentes.
 
 ## Créditos
 

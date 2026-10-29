@@ -10,7 +10,7 @@ fn main() {
         .set_icon("assets/icons/icon.ico")
         .set("ProductName", "Túnel")
         .set("FileDescription", "Túnel")
-        .set("LegalCopyright", "Camilo Puentes · MIT o Apache 2.0");
+        .set("LegalCopyright", "Camilo Puentes · GPLv3");
     if let Err(err) = resource.compile() {
         panic!("no se pudo incrustar el icono de Windows: {err}");
     }
