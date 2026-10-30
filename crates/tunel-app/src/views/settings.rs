@@ -227,7 +227,11 @@ fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
         return account_form(app, ui, &status);
     };
     let (server, email) = (server.to_string(), email.to_string());
-    ui.label(RichText::new(format!("{email} · {server}")).strong());
+    ui.horizontal(|ui| {
+        let shown = ui::masked(&server, app.sync.form.show_server);
+        ui.label(RichText::new(format!("{email} · {shown}")).strong());
+        ui::reveal_button(ui, &mut app.sync.form.show_server);
+    });
     if server.starts_with("http://") {
         ui.label(
             RichText::new("Conexión sin cifrar (HTTP): úsala solo en tu red local.")
@@ -314,12 +318,16 @@ fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
                 .desired_width(f32::INFINITY),
         );
     };
-    field(
-        ui,
-        &mut form.server,
-        "Servidor, por ejemplo https://tunel.tudominio.com",
-        false,
-    );
+    ui.horizontal(|ui| {
+        let eye = 28.0 + ui.spacing().item_spacing.x;
+        ui.add(
+            egui::TextEdit::singleline(&mut form.server)
+                .hint_text("Servidor, por ejemplo https://tunel.tudominio.com")
+                .password(!form.show_server)
+                .desired_width(ui.available_width() - eye),
+        );
+        ui::reveal_button(ui, &mut form.show_server);
+    });
     field(ui, &mut form.email, "Correo de la cuenta", false);
     ui.horizontal(|ui| {
         let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
