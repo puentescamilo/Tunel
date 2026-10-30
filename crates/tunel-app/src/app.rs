@@ -15,8 +15,8 @@ use tunel_ssh::forward::ActiveForward;
 use tunel_term::palette::{self, Theme};
 
 const NOTICE_TTL: Duration = Duration::from_secs(6);
-const DEFAULT_COLS: u16 = 100;
-const DEFAULT_ROWS: u16 = 30;
+pub const DEFAULT_COLS: u16 = 100;
+pub const DEFAULT_ROWS: u16 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -86,6 +86,7 @@ impl Tab {
 
     pub fn icon(&self) -> &'static str {
         match self {
+            Tab::Terminal(t) if t.live.is_some() => crate::ui::icons::BROADCAST,
             Tab::Terminal(_) => crate::ui::icons::TERMINAL,
             Tab::Sftp(_) => crate::ui::icons::FOLDER_OPEN,
         }
@@ -126,6 +127,7 @@ pub struct TunelApp {
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
+    pub live: crate::live::LiveUi,
 }
 
 impl TunelApp {
@@ -183,6 +185,9 @@ impl TunelApp {
                 self.send_to_terminals(&format!("{command}\n"), false);
             }
         }
+        // `TUNEL_DEV_LIVE=compartir` comparte la primera terminal con el primer Team;
+        // `mirar` abre la primera sesión en vivo de otra persona y pide el control.
+        self.live.dev = std::env::var("TUNEL_DEV_LIVE").ok();
         // `TUNEL_DEV_TEAM=1` despliega el primer Team en Ajustes con sus miembros.
         if std::env::var("TUNEL_DEV_TEAM").as_deref() == Ok("1")
             && let Some(team) = self
@@ -281,6 +286,7 @@ impl TunelApp {
             notices: Vec::new(),
             sync: Default::default(),
             updates: Default::default(),
+            live: Default::default(),
         })
     }
 
@@ -339,6 +345,7 @@ impl TunelApp {
         self.forwards.clear();
         self.editor = None;
         self.sync = Default::default();
+        self.live = Default::default();
         self.vault = None;
     }
 
@@ -386,6 +393,10 @@ impl TunelApp {
             Ok(id) => self.push_tab(Tab::Sftp(Box::new(SftpTab::new(id, title)))),
             Err(e) => self.notify(format!("No se pudo abrir SFTP: {e:#}")),
         }
+    }
+
+    pub fn open_tab(&mut self, tab: Tab) {
+        self.push_tab(tab);
     }
 
     fn push_tab(&mut self, tab: Tab) {
@@ -455,6 +466,7 @@ impl TunelApp {
                 AppEvent::TeamDone { round, result } => {
                     crate::sync::teams::on_done(self, round, result)
                 }
+                AppEvent::Live(event) => crate::live::on_event(self, event),
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }
         }
@@ -471,6 +483,7 @@ impl TunelApp {
                 session.pump();
             }
         }
+        crate::live::tick(self);
         self.notices.retain(|(at, _)| at.elapsed() < NOTICE_TTL);
     }
 
@@ -503,8 +516,14 @@ impl TunelApp {
         let settings = self.data().map(|d| d.settings.clone()).unwrap_or_default();
         let mut close = false;
         let mut reconnect = None;
+        let mut live_action = None;
+        let mut tab_key = 0;
         match &mut self.tabs[index] {
             Tab::Terminal(session) => {
+                tab_key = session.key;
+                if session.live.is_some() {
+                    live_action = views::live::bar(ui, session);
+                }
                 if let Some(message) = status_message(&session.status) {
                     let failed = matches!(session.status, SessionStatus::Failed(_));
                     let action =
@@ -521,6 +540,12 @@ impl TunelApp {
                 crate::terminal_view::show(ui, session, &theme, &settings);
             }
             Tab::Sftp(_) => views::sftp::show(self, ui, index),
+        }
+        match live_action {
+            Some(views::live::BarAction::Grant(conn)) => crate::live::grant(self, tab_key, conn),
+            Some(views::live::BarAction::Confirm) => crate::live::confirm_grant(self, tab_key),
+            Some(views::live::BarAction::Stop) => crate::live::stop_sharing(self, tab_key),
+            None => {}
         }
         if close {
             self.close_tab(index);
@@ -565,6 +590,11 @@ impl eframe::App for TunelApp {
         }
         self.process_background();
         let wait = self.updates.wait();
+        let wait = if crate::live::active(self) {
+            wait.min(crate::live::POLL)
+        } else {
+            wait
+        };
         ctx.request_repaint_after(self.sync.wait().map_or(wait, |w| w.min(wait)));
         self.handle_shortcuts(&ctx);
 

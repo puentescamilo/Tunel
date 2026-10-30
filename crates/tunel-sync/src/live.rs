@@ -588,6 +588,14 @@ pub struct LiveViewer {
 }
 
 impl LiveViewer {
+    /// Un `LiveViewer` sin sesión detrás, para las pruebas de la aplicación.
+    #[doc(hidden)]
+    pub fn detached() -> Self {
+        let (commands, _) = mpsc::unbounded_channel();
+        let (_, updates) = mpsc::unbounded_channel();
+        Self { commands, updates }
+    }
+
     pub fn request_control(&self) {
         let _ = self.commands.send(ViewerCommand::RequestControl);
     }

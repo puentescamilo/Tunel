@@ -407,6 +407,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             }));
         }
     });
+    crate::views::live::strip(app, ui);
     ui::search_box(
         ui,
         &mut app.search,
