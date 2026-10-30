@@ -36,7 +36,8 @@ pub struct MemberView {
     pub email: String,
     pub role: TeamRole,
     pub pending: bool,
-    /// Huella de la clave que da el servidor.
+    /// Clave que da el servidor, y su huella.
+    pub public_key: PublicKey,
     pub fingerprint: String,
     pub key: KeyStatus,
 }
@@ -421,6 +422,7 @@ pub async fn members(
     let views = members
         .into_iter()
         .map(|m| MemberView {
+            public_key: m.public_key,
             fingerprint: m.public_key.fingerprint(),
             key: key_status(local, &m.email, m.public_key),
             email: m.email,

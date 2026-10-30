@@ -7,4 +7,5 @@ pub mod known_hosts;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;
+pub mod teams;
 pub mod themes;

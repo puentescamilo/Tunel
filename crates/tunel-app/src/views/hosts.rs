@@ -107,7 +107,32 @@ fn host_menu(ui: &mut egui::Ui, host: &Host, actions: &mut Vec<Action>) {
     }
 }
 
-fn host_card(ui: &mut egui::Ui, data: &VaultData, host: &Host, actions: &mut Vec<Action>) {
+/// Nombre del Team de un elemento compartido; `None` si es personal.
+fn team_name<'a>(teams: &'a [(String, String)], team: &Option<String>) -> Option<&'a str> {
+    let team = team.as_deref()?;
+    Some(
+        teams
+            .iter()
+            .find(|(id, _)| id == team)
+            .map_or("Team", |(_, name)| name.as_str()),
+    )
+}
+
+/// Antepone el Team al texto secundario de una tarjeta.
+fn with_team(team: Option<&str>, text: String) -> String {
+    match team {
+        Some(team) => format!("{team} · {text}"),
+        None => text,
+    }
+}
+
+fn host_card(
+    ui: &mut egui::Ui,
+    data: &VaultData,
+    host: &Host,
+    team: Option<&str>,
+    actions: &mut Vec<Action>,
+) {
     let p = ui::pal(ui);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), CARD_HEIGHT), Sense::click());
@@ -150,7 +175,7 @@ fn host_card(ui: &mut egui::Ui, data: &VaultData, host: &Host, actions: &mut Vec
         .galley(egui::pos2(text_left, rect.top() + 14.0), title, p.text);
     let sub = elided(
         ui,
-        &subtitle(data, host),
+        &with_team(team, subtitle(data, host)),
         FontId::proportional(12.0),
         p.muted,
         text_width,
@@ -207,7 +232,13 @@ fn host_card(ui: &mut egui::Ui, data: &VaultData, host: &Host, actions: &mut Vec
         .context_menu(|ui| host_menu(ui, host, actions));
 }
 
-fn group_card(ui: &mut egui::Ui, group: &Group, count: usize, actions: &mut Vec<Action>) {
+fn group_card(
+    ui: &mut egui::Ui,
+    group: &Group,
+    count: usize,
+    team: Option<&str>,
+    actions: &mut Vec<Action>,
+) {
     let p = ui::pal(ui);
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), GROUP_HEIGHT),
@@ -241,11 +272,14 @@ fn group_card(ui: &mut egui::Ui, group: &Group, count: usize, actions: &mut Vec<
     );
     ui.painter()
         .galley(egui::pos2(text_left, rect.top() + 12.0), name, p.text);
-    let hosts = if count == 1 {
-        "1 host".to_string()
-    } else {
-        format!("{count} hosts")
-    };
+    let hosts = with_team(
+        team,
+        if count == 1 {
+            "1 host".to_string()
+        } else {
+            format!("{count} hosts")
+        },
+    );
     ui.painter().text(
         egui::pos2(text_left, rect.top() + 32.0),
         Align2::LEFT_TOP,
@@ -353,6 +387,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
     };
     let mut actions = Vec::new();
     let mut navigate = None;
+    let teams = crate::sync::teams::names(app);
     if app.host_group.is_some_and(|g| data.group(g).is_none()) {
         app.host_group = None;
     }
@@ -364,6 +399,10 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         if ui::secondary_button(ui, &ui::with_icon(icons::FOLDER, "Grupo")).clicked() {
             app.editor = Some(Editor::Group(Group {
                 parent: app.host_group,
+                team: app
+                    .host_group
+                    .and_then(|g| data.group(g))
+                    .and_then(|g| g.team.clone()),
                 ..Group::new("Nuevo grupo")
             }));
         }
@@ -402,7 +441,8 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                             .iter()
                             .filter(|h| h.group == Some(group.id))
                             .count();
-                        group_card(ui, group, count, &mut actions);
+                        let team = team_name(&teams, &group.team);
+                        group_card(ui, group, count, team, &mut actions);
                     });
                     ui.add_space(8.0);
                 }
@@ -411,7 +451,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             if !hosts.is_empty() {
                 ui::section_label(ui, if searching { "Resultados" } else { "Hosts" });
                 grid(ui, &hosts, CARD_HEIGHT, |ui, host| {
-                    host_card(ui, &data, host, &mut actions)
+                    host_card(ui, &data, host, team_name(&teams, &host.team), &mut actions)
                 });
             } else if searching {
                 ui::empty_state(
@@ -431,9 +471,14 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             Action::Connect(id) => app.open_host(id),
             Action::Sftp(id) => app.open_sftp(id),
             Action::Edit(host) => app.editor = Some(Editor::host(host)),
+            // Un host nuevo dentro de un grupo compartido se comparte con el mismo Team.
             Action::NewHost => {
                 app.editor = Some(Editor::host(Host {
                     group: app.host_group,
+                    team: app
+                        .host_group
+                        .and_then(|g| data.group(g))
+                        .and_then(|g| g.team.clone()),
                     ..Host::new("", "")
                 }))
             }

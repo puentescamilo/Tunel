@@ -102,6 +102,9 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.set_max_width(760.0);
         card(ui, icons::REFRESH, "Cuenta y sincronización", |ui| sync_card(app, ui));
+        if app.sync.account().is_some() {
+            card(ui, icons::USERS, "Teams", |ui| super::teams::card(app, ui));
+        }
         card(ui, icons::PALETTE, "Apariencia", |ui| {
             setting_row(ui, "Interfaz", "En automático sigue al fondo del tema de la terminal", |ui| {
                 themes::ui_mode_selector(ui, &mut settings.ui_theme);

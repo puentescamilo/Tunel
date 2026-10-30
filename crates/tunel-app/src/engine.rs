@@ -62,6 +62,11 @@ pub enum AppEvent {
         round: u64,
         result: Result<Box<SyncLocal>, SyncError>,
     },
+    /// Terminó la operación de Teams de la tarea `round`.
+    TeamDone {
+        round: u64,
+        result: Result<Box<crate::sync::teams::TeamDone>, SyncError>,
+    },
 }
 
 /// Unir el equipo a una cuenta nueva o a una que ya existe.
@@ -396,6 +401,23 @@ impl Engine {
         self.spawn(async move {
             let result = tunel_sync::sync_once(&local, &data).await.map(Box::new);
             let _ = events.send(AppEvent::SyncFinished { round, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Lanza una operación de Teams sobre una copia de la configuración y la bóveda.
+    pub fn team_op(
+        &self,
+        round: u64,
+        op: crate::sync::teams::TeamOp,
+        local: SyncLocal,
+        data: VaultData,
+    ) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result = crate::sync::teams::run(op, local, data).await.map(Box::new);
+            let _ = events.send(AppEvent::TeamDone { round, result });
             ctx.request_repaint();
         });
     }

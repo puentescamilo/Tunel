@@ -3,7 +3,7 @@
 mod host;
 
 use crate::app::TunelApp;
-use host::{HostForm, host_form, inherited_theme, parse_port};
+use host::{HostForm, host_form, inherited_theme, parse_port, team_picker};
 use tunel_core::*;
 
 const MODAL_WIDTH: f32 = 520.0;
@@ -140,6 +140,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     let Some(data) = app.data().cloned() else {
         return;
     };
+    let teams = crate::sync::teams::names(app);
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
@@ -184,10 +185,14 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
             egui::ScrollArea::vertical()
                 .max_height(ctx.content_rect().height() * 0.7)
                 .show(ui, |ui| match editor {
-                    Editor::Host(form) => host_form(ui, form, &data),
+                    Editor::Host(form) => host_form(ui, form, &data, &teams),
                     Editor::Group(group) => {
                         ui.label("Nombre");
                         ui.text_edit_singleline(&mut group.name);
+                        if !teams.is_empty() || group.team.is_some() {
+                            ui.label("Compartir en (con sus subgrupos y hosts)");
+                            team_picker(ui, "team-grupo", &mut group.team, &teams);
+                        }
                         ui.label("Identidad por defecto para sus hosts");
                         let identities: Vec<(IdentityId, String)> = data
                             .identities
@@ -306,7 +311,23 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         Some(Editor::Host(form)) => form
             .build(&data)
             .inspect_err(|e| form.error = Some(e.clone())),
-        Some(Editor::Group(group)) => Ok(data.with_group(group.clone())),
+        Some(Editor::Group(group)) => {
+            let before = data.group(group.id).and_then(|g| g.team.clone());
+            let saved = data.with_group(Group {
+                team: before.clone(),
+                ..group.clone()
+            });
+            Ok(if group.team == before {
+                saved
+            } else {
+                tunel_core::share::move_group(
+                    &saved,
+                    group.id,
+                    group.team.as_deref(),
+                    tunel_core::share::Credentials::Copy,
+                )
+            })
+        }
         Some(Editor::Identity(identity)) => Ok(data.with_identity(identity.clone())),
         Some(Editor::Key(key)) => Ok(data.with_key(key.clone())),
         Some(Editor::Snippet(snippet)) => Ok(data.with_snippet(snippet.clone())),
