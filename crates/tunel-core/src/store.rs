@@ -414,6 +414,9 @@ mod tests {
             token: None,
             state: crate::sync::SyncState::new(uuid::Uuid::from_u128(1)),
             keypair: None,
+            teams: Vec::new(),
+            invitations: Vec::new(),
+            contacts: Default::default(),
         }
     }
 

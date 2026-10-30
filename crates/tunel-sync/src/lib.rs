@@ -8,12 +8,14 @@ pub mod account;
 pub mod api;
 mod keypair;
 pub mod run;
+mod session;
+pub mod teams;
 
 pub use account::{create_account, sign_in, sign_out};
 pub use api::{ServerUrl, check_server_url};
-pub use run::{SyncOutcome, sync_once};
+pub use run::{SyncOutcome, TeamProblem, sync_once};
 
-use tunel_core::sync::{ManifestError, SyncCryptoError};
+use tunel_core::sync::{KeyProblem, ManifestError, SyncCryptoError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
@@ -55,6 +57,24 @@ pub enum SyncError {
     Timeout,
     #[error("error interno: {0}")]
     Internal(String),
+    #[error("no encontrado: {0}")]
+    NotFound(String),
+    #[error("la cuenta todavía no tiene claves para Teams; sincroniza primero")]
+    NoKeypair,
+    #[error(transparent)]
+    Key(#[from] KeyProblem),
+    #[error(
+        "hay registros del Team que esta versión de Túnel no reconoce; actualízala antes de renovar la clave"
+    )]
+    RejectedRecords,
+    #[error("la clave del Team cambió; se actualizará en la próxima sincronización")]
+    StaleKey,
+    #[error("el servidor devolvió una clave del Team anterior a la que ya se tenía")]
+    KeyRollback,
+    #[error("alguien salió del Team y un administrador tiene que renovar la clave")]
+    RekeyNeeded,
+    #[error("el nombre del Team no puede estar vacío ni pasar de 60 caracteres")]
+    InvalidName,
 }
 
 impl SyncError {
@@ -67,6 +87,7 @@ impl SyncError {
                 | Self::TooManyConflicts
                 | Self::TooManyAttempts
                 | Self::Timeout
+                | Self::StaleKey
         ) || matches!(self, Self::Server { status, .. } if *status >= 500)
     }
 }

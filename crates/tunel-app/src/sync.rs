@@ -82,6 +82,8 @@ pub struct SyncController {
     next: Option<Instant>,
     backoff: Duration,
     pub form: AccountForm,
+    /// Problemas de Teams de la última ronda; solo se avisa cuando cambian.
+    team_problems: Vec<tunel_sync::TeamProblem>,
 }
 
 impl Default for SyncController {
@@ -92,6 +94,7 @@ impl Default for SyncController {
             status: SyncStatus::Off,
             next: None,
             backoff: FIRST_BACKOFF,
+            team_problems: Vec::new(),
             form: AccountForm::default(),
         }
     }
@@ -109,7 +112,7 @@ impl SyncController {
     }
 
     pub fn pending(&self) -> usize {
-        self.local.as_ref().map_or(0, |l| l.state.pending.len())
+        self.local.as_ref().map_or(0, SyncLocal::pending)
     }
 
     pub fn busy(&self) -> bool {
@@ -165,8 +168,8 @@ fn rebase(
         settings: current.settings.clone(),
         ..record::apply(result, &edits)?
     };
-    let state = local.state.record_local(result, &merged, now_millis())?;
-    Ok((merged, SyncLocal { state, ..local }))
+    let local = local.record_local(result, &merged, now_millis())?;
+    Ok((merged, local))
 }
 
 /// Carga la configuración al desbloquear la bóveda y programa una ronda.
@@ -199,14 +202,25 @@ fn save(app: &mut TunelApp) {
     }
 }
 
+/// Cambió la cola de algún espacio: hay algo nuevo que guardar y subir.
+fn queue_changed(old: &SyncLocal, new: &SyncLocal) -> bool {
+    old.state != new.state
+        || old.teams.len() != new.teams.len()
+        || old
+            .teams
+            .iter()
+            .zip(&new.teams)
+            .any(|(a, b)| a.state != b.state)
+}
+
 /// Anota en la cola un cambio local recién guardado y programa la subida.
 pub fn after_commit(app: &mut TunelApp, old: &VaultData, new: &VaultData) {
     let Some(local) = app.sync.local.as_mut() else {
         return;
     };
-    match local.state.record_local(old, new, now_millis()) {
-        Ok(state) if state != local.state => {
-            local.state = state;
+    match local.record_local(old, new, now_millis()) {
+        Ok(next) if queue_changed(local, &next) => {
+            *local = next;
             save(app);
             app.sync.schedule_in(DEBOUNCE);
         }
@@ -301,7 +315,7 @@ fn apply_outcome(app: &mut TunelApp, snapshot: &VaultData, outcome: SyncOutcome)
             true,
         );
     }
-    let has_pending = !local.state.pending.is_empty();
+    let has_pending = local.pending() > 0;
     app.sync.local = Some(local);
     save(app);
     if !outcome.rejected.is_empty() {
@@ -309,6 +323,12 @@ fn apply_outcome(app: &mut TunelApp, snapshot: &VaultData, outcome: SyncOutcome)
             "Sincronización: se apartaron {} elementos que esta versión de Túnel no reconoce",
             outcome.rejected.len()
         ));
+    }
+    if outcome.team_problems != app.sync.team_problems {
+        if let Some(problem) = outcome.team_problems.first() {
+            app.notify(format!("Teams: {}", problem.message));
+        }
+        app.sync.team_problems = outcome.team_problems;
     }
     app.sync.status = SyncStatus::Idle {
         last: Some(SystemTime::now()),
@@ -373,8 +393,8 @@ pub fn on_linked(app: &mut TunelApp, round: u64, result: Result<Box<SyncLocal>, 
         return;
     };
     // Lo editado mientras se derivaban las claves también tiene que subir.
-    match local.state.record_local(&snapshot, &current, now_millis()) {
-        Ok(state) => app.sync.local = Some(SyncLocal { state, ..local }),
+    match local.record_local(&snapshot, &current, now_millis()) {
+        Ok(next) => app.sync.local = Some(next),
         Err(e) => {
             app.sync.status = SyncStatus::Off;
             return app.notify(format!("No se pudo preparar la sincronización: {e}"));
@@ -422,6 +442,9 @@ mod tests {
             token: None,
             state: SyncState::adopt(Uuid::from_u128(1), data, 1).unwrap(),
             keypair: None,
+            teams: Vec::new(),
+            invitations: Vec::new(),
+            contacts: Default::default(),
         }
     }
 

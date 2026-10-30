@@ -673,10 +673,10 @@ async fn after_removing_a_member_nothing_is_written_until_the_key_is_renewed() {
         ..VaultData::default()
     };
     let (status, _) = push_team(&app, &ana, &key, 0, &data, &Manifest::empty()).await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::LOCKED);
     assert_eq!(
         invite(&app, &ana, "carol@ejemplo.com", &key, 0).await,
-        StatusCode::CONFLICT
+        StatusCode::LOCKED
     );
 }
 

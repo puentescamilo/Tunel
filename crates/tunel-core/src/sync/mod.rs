@@ -14,12 +14,13 @@ pub mod local;
 pub mod manifest;
 pub mod protocol;
 pub mod record;
+pub mod space;
 pub mod state;
 pub mod team;
 
 pub use hlc::Hlc;
 pub use keys::{AccountKeys, RecordEnvelope, SealedBlob, SealedRecord, SyncCryptoError, VaultKey};
-pub use local::SyncLocal;
+pub use local::{Contact, Invitation, KeyProblem, SyncLocal, TeamLocal};
 pub use manifest::{Manifest, ManifestError};
 pub use record::{Change, RecordKey, RecordKind};
 pub use state::SyncState;
