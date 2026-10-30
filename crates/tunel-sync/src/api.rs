@@ -64,6 +64,12 @@ pub fn check_server_url(text: &str) -> Result<ServerUrl, SyncError> {
     })
 }
 
+/// Los errores de red se muestran en la interfaz: sin la dirección del servidor, que la
+/// interfaz oculta como si fuera una contraseña.
+fn network(error: reqwest::Error) -> SyncError {
+    SyncError::Network(error.without_url())
+}
+
 pub struct Api {
     client: Client,
     base: String,
@@ -79,7 +85,7 @@ impl Api {
             .https_only(!server.plaintext)
             .user_agent(concat!("Tunel/", env!("CARGO_PKG_VERSION")))
             .build()
-            .map_err(SyncError::Network)?;
+            .map_err(network)?;
         Ok(Self {
             client,
             base: server.base.clone(),
@@ -91,7 +97,7 @@ impl Api {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, SyncError> {
-        let response = request.send().await.map_err(SyncError::Network)?;
+        let response = request.send().await.map_err(network)?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
@@ -121,11 +127,7 @@ impl Api {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<T, SyncError> {
-        self.execute(request)
-            .await?
-            .json()
-            .await
-            .map_err(SyncError::Network)
+        self.execute(request).await?.json().await.map_err(network)
     }
 
     fn post<B: Serialize>(&self, path: &str, body: &B) -> reqwest::RequestBuilder {

@@ -159,6 +159,29 @@ pub fn icon_button_colored(
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// Botón de ojo para mostrar u ocultar un dato; cambia `revealed` al pulsarlo.
+pub fn reveal_button(ui: &mut Ui, revealed: &mut bool) -> Response {
+    let (icon, tooltip) = if *revealed {
+        (super::icons::EYE_SLASH, "Ocultar")
+    } else {
+        (super::icons::EYE, "Mostrar")
+    };
+    let response = icon_button(ui, icon, tooltip);
+    if response.clicked() {
+        *revealed = !*revealed;
+    }
+    response
+}
+
+/// Un dato que se muestra como puntos hasta que se pulsa el ojo.
+pub fn masked(text: &str, revealed: bool) -> String {
+    if revealed {
+        text.to_string()
+    } else {
+        "••••••••••••".to_string()
+    }
+}
+
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     let p = pal(ui);
     let button = egui::Button::new(RichText::new(text).color(p.accent_text).strong())

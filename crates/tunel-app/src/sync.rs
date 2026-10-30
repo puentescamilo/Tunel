@@ -53,6 +53,8 @@ pub enum SyncStatus {
 #[derive(Default)]
 pub struct AccountForm {
     pub server: String,
+    /// La dirección del servidor se ve en claro; si no, como una contraseña.
+    pub show_server: bool,
     pub email: String,
     pub password: String,
     pub confirm: String,
