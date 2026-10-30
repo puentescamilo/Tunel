@@ -1,6 +1,7 @@
 //! Crear una cuenta, unir un equipo a una existente y desvincularlo.
 
 use crate::api::{Api, ServerUrl};
+use crate::keypair;
 use crate::{SyncError, now_millis};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -66,6 +67,7 @@ pub async fn create_account(
     .await?;
     let auth = keys.auth_token();
     let session = api.login(&email, &auth).await?;
+    let keypair = keypair::try_fetch_or_create(&api, &session.token, &vault_key).await;
     let device = Uuid::new_v4();
     Ok(SyncLocal {
         server: server.base.clone(),
@@ -74,6 +76,7 @@ pub async fn create_account(
         vault_key,
         token: Some(Zeroizing::new(session.token)),
         state: SyncState::adopt(device, data, now_millis())?,
+        keypair,
     })
 }
 
@@ -100,6 +103,7 @@ pub async fn sign_in(
     // Si la contraseña no es la de la cuenta, el servidor ya habría respondido 401; si
     // aun así no se puede abrir la clave, los datos del servidor están manipulados.
     let vault_key = VaultKey::unwrap(&session.vault_key, &keys)?;
+    let keypair = keypair::try_fetch_or_create(&api, &session.token, &vault_key).await;
     let device = Uuid::new_v4();
     Ok(SyncLocal {
         server: server.base.clone(),
@@ -108,6 +112,7 @@ pub async fn sign_in(
         vault_key,
         token: Some(Zeroizing::new(session.token)),
         state: SyncState::adopt(device, data, now_millis())?,
+        keypair,
     })
 }
 

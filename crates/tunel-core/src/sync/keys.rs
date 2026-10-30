@@ -50,7 +50,7 @@ pub enum SyncCryptoError {
     WeakKdf,
 }
 
-fn expand(root: &[u8], info: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
+pub(super) fn expand(root: &[u8], info: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
     let hkdf = hkdf::Hkdf::<Sha256>::new(None, root);
     let mut out = Zeroizing::new([0u8; KEY_LEN]);
     hkdf.expand(info, out.as_mut())
@@ -170,14 +170,14 @@ pub struct SealedBlob {
 }
 
 impl SealedBlob {
-    fn from_sealed(sealed: &Sealed) -> Self {
+    pub(super) fn from_sealed(sealed: &Sealed) -> Self {
         Self {
             nonce: B64.encode(sealed.nonce),
             ciphertext: B64.encode(&sealed.ciphertext),
         }
     }
 
-    fn to_sealed(&self) -> Result<Sealed, SyncCryptoError> {
+    pub(super) fn to_sealed(&self) -> Result<Sealed, SyncCryptoError> {
         if self.ciphertext.len() > MAX_RECORD_CIPHERTEXT || self.nonce.len() > NONCE_LEN * 2 {
             return Err(SyncCryptoError::Corrupt);
         }
@@ -231,6 +231,14 @@ fn pad(mut plain: Zeroizing<Vec<u8>>) -> Zeroizing<Vec<u8>> {
 impl VaultKey {
     pub fn generate() -> Self {
         Self(MasterKey::random())
+    }
+
+    pub(super) fn from_bytes(bytes: Zeroizing<[u8; KEY_LEN]>) -> Self {
+        Self(MasterKey::from_bytes(bytes))
+    }
+
+    pub(super) fn as_bytes(&self) -> &[u8; KEY_LEN] {
+        self.0.as_bytes()
     }
 
     /// Cifra la clave con la de la cuenta para guardarla en el servidor.

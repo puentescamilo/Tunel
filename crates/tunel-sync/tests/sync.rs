@@ -243,3 +243,21 @@ async fn a_server_that_hides_records_is_detected() {
     let error = sync_once(&local, &VaultData::default()).await.unwrap_err();
     assert!(matches!(error, SyncError::Integrity(_)), "{error:?}");
 }
+
+#[tokio::test]
+async fn every_device_of_the_account_shares_one_key_pair() {
+    let server = start_server().await;
+    let laptop = first_device(&server, hosts(&["web"])).await;
+    let desktop = another_device(&server, VaultData::default()).await;
+    let laptop_key = laptop.local.keypair.as_ref().unwrap().public();
+    assert_eq!(desktop.local.keypair.unwrap().public(), laptop_key);
+}
+
+#[tokio::test]
+async fn a_device_linked_before_teams_gets_the_key_pair_on_its_next_sync() {
+    let server = start_server().await;
+    let mut laptop = first_device(&server, hosts(&["web"])).await;
+    let public = laptop.local.keypair.take().unwrap().public();
+    let outcome = laptop.sync().await;
+    assert_eq!(outcome.local.keypair.unwrap().public(), public);
+}

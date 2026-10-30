@@ -421,6 +421,7 @@ mod tests {
             vault_key: VaultKey::generate(),
             token: None,
             state: SyncState::adopt(Uuid::from_u128(1), data, 1).unwrap(),
+            keypair: None,
         }
     }
 

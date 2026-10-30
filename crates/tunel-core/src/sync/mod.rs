@@ -15,6 +15,7 @@ pub mod manifest;
 pub mod protocol;
 pub mod record;
 pub mod state;
+pub mod team;
 
 pub use hlc::Hlc;
 pub use keys::{AccountKeys, RecordEnvelope, SealedBlob, SealedRecord, SyncCryptoError, VaultKey};
@@ -22,3 +23,4 @@ pub use local::SyncLocal;
 pub use manifest::{Manifest, ManifestError};
 pub use record::{Change, RecordKey, RecordKind};
 pub use state::SyncState;
+pub use team::{AccountKeypair, PublicKey, TeamKeyContext};

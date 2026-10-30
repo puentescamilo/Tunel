@@ -121,6 +121,7 @@ fn push_body(
     let outgoing = state.outgoing(data).unwrap();
     let manifest = base.with_pushed(outgoing.iter().map(|e| (vault.record_id(&e.key), e.hlc)));
     let request = PushRequest {
+        epoch: None,
         base_version: base.version,
         manifest: ManifestBlob {
             version: manifest.version,
@@ -236,6 +237,7 @@ async fn pull_is_paged_and_returns_only_newer_changes() {
     for chunk in outgoing.chunks(MAX_PUSH_RECORDS) {
         let manifest = base.with_pushed(chunk.iter().map(|e| (vault.record_id(&e.key), e.hlc)));
         let request = PushRequest {
+            epoch: None,
             base_version: base.version,
             manifest: ManifestBlob {
                 version: manifest.version,

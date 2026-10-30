@@ -413,6 +413,7 @@ mod tests {
             vault_key: crate::sync::VaultKey::generate(),
             token: None,
             state: crate::sync::SyncState::new(uuid::Uuid::from_u128(1)),
+            keypair: None,
         }
     }
 
