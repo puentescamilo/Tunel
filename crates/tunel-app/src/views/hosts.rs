@@ -136,7 +136,13 @@ fn host_card(
     let p = ui::pal(ui);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), CARD_HEIGHT), Sense::click());
-    let hovered = response.hovered() || response.context_menu_opened();
+    let more_id = response.id.with("mas");
+    let menu_open = egui::Popup::is_id_open(ui.ctx(), more_id.with("popup"));
+    // El rectángulo y no `hovered` ni `contains_pointer`: los botones de conectar y «más»
+    // se dibujan encima y, con esas dos, la tarjeta dejaría de estar activa al pasar
+    // sobre ellos; los botones desaparecerían, volvería a estarlo y parpadearía sin parar.
+    // Mientras su menú está abierto también sigue activa, aunque el menú tape el puntero.
+    let hovered = ui.rect_contains_pointer(rect) || response.context_menu_opened() || menu_open;
     let painter = ui.painter();
     painter.rect_filled(
         rect,
@@ -193,7 +199,7 @@ fn host_card(
             Vec2::splat(28.0),
         );
         let play_r = ui.interact(play, response.id.with("conectar"), Sense::click());
-        let more_r = ui.interact(more, response.id.with("mas"), Sense::click());
+        let more_r = ui.interact(more, more_id, Sense::click());
         let (play_bg, play_fg) = if play_r.hovered() {
             (p.accent, p.accent_text)
         } else {
@@ -208,7 +214,7 @@ fn host_card(
             ui::icon_font(14.0),
             play_fg,
         );
-        if more_r.hovered() {
+        if more_r.hovered() || menu_open {
             ui.painter()
                 .rect_filled(more, CornerRadius::same(6), p.border);
         }

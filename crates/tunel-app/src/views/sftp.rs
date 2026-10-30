@@ -216,7 +216,9 @@ fn file_row(
     let p = ui::pal(ui);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_HEIGHT), Sense::click());
-    let hovered = response.hovered() || response.context_menu_opened();
+    // El rectángulo y no `hovered`: el botón de acción se dibuja encima y con `hovered` la
+    // fila dejaría de estar activa al pasar sobre él, y parpadearía (ver `hosts::host_card`).
+    let hovered = ui.rect_contains_pointer(rect) || response.context_menu_opened();
     if hovered {
         ui.painter()
             .rect_filled(rect, CornerRadius::same(6), p.surface_hover);
