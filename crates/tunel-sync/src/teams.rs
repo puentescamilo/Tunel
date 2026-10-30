@@ -401,7 +401,7 @@ pub async fn set_role(
     Ok(finish(session, local.clone()))
 }
 
-fn key_status(local: &SyncLocal, email: &str, key: PublicKey) -> KeyStatus {
+pub(crate) fn key_status(local: &SyncLocal, email: &str, key: PublicKey) -> KeyStatus {
     let own = normalize_email(email) == normalize_email(&local.email);
     match local.check_key(email, key) {
         Ok(()) if own => KeyStatus::Own,

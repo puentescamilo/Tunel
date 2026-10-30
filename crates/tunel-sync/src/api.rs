@@ -2,10 +2,12 @@
 
 use crate::SyncError;
 use reqwest::{Client, StatusCode, Url};
+use reqwest_websocket::{Upgrade, WebSocket};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::net::IpAddr;
 use std::time::Duration;
+use tunel_core::sync::live::JoinNonce;
 use tunel_core::sync::protocol::*;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -72,6 +74,10 @@ fn network(error: reqwest::Error) -> SyncError {
 
 pub struct Api {
     client: Client,
+    /// Para los WebSocket de las sesiones compartidas: solo HTTP/1.1, que es donde existe
+    /// la actualización a WebSocket, y sin tiempo total, porque la conexión dura lo que la
+    /// sesión.
+    live: Client,
     base: String,
 }
 
@@ -86,8 +92,17 @@ impl Api {
             .user_agent(concat!("Tunel/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(network)?;
+        let live = Client::builder()
+            .http1_only()
+            .connect_timeout(TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .https_only(!server.plaintext)
+            .user_agent(concat!("Tunel/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(network)?;
         Ok(Self {
             client,
+            live,
             base: server.base.clone(),
         })
     }
@@ -98,29 +113,10 @@ impl Api {
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, SyncError> {
         let response = request.send().await.map_err(network)?;
-        let status = response.status();
-        if status.is_success() {
+        if response.status().is_success() {
             return Ok(response);
         }
-        let message = response
-            .json::<ErrorResponse>()
-            .await
-            .map(|e| e.error.chars().take(MAX_ERROR_MESSAGE).collect())
-            .unwrap_or_default();
-        Err(match status {
-            StatusCode::UNAUTHORIZED => SyncError::Unauthorized,
-            StatusCode::CONFLICT => SyncError::Conflict(message),
-            StatusCode::TOO_MANY_REQUESTS => SyncError::TooManyAttempts,
-            StatusCode::FORBIDDEN => SyncError::Forbidden(message),
-            StatusCode::SERVICE_UNAVAILABLE => SyncError::Busy,
-            StatusCode::INSUFFICIENT_STORAGE => SyncError::QuotaExceeded,
-            StatusCode::NOT_FOUND => SyncError::NotFound(message),
-            StatusCode::LOCKED => SyncError::RekeyNeeded,
-            other => SyncError::Server {
-                status: other.as_u16(),
-                message,
-            },
-        })
+        Err(error_from(response).await)
     }
 
     async fn send<T: DeserializeOwned>(
@@ -325,6 +321,122 @@ impl Api {
         let path = format!("/v1/teams/{}/rotate", segment(team));
         self.send(self.post(&path, request).bearer_auth(token))
             .await
+    }
+
+    fn live_path(team: &str) -> String {
+        format!("/v1/teams/{}/live", segment(team))
+    }
+
+    pub async fn live_sessions(
+        &self,
+        token: &str,
+        team: &str,
+    ) -> Result<Vec<LiveSummary>, SyncError> {
+        self.send(self.get(token, &Self::live_path(team))).await
+    }
+
+    pub async fn create_live(
+        &self,
+        token: &str,
+        team: &str,
+        request: &CreateLiveRequest,
+    ) -> Result<(), SyncError> {
+        let request = self
+            .post(&Self::live_path(team), request)
+            .bearer_auth(token);
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn update_live(
+        &self,
+        token: &str,
+        team: &str,
+        id: &str,
+        announcement: &LiveAnnouncement,
+    ) -> Result<(), SyncError> {
+        let url = format!("{}{}/{}", self.base, Self::live_path(team), segment(id));
+        let request = self.client.put(url).bearer_auth(token).json(announcement);
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn delete_live(&self, token: &str, team: &str, id: &str) -> Result<(), SyncError> {
+        let url = format!("{}{}/{}", self.base, Self::live_path(team), segment(id));
+        self.execute(self.client.delete(url).bearer_auth(token))
+            .await
+            .map(|_| ())
+    }
+
+    /// Abre el WebSocket de una sesión compartida, como quien la comparte o como quien
+    /// la mira.
+    pub async fn connect_live(
+        &self,
+        token: &str,
+        team: &str,
+        id: &str,
+        role: LiveRole,
+    ) -> Result<WebSocket, SyncError> {
+        let role = match role {
+            LiveRole::Host => "host".to_string(),
+            LiveRole::Watch(nonce) => format!("watch?nonce={}", nonce.to_base64()),
+        };
+        let url = format!(
+            "{}{}/{}/{role}",
+            self.base,
+            Self::live_path(team),
+            segment(id)
+        );
+        let response = self
+            .live
+            .get(url)
+            .bearer_auth(token)
+            .upgrade()
+            .send()
+            .await
+            .map_err(live_error)?;
+        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+            return Err(error_from(response.into_inner()).await);
+        }
+        response.into_websocket().await.map_err(live_error)
+    }
+}
+
+/// Con qué papel se conecta una cuenta a una sesión compartida.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveRole {
+    Host,
+    /// Quien mira llega con un número aleatorio (ver [`JoinNonce`]).
+    Watch(JoinNonce),
+}
+
+/// Los errores del WebSocket, sin la dirección del servidor.
+pub(crate) fn live_error(error: reqwest_websocket::Error) -> SyncError {
+    match error {
+        reqwest_websocket::Error::Reqwest(e) => network(e),
+        other => SyncError::Live(other.to_string()),
+    }
+}
+
+/// Convierte una respuesta de error del servidor en [`SyncError`].
+async fn error_from(response: reqwest::Response) -> SyncError {
+    let status = response.status();
+    let message = response
+        .json::<ErrorResponse>()
+        .await
+        .map(|e| e.error.chars().take(MAX_ERROR_MESSAGE).collect())
+        .unwrap_or_default();
+    match status {
+        StatusCode::UNAUTHORIZED => SyncError::Unauthorized,
+        StatusCode::CONFLICT => SyncError::Conflict(message),
+        StatusCode::TOO_MANY_REQUESTS => SyncError::TooManyAttempts,
+        StatusCode::FORBIDDEN => SyncError::Forbidden(message),
+        StatusCode::SERVICE_UNAVAILABLE => SyncError::Busy,
+        StatusCode::INSUFFICIENT_STORAGE => SyncError::QuotaExceeded,
+        StatusCode::NOT_FOUND => SyncError::NotFound(message),
+        StatusCode::LOCKED => SyncError::RekeyNeeded,
+        other => SyncError::Server {
+            status: other.as_u16(),
+            message,
+        },
     }
 }
 
