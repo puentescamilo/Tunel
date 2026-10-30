@@ -27,8 +27,10 @@ pub enum SyncError {
     Unauthorized,
     #[error("ya existe una cuenta con ese correo en este servidor")]
     AccountExists,
-    #[error("este servidor no admite cuentas nuevas")]
-    RegistrationClosed,
+    /// El servidor no admite la cuenta; el mensaje dice por qué (registro cerrado o
+    /// dominio de correo no permitido).
+    #[error("no se puede crear la cuenta: {0}")]
+    RegistrationClosed(String),
     #[error("no permitido: {0}")]
     Forbidden(String),
     #[error("demasiados intentos; espera unos minutos")]

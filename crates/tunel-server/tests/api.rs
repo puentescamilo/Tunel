@@ -612,3 +612,72 @@ async fn responses_are_not_cached() {
         .unwrap();
     assert_eq!(response.headers()["cache-control"], "no-store");
 }
+
+#[tokio::test]
+async fn allowed_domains_open_registration_only_for_them() {
+    let (app, _) = app_with(Config {
+        allowed_domains: vec!["ejemplo.com".into(), "otro.org".into()],
+        ..config()
+    })
+    .await;
+    // Varias cuentas de los dominios permitidos, sin abrir el registro.
+    for email in [EMAIL, "Bea@EJEMPLO.com", "carlos@otro.org"] {
+        assert_eq!(
+            register(&app, email, "contraseña-larga").await.0,
+            StatusCode::CREATED,
+            "{email}"
+        );
+    }
+    // Otros dominios, subdominios incluidos, no.
+    for email in [
+        "intruso@gmail.com",
+        "dev@dev.ejemplo.com",
+        "x@ejemplo.com.evil",
+    ] {
+        let keys = account("contraseña-larga");
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/v1/accounts",
+            None,
+            Some(register_body(email, &keys, &VaultKey::generate())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{email}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("@ejemplo.com, @otro.org")
+        );
+    }
+}
+
+#[tokio::test]
+async fn allowed_domains_do_not_lock_out_existing_accounts() {
+    let db = Db::open_in_memory().unwrap();
+    let state = AppState::new(db.clone(), config()).await.unwrap();
+    let before = router(state);
+    assert_eq!(
+        register(&before, "antigua@gmail.com", "contraseña-larga")
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    let state = AppState::new(
+        db,
+        Config {
+            allowed_domains: vec!["ejemplo.com".into()],
+            ..config()
+        },
+    )
+    .await
+    .unwrap();
+    let after = router(state);
+    assert_eq!(
+        login(&after, "antigua@gmail.com", "contraseña-larga")
+            .await
+            .0,
+        StatusCode::OK
+    );
+}

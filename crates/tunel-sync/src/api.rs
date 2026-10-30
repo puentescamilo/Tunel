@@ -146,7 +146,7 @@ impl Api {
         match self.execute(self.post("/v1/accounts", request)).await {
             Ok(_) => Ok(()),
             Err(SyncError::Conflict(_)) => Err(SyncError::AccountExists),
-            Err(SyncError::Forbidden(_)) => Err(SyncError::RegistrationClosed),
+            Err(SyncError::Forbidden(message)) => Err(SyncError::RegistrationClosed(message)),
             Err(e) => Err(e),
         }
     }

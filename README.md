@@ -343,15 +343,23 @@ En el primer equipo, abre **Ajustes → Cuenta y sincronización**, escribe la d
 servidor, tu correo y la contraseña de la cuenta, y pulsa **Crear cuenta**. En los demás
 equipos, usa los mismos datos con **Iniciar sesión**.
 
-El servidor solo deja crear **la primera cuenta**, para que nadie más pueda usarlo. Si quieres
-más cuentas (por ejemplo, una por persona), añade a `tunel-server` en `compose.yaml`:
+El servidor solo deja crear **la primera cuenta**, para que nadie más pueda usarlo. Para
+admitir más (por ejemplo, una por persona o para los [Teams](#teams-compartir-hosts-con-otras-personas)),
+crea `crates/tunel-server/.env` con una de estas opciones y vuelve a ejecutar el comando de
+arranque:
 
-```yaml
-    environment:
-      TUNEL_REGISTRO_ABIERTO: "1"
+```bash
+# Solo correos de estos dominios, separados por comas. Cada persona crea su cuenta.
+TUNEL_DOMINIOS_PERMITIDOS=gammaingenieros.com,otra-empresa.com
+
+# O cualquier correo. Ábrelo solo mientras creas las cuentas y luego bórralo.
+TUNEL_REGISTRO_ABIERTO=1
 ```
 
-y vuelve a ejecutar el comando de arranque. Cuando las hayas creado, quítalo de nuevo.
+Con `TUNEL_DOMINIOS_PERMITIDOS`, el registro queda abierto solo para esos dominios, exactos
+(`gammaingenieros.com` no incluye `dev.gammaingenieros.com`). Las cuentas que ya existían
+siguen funcionando aunque su correo sea de otro dominio. El servidor muestra al arrancar qué
+registro tiene: `docker compose -f crates/tunel-server/compose.yaml logs tunel-server`.
 
 ### Mantenimiento
 
@@ -393,6 +401,7 @@ si usas la opción A.
 |---|---|---|
 | `TUNEL_DOMINIO` | Dominio del certificado HTTPS (solo opción A) | — |
 | `TUNEL_REGISTRO_ABIERTO` | `1` permite crear más de una cuenta | sin definir |
+| `TUNEL_DOMINIOS_PERMITIDOS` | Dominios de correo con los que se pueden crear cuentas, separados por comas | sin definir |
 | `TUNEL_DB` | Archivo de la base de datos SQLite | `/datos/tunel.db` |
 | `TUNEL_ESCUCHA` | Dirección y puerto en los que escucha | `0.0.0.0:8080` |
 
