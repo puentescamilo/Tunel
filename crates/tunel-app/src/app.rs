@@ -183,6 +183,17 @@ impl TunelApp {
                 self.send_to_terminals(&format!("{command}\n"), false);
             }
         }
+        // `TUNEL_DEV_TEAM=1` despliega el primer Team en Ajustes con sus miembros.
+        if std::env::var("TUNEL_DEV_TEAM").as_deref() == Ok("1")
+            && let Some(team) = self
+                .sync
+                .local()
+                .and_then(|l| l.teams.first())
+                .map(|t| t.id.clone())
+        {
+            self.sync.teams.open = Some(team.clone());
+            crate::sync::teams::start(self, crate::sync::teams::TeamOp::Members { team });
+        }
         if let Ok(name) = std::env::var("TUNEL_DEV_GROUP") {
             self.host_group = self
                 .data()
@@ -440,6 +451,9 @@ impl TunelApp {
                 }
                 AppEvent::SyncLinked { round, result } => {
                     crate::sync::on_linked(self, round, result)
+                }
+                AppEvent::TeamDone { round, result } => {
+                    crate::sync::teams::on_done(self, round, result)
                 }
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }

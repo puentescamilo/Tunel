@@ -232,6 +232,36 @@ La contraseña de la cuenta no sale del equipo: de ella se derivan una clave par
 para identificarse ante el servidor. Si la olvidas, los datos de la cuenta no se pueden
 recuperar, pero la bóveda local de cada equipo sigue intacta.
 
+## Teams: compartir hosts con otras personas
+
+Un **Team** comparte hosts y grupos, con sus credenciales, entre varias cuentas del mismo
+servidor. Va cifrado de extremo a extremo como el resto: el servidor sabe quién es miembro de
+cada Team, pero no su nombre ni lo que contiene. Cada persona necesita su propia cuenta
+(ver [Crear la cuenta](#4-crear-la-cuenta) para abrir el registro).
+
+![Teams en Ajustes](docs/screenshots/teams.png)
+
+1. En **Ajustes → Teams**, escribe un nombre y pulsa **Crear Team**.
+2. Pulsa **Miembros**, escribe el correo de la otra cuenta y **Buscar**. Compara con esa
+   persona la **huella** que aparece (en persona o por teléfono) y, si coincide, **invita**.
+3. La otra persona ve la invitación en sus Ajustes, con tu huella. Si coincide, la acepta.
+
+![Invitación a un Team](docs/screenshots/teams-invitacion.png)
+
+Para compartir algo, abre la ficha de un host o de un grupo y elige el Team en **Compartir
+en**. Un grupo se comparte con sus subgrupos y sus hosts. Si su identidad es personal,
+eliges entre llevar una copia al Team (la original no cambia) o dejarlo sin credenciales para
+que cada cual ponga las suyas. Los hosts compartidos muestran el nombre del Team.
+
+- **Roles:** los admins invitan, cambian roles, expulsan y borran el Team; los miembros usan
+  y editan lo compartido.
+- **Expulsar** a alguien renueva la clave del Team: deja de recibir lo que se guarde después.
+  Si alguien sale por su cuenta, la clave la renueva el primer admin que sincroniza.
+- **Suplantación:** Túnel recuerda la clave de cada persona la primera vez que confirmas su
+  huella. Si el servidor entrega otra, el Team se detiene y lo avisa: compara la huella de
+  nuevo antes de aceptarla.
+- Las claves de host conocidas no se comparten: cada persona decide de qué servidores se fía.
+
 ## Montar el servidor de sincronización con Docker
 
 `tunel-server` guarda las bóvedas cifradas de extremo a extremo: solo recibe datos cifrados
@@ -402,7 +432,8 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
 | Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
 | Sincronización entre equipos (servidor propio, cifrado de extremo a extremo) | ✅ |
-| Equipos compartidos, sesiones compartidas | ⏳ fase 3 |
+| Teams: hosts compartidos entre cuentas | ✅ |
+| Sesiones compartidas | ⏳ fase 3 |
 
 ## Desarrollo
 
@@ -449,6 +480,7 @@ Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_
 `TUNEL_DEV_QUICK=<texto>`, `TUNEL_DEV_EDIT=<host>`, `TUNEL_DEV_PROMPT=cambio|nuevo|llave`,
 `TUNEL_DEV_THEME=<id de tema>`, `TUNEL_DEV_CURSOR=bloque|barra|subrayado`,
 `TUNEL_DEV_SCROLL=temas` (baja en Ajustes hasta los temas),
+`TUNEL_DEV_TEAM=1` (despliega en Ajustes el primer Team con sus miembros),
 `TUNEL_DEV_SYNC=crear|<servidor>|<correo>|<contraseña>` (o `entrar|…`, une el equipo a una
 cuenta), `TUNEL_DEV_VERSION=<versión>` (simula otra versión instalada para ver el aviso de
 actualización) y `TUNEL_DEV_POSITION=x,y` (posición de la ventana; en un Mac con dos pantallas

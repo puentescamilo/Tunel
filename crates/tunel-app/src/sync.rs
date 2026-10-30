@@ -5,6 +5,8 @@
 //! hasta que el servidor responde. Las rondas corren en segundo plano sobre una copia; lo
 //! que se edite mientras tanto se vuelve a aplicar encima del resultado.
 
+pub mod teams;
+
 use crate::app::TunelApp;
 use crate::engine::LinkAccount;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -84,6 +86,7 @@ pub struct SyncController {
     pub form: AccountForm,
     /// Problemas de Teams de la última ronda; solo se avisa cuando cambian.
     team_problems: Vec<tunel_sync::TeamProblem>,
+    pub teams: teams::TeamsUi,
 }
 
 impl Default for SyncController {
@@ -95,6 +98,7 @@ impl Default for SyncController {
             next: None,
             backoff: FIRST_BACKOFF,
             team_problems: Vec::new(),
+            teams: teams::TeamsUi::default(),
             form: AccountForm::default(),
         }
     }
@@ -117,6 +121,15 @@ impl SyncController {
 
     pub fn busy(&self) -> bool {
         self.running.is_some()
+    }
+
+    pub fn local(&self) -> Option<&SyncLocal> {
+        self.local.as_ref()
+    }
+
+    /// Problemas de los Teams en la última ronda.
+    pub fn team_problems(&self) -> &[tunel_sync::TeamProblem] {
+        &self.team_problems
     }
 
     /// Empieza una tarea y devuelve su número.

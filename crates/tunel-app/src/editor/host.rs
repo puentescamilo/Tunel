@@ -3,6 +3,7 @@
 use super::combo;
 use crate::views::themes::{InheritedTheme, theme_picker};
 use std::collections::BTreeMap;
+use tunel_core::share;
 use tunel_core::*;
 
 /// Parsea un puerto; vacío significa "por defecto".
@@ -95,6 +96,10 @@ pub struct HostForm {
     env: String,
     new_username: String,
     new_password: String,
+    /// Espacio al que irá el host: `None` es la bóveda personal.
+    team: Option<String>,
+    /// Al cambiar de espacio, copiar sus credenciales o quitárselas.
+    copy_credentials: bool,
     pub(super) error: Option<String>,
 }
 
@@ -153,7 +158,9 @@ impl HostForm {
                 password.clone().unwrap_or_default(),
             ),
         };
+        let team = host.team.clone();
         Self {
+            team,
             port: host.port.map(|p| p.to_string()).unwrap_or_default(),
             tags: host.tags.join(", "),
             env: format_env(&host.env),
@@ -169,6 +176,7 @@ impl HostForm {
             proxy_password,
             new_username: String::new(),
             new_password: String::new(),
+            copy_credentials: true,
             error: None,
         }
     }
@@ -230,6 +238,7 @@ impl HostForm {
         let mut identity = self.host.identity;
         if !self.new_username.trim().is_empty() {
             let new_identity = Identity {
+                team: self.team.clone(),
                 password: Some(self.new_password.clone()).filter(|p| !p.is_empty()),
                 ..Identity::new(
                     format!("{}@{}", self.new_username.trim(), self.host.display_name()),
@@ -250,7 +259,34 @@ impl HostForm {
             env: parse_env(&self.env)?,
             ..self.host.clone()
         };
-        Ok(result.with_host(host))
+        let id = host.id;
+        let result = result.with_host(host);
+        // También sin cambiar de espacio: la identidad elegida puede ser de otro.
+        let credentials = if self.copy_credentials {
+            share::Credentials::Copy
+        } else {
+            share::Credentials::Drop
+        };
+        Ok(share::move_host(
+            &result,
+            id,
+            self.team.as_deref(),
+            credentials,
+        ))
+    }
+
+    /// La identidad que usaría el host (propia o del grupo) está en otro espacio que el
+    /// elegido para él.
+    fn credentials_elsewhere(&self, data: &VaultData) -> bool {
+        let identity = self.host.identity.or_else(|| {
+            self.host
+                .group
+                .and_then(|g| data.group(g))
+                .and_then(|g| g.identity)
+        });
+        identity
+            .and_then(|i| data.identity(i))
+            .is_some_and(|i| i.team != self.team)
     }
 }
 
@@ -272,11 +308,58 @@ const X11_HINT: &str = "Necesita un servidor X en este equipo: XQuartz en macOS 
 Windows; en Linux ya viene con el escritorio. Actívalo solo con servidores de confianza: sus \
 aplicaciones pueden ver lo que escribes en otras ventanas X.";
 
-pub(super) fn host_form(ui: &mut egui::Ui, form: &mut HostForm, data: &VaultData) {
+/// Desplegable de espacio: la bóveda personal o uno de los Teams de la cuenta.
+pub(super) fn team_picker(
+    ui: &mut egui::Ui,
+    id: &str,
+    team: &mut Option<String>,
+    teams: &[(String, String)],
+) {
+    let selected = team
+        .as_ref()
+        .and_then(|t| teams.iter().find(|(id, _)| id == t))
+        .map_or("Personal (solo tú)".to_string(), |(_, name)| name.clone());
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(selected)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(team, None, "Personal (solo tú)");
+            for (id, name) in teams {
+                ui.selectable_value(team, Some(id.clone()), name);
+            }
+        });
+}
+
+pub(super) fn host_form(
+    ui: &mut egui::Ui,
+    form: &mut HostForm,
+    data: &VaultData,
+    teams: &[(String, String)],
+) {
     egui::Grid::new("form-host")
         .num_columns(2)
         .spacing([10.0, 6.0])
         .show(ui, |ui| {
+            if !teams.is_empty() || form.team.is_some() {
+                ui.label("Compartir en");
+                team_picker(ui, "team-host", &mut form.team, teams);
+                ui.end_row();
+                if form.credentials_elsewhere(data) {
+                    ui.label("Credenciales");
+                    ui.vertical(|ui| {
+                        ui.radio_value(
+                            &mut form.copy_credentials,
+                            true,
+                            "Llevar una copia de su identidad y su clave",
+                        );
+                        ui.radio_value(
+                            &mut form.copy_credentials,
+                            false,
+                            "Sin credenciales: cada cual pone las suyas",
+                        );
+                    });
+                    ui.end_row();
+                }
+            }
             ui.label("Nombre");
             ui.add(
                 egui::TextEdit::singleline(&mut form.host.label)
@@ -534,6 +617,65 @@ mod tests {
         let identity = resolved.identity.unwrap();
         assert_eq!(identity.username, "ana");
         assert_eq!(identity.password.as_deref(), Some("secreto"));
+    }
+
+    const TEAM: &str = "6c2b8f0e-6f4e-4d55-9a37-1e2f3a4b5c6d";
+
+    #[test]
+    fn sharing_a_host_copies_its_personal_identity() {
+        let identity = Identity::new("deploy", "deploy");
+        let host = Host {
+            identity: Some(identity.id),
+            ..Host::new("web", "10.0.0.1")
+        };
+        let id = host.id;
+        let data = VaultData::default()
+            .with_identity(identity.clone())
+            .with_host(host.clone());
+        let mut form = HostForm::new(host);
+        form.team = Some(TEAM.into());
+        let shared = form.build(&data).unwrap();
+        let host = shared.host(id).unwrap();
+        assert_eq!(host.team.as_deref(), Some(TEAM));
+        let copy = shared.identity(host.identity.unwrap()).unwrap();
+        assert_eq!(copy.team.as_deref(), Some(TEAM));
+        assert_eq!(shared.identity(identity.id).unwrap().team, None);
+    }
+
+    #[test]
+    fn a_new_user_typed_in_a_shared_host_belongs_to_the_team() {
+        let host = Host {
+            team: Some(TEAM.into()),
+            ..Host::new("web", "10.0.0.1")
+        };
+        let id = host.id;
+        let mut form = HostForm::new(host);
+        form.new_username = "ana".into();
+        let data = form.build(&VaultData::default()).unwrap();
+        let identity = data
+            .identity(data.host(id).unwrap().identity.unwrap())
+            .unwrap();
+        assert_eq!(identity.team.as_deref(), Some(TEAM));
+        assert_eq!(data.identities.len(), 1);
+    }
+
+    #[test]
+    fn a_shared_host_can_drop_credentials_instead_of_copying_them() {
+        let identity = Identity::new("deploy", "deploy");
+        let host = Host {
+            identity: Some(identity.id),
+            ..Host::new("web", "10.0.0.1")
+        };
+        let id = host.id;
+        let data = VaultData::default()
+            .with_identity(identity)
+            .with_host(host.clone());
+        let mut form = HostForm::new(host);
+        form.team = Some(TEAM.into());
+        form.copy_credentials = false;
+        let shared = form.build(&data).unwrap();
+        assert_eq!(shared.host(id).unwrap().identity, None);
+        assert_eq!(shared.identities.len(), 1);
     }
 
     #[test]

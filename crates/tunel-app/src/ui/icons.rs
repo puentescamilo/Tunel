@@ -21,6 +21,7 @@ pub const MORE: &str = "\u{E208}";
 pub const COPY: &str = "\u{E1CA}";
 pub const DESKTOP: &str = "\u{E560}";
 pub const USER: &str = "\u{E4C2}";
+pub const USERS: &str = "\u{E68E}";
 pub const LIGHTNING: &str = "\u{E2DE}";
 pub const UPLOAD: &str = "\u{E4C0}";
 pub const DOWNLOAD: &str = "\u{E20C}";
