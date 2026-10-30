@@ -12,7 +12,15 @@ pub enum SessionInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionOutput {
     Data(Vec<u8>),
-    Closed { exit_status: Option<u32> },
+    /// El otro extremo decide el tamaño de la terminal: una sesión compartida que se mira
+    /// tiene el de quien la comparte.
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    Closed {
+        exit_status: Option<u32>,
+    },
     Error(String),
 }
 

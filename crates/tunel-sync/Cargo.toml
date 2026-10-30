@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 tunel-core.workspace = true
 reqwest.workspace = true
+reqwest-websocket.workspace = true
+futures-util.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

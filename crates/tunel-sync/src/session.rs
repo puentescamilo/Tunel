@@ -28,6 +28,11 @@ impl Session {
         self.token
     }
 
+    /// Token vigente sin soltar la sesión, que sigue en uso.
+    pub fn current_token(&self) -> Option<Zeroizing<String>> {
+        self.token.clone()
+    }
+
     pub async fn token(&mut self) -> Result<Zeroizing<String>, SyncError> {
         if let Some(token) = &self.token {
             return Ok(token.clone());

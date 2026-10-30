@@ -178,6 +178,7 @@ mod tests {
                 Ok(SessionOutput::Data(d)) => collected.extend(d),
                 Ok(SessionOutput::Closed { .. }) => closed = true,
                 Ok(SessionOutput::Error(e)) => panic!("{e}"),
+                Ok(SessionOutput::Resize { .. }) => {}
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
         }

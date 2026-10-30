@@ -530,6 +530,7 @@ async fn interactive_shell_round_trip_and_exit_status() {
                 }
                 Some(SessionOutput::Closed { exit_status }) => return exit_status,
                 Some(SessionOutput::Error(e)) => panic!("{e}"),
+                Some(SessionOutput::Resize { .. }) => {}
                 None => return None,
             }
         }

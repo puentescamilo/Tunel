@@ -7,6 +7,7 @@
 pub mod account;
 pub mod api;
 mod keypair;
+pub mod live;
 pub mod run;
 mod session;
 pub mod teams;
@@ -77,6 +78,8 @@ pub enum SyncError {
     RekeyNeeded,
     #[error("el nombre del Team no puede estar vacío ni pasar de 60 caracteres")]
     InvalidName,
+    #[error("la conexión de la sesión compartida falló: {0}")]
+    Live(String),
 }
 
 impl SyncError {

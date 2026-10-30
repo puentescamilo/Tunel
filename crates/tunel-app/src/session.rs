@@ -88,6 +88,9 @@ impl TerminalSession {
                     self.status = SessionStatus::Closed(exit_status)
                 }
                 SessionOutput::Error(error) => self.status = SessionStatus::Failed(error),
+                SessionOutput::Resize { cols, rows } => {
+                    self.emulator.resize(cols, rows);
+                }
             }
         }
         changed
