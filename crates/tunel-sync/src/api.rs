@@ -108,6 +108,8 @@ impl Api {
             StatusCode::FORBIDDEN => SyncError::Forbidden(message),
             StatusCode::SERVICE_UNAVAILABLE => SyncError::Busy,
             StatusCode::INSUFFICIENT_STORAGE => SyncError::QuotaExceeded,
+            StatusCode::NOT_FOUND => SyncError::NotFound(message),
+            StatusCode::LOCKED => SyncError::RekeyNeeded,
             other => SyncError::Server {
                 status: other.as_u16(),
                 message,
@@ -211,7 +213,7 @@ impl Api {
     pub async fn keys(&self, token: &str) -> Result<Option<AccountKeysBlob>, SyncError> {
         match self.send(self.get(token, "/v1/keys")).await {
             Ok(keys) => Ok(Some(keys)),
-            Err(SyncError::Server { status: 404, .. }) => Ok(None),
+            Err(SyncError::NotFound(_)) => Ok(None),
             Err(e) => Err(e),
         }
     }
@@ -241,6 +243,13 @@ impl Api {
     ) -> Result<(), SyncError> {
         let request = self.post("/v1/teams", request).bearer_auth(token);
         self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn accept(&self, token: &str, team: &str) -> Result<(), SyncError> {
+        let path = format!("/v1/teams/{}/accept", segment(team));
+        self.execute(self.post(&path, &()).bearer_auth(token))
+            .await
+            .map(|_| ())
     }
 
     pub async fn delete_team(&self, token: &str, team: &str) -> Result<(), SyncError> {

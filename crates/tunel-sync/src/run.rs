@@ -1,18 +1,16 @@
-//! Una ronda de sincronización: descargar, fusionar, comprobar y subir.
+//! Una ronda de sincronización: para la bóveda personal y después para cada Team,
+//! descargar, fusionar, comprobar y subir.
 
-use crate::api::Api;
-use crate::keypair;
-use crate::{SyncError, check_server_url, now_millis};
-use tunel_core::sync::protocol::{
-    MAX_PUSH_RECORDS, ManifestBlob, PullResponse, PushRequest, PushResponse,
-};
+use crate::session::{Session, call};
+use crate::{SyncError, keypair, now_millis, teams};
+use tunel_core::sync::protocol::{MAX_PUSH_RECORDS, ManifestBlob, PushRequest, TeamRole};
+use tunel_core::sync::space::{Space, absorb, partition};
 use tunel_core::sync::state::Rejected;
-use tunel_core::sync::{Manifest, ManifestError, SyncLocal};
+use tunel_core::sync::{Manifest, ManifestError, SyncLocal, SyncState, VaultKey};
 use tunel_core::vault::VaultData;
-use zeroize::Zeroizing;
 
 /// Rondas de descargar y subir antes de rendirse si otros equipos suben a la vez.
-const MAX_ROUNDS: usize = 5;
+pub(crate) const MAX_ROUNDS: usize = 5;
 /// Páginas que se descargan como mucho en una ronda; con la cuota del servidor bastan 40.
 const MAX_PAGES: usize = 1000;
 /// Tiempo máximo de una ronda entera, para que un servidor lento no la deje colgada.
@@ -28,80 +26,60 @@ pub struct SyncOutcome {
     pub rejected: Vec<Rejected>,
     pub downloaded: usize,
     pub uploaded: usize,
+    /// Teams que no se pudieron sincronizar en esta ronda. No impiden sincronizar la
+    /// bóveda personal ni los demás Teams.
+    pub team_problems: Vec<TeamProblem>,
 }
 
-/// Sesión con el servidor que se renueva sola con la clave de acceso guardada.
-struct Session<'a> {
-    api: Api,
-    local: &'a mut SyncLocal,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamProblem {
+    /// Identificador del Team, o vacío si falló la lista de Teams.
+    pub team: String,
+    pub message: String,
 }
 
-impl Session<'_> {
-    async fn token(&mut self) -> Result<Zeroizing<String>, SyncError> {
-        if let Some(token) = &self.local.token {
-            return Ok(token.clone());
-        }
-        let session = self.api.login(&self.local.email, &self.local.auth).await?;
-        let token = Zeroizing::new(session.token);
-        self.local.token = Some(token.clone());
-        Ok(token)
-    }
+/// Un espacio a sincronizar: la bóveda personal (`team` es `None`) o un Team.
+pub(crate) struct SpaceSync<'a> {
+    pub team: Option<&'a str>,
+    pub key: &'a VaultKey,
+    /// Época de la clave de un Team.
+    pub epoch: Option<u64>,
+    pub state: SyncState,
+}
 
-    /// El token caducó o se revocó: se inicia sesión de nuevo con la clave guardada.
-    async fn renew(&mut self) -> Result<Zeroizing<String>, SyncError> {
-        self.local.token = None;
-        self.token().await
-    }
-
-    async fn pull(&mut self, since: u64) -> Result<PullResponse, SyncError> {
-        let token = self.token().await?;
-        match self.api.pull(&token, None, since).await {
-            Err(SyncError::Unauthorized) => {
-                let token = self.renew().await?;
-                self.api.pull(&token, None, since).await
-            }
-            other => other,
-        }
-    }
-
-    async fn push(&mut self, request: &PushRequest) -> Result<PushResponse, SyncError> {
-        let token = self.token().await?;
-        match self.api.push(&token, None, request).await {
-            Err(SyncError::Unauthorized) => {
-                let token = self.renew().await?;
-                self.api.push(&token, None, request).await
-            }
-            other => other,
-        }
-    }
+/// Lo que deja una ronda en un espacio.
+#[derive(Default)]
+pub(crate) struct Counters {
+    pub rejected: Vec<Rejected>,
+    pub downloaded: usize,
+    pub uploaded: usize,
 }
 
 /// Descarga todo lo nuevo desde el cursor, lo fusiona y comprueba el manifiesto.
 /// Devuelve el manifiesto actual, sobre el que se construye la siguiente subida.
-async fn pull(
-    session: &mut Session<'_>,
+pub(crate) async fn pull(
+    session: &mut Session,
+    space: &mut SpaceSync<'_>,
     data: &mut VaultData,
-    rejected: &mut Vec<Rejected>,
-    downloaded: &mut usize,
+    counters: &mut Counters,
 ) -> Result<Manifest, SyncError> {
     let mut retried_from_start = false;
     loop {
-        let manifest_blob = pull_pages(session, data, rejected, downloaded).await?;
-        let checked = check_manifest(session.local, manifest_blob, rejected);
-        match checked {
+        let manifest_blob = pull_pages(session, space, data, counters).await?;
+        match check_manifest(space, manifest_blob, &counters.rejected) {
             Ok(manifest) => {
-                session.local.state.manifest_version = manifest.version;
+                space.state.manifest_version = manifest.version;
                 return Ok(manifest);
             }
             // El cursor puede estar por delante del servidor (por ejemplo, si se restauró
             // de una copia) o el manifiesto puede no corresponder a lo descargado: se
             // descarga todo una vez más antes de dar la alarma.
             Err(SyncError::Integrity(ManifestError::Incomplete(_)) | SyncError::Crypto(_))
-                if !retried_from_start && session.local.state.cursor > 0 =>
+                if !retried_from_start && space.state.cursor > 0 =>
             {
                 retried_from_start = true;
-                session.local.state.cursor = 0;
-                rejected.clear();
+                space.state.cursor = 0;
+                counters.rejected.clear();
             }
             Err(e) => return Err(e),
         }
@@ -109,33 +87,36 @@ async fn pull(
 }
 
 async fn pull_pages(
-    session: &mut Session<'_>,
+    session: &mut Session,
+    space: &mut SpaceSync<'_>,
     data: &mut VaultData,
-    rejected: &mut Vec<Rejected>,
-    downloaded: &mut usize,
+    counters: &mut Counters,
 ) -> Result<Option<ManifestBlob>, SyncError> {
+    let team = space.team;
     for _ in 0..MAX_PAGES {
-        let since = session.local.state.cursor;
-        let page = session.pull(since).await?;
+        let since = space.state.cursor;
+        let page = call!(session, |api, token| api.pull(token, team, since))?;
         if page.more && page.cursor <= since {
             return Err(SyncError::Misbehaving("la descarga no avanza"));
+        }
+        // Se renovó la clave del Team desde que este equipo la recibió.
+        if space.epoch.is_some() && page.epoch != space.epoch {
+            return Err(SyncError::StaleKey);
         }
         // Un registro que no se puede descifrar no se ignora: sería una forma de que el
         // servidor ocultara datos sin que el manifiesto lo delatara.
         let envelopes = page
             .records
             .iter()
-            .map(|r| session.local.vault_key.open_record(r))
+            .map(|r| space.key.open_record(r))
             .collect::<Result<Vec<_>, _>>()?;
-        *downloaded += envelopes.len();
-        let merged =
-            session
-                .local
-                .state
-                .merge_remote(data, &envelopes, page.cursor, now_millis())?;
+        counters.downloaded += envelopes.len();
+        let merged = space
+            .state
+            .merge_remote(data, &envelopes, page.cursor, now_millis())?;
         *data = merged.data;
-        session.local.state = merged.state;
-        rejected.extend(merged.rejected);
+        space.state = merged.state;
+        counters.rejected.extend(merged.rejected);
         if !page.more {
             return Ok(page.manifest);
         }
@@ -144,63 +125,66 @@ async fn pull_pages(
 }
 
 fn check_manifest(
-    local: &SyncLocal,
+    space: &SpaceSync<'_>,
     blob: Option<ManifestBlob>,
     rejected: &[Rejected],
 ) -> Result<Manifest, SyncError> {
     let Some(blob) = blob else {
         // Nadie ha subido nada. Si este equipo ya había visto un manifiesto, el servidor
         // está devolviendo un estado anterior.
-        if local.state.manifest_version > 0 {
+        if space.state.manifest_version > 0 {
             return Err(ManifestError::Rollback {
                 got: 0,
-                seen: local.state.manifest_version,
+                seen: space.state.manifest_version,
             }
             .into());
         }
         return Ok(Manifest::empty());
     };
-    let manifest = Manifest::open(&blob.blob, blob.version, &local.vault_key)?;
+    let manifest = Manifest::open(&blob.blob, blob.version, space.key)?;
     let ignored: Vec<_> = rejected
         .iter()
-        .map(|r| (local.vault_key.record_id(&r.key), r.hlc))
+        .map(|r| (space.key.record_id(&r.key), r.hlc))
         .collect();
-    manifest.verify(&local.state, &local.vault_key, &ignored)?;
+    manifest.verify(&space.state, space.key, &ignored)?;
     Ok(manifest)
 }
 
 /// Sube lo pendiente por lotes. Devuelve `false` si otro equipo subió antes y hay que
 /// volver a descargar.
 async fn push(
-    session: &mut Session<'_>,
+    session: &mut Session,
+    space: &mut SpaceSync<'_>,
     data: &VaultData,
     mut manifest: Manifest,
-    uploaded: &mut usize,
+    counters: &mut Counters,
 ) -> Result<bool, SyncError> {
-    let outgoing = session.local.state.outgoing(data)?;
+    let outgoing = space.state.outgoing(data)?;
+    let key = space.key;
     for chunk in outgoing.chunks(MAX_PUSH_RECORDS) {
-        let vault_key = &session.local.vault_key;
-        let next = manifest.with_pushed(chunk.iter().map(|e| (vault_key.record_id(&e.key), e.hlc)));
+        let next = manifest.with_pushed(chunk.iter().map(|e| (key.record_id(&e.key), e.hlc)));
         let request = PushRequest {
-            epoch: None,
+            epoch: space.epoch,
             base_version: manifest.version,
             manifest: ManifestBlob {
                 version: next.version,
-                blob: next.seal(vault_key)?,
+                blob: next.seal(key)?,
             },
             records: chunk
                 .iter()
-                .map(|e| vault_key.seal_record(e))
+                .map(|e| key.seal_record(e))
                 .collect::<Result<_, _>>()?,
         };
-        match session.push(&request).await {
-            Ok(response) if response.cursor < session.local.state.cursor => {
+        let team = space.team;
+        let pushed = call!(session, |api, token| api.push(token, team, &request));
+        match pushed {
+            Ok(response) if response.cursor < space.state.cursor => {
                 return Err(SyncError::Misbehaving("el servidor retrocedió al guardar"));
             }
             Ok(_) => {
-                session.local.state = session.local.state.acknowledge(chunk);
-                session.local.state.manifest_version = next.version;
-                *uploaded += chunk.len();
+                space.state = space.state.acknowledge(chunk);
+                space.state.manifest_version = next.version;
+                counters.uploaded += chunk.len();
                 manifest = next;
             }
             Err(SyncError::Conflict(_)) => return Ok(false),
@@ -210,10 +194,28 @@ async fn push(
     Ok(true)
 }
 
+/// Sincroniza un espacio: `data` son solo sus elementos. Devuelve sus elementos y su
+/// estado nuevos.
+pub(crate) async fn sync_space(
+    session: &mut Session,
+    mut space: SpaceSync<'_>,
+    mut data: VaultData,
+    counters: &mut Counters,
+) -> Result<(VaultData, SyncState), SyncError> {
+    for _ in 0..MAX_ROUNDS {
+        let manifest = pull(session, &mut space, &mut data, counters).await?;
+        if push(session, &mut space, &data, manifest, counters).await? {
+            return Ok((data, space.state));
+        }
+    }
+    Err(SyncError::TooManyConflicts)
+}
+
 /// Sincroniza una vez la bóveda `data` con el servidor de `local`.
 ///
 /// Trabaja sobre copias: si falla a medias, la bóveda y la configuración originales no
-/// cambian, y lo pendiente se vuelve a intentar en la siguiente ronda.
+/// cambian, y lo pendiente se vuelve a intentar en la siguiente ronda. Un Team que falla
+/// no impide sincronizar lo demás; queda anotado en [`SyncOutcome::team_problems`].
 pub async fn sync_once(local: &SyncLocal, data: &VaultData) -> Result<SyncOutcome, SyncError> {
     tokio::time::timeout(ROUND_TIMEOUT, run_round(local, data))
         .await
@@ -221,36 +223,118 @@ pub async fn sync_once(local: &SyncLocal, data: &VaultData) -> Result<SyncOutcom
 }
 
 async fn run_round(local: &SyncLocal, data: &VaultData) -> Result<SyncOutcome, SyncError> {
-    let server = check_server_url(&local.server)?;
     let mut local = local.clone();
-    let mut data = data.clone();
-    let mut rejected = Vec::new();
-    let (mut downloaded, mut uploaded) = (0, 0);
-    let mut session = Session {
-        api: Api::new(&server)?,
-        local: &mut local,
+    let mut session = Session::new(&local)?;
+    let mut counters = Counters::default();
+
+    // La bóveda personal va primero: así, si algo se mueve a un Team, el borrado del
+    // espacio personal llega a los demás equipos antes que el alta en el Team.
+    let personal = partition(data, Space::Personal);
+    let space = SpaceSync {
+        team: None,
+        key: &local.vault_key,
+        epoch: None,
+        state: local.state.clone(),
     };
-    let mut done = false;
-    for _ in 0..MAX_ROUNDS {
-        let manifest = pull(&mut session, &mut data, &mut rejected, &mut downloaded).await?;
-        if push(&mut session, &data, manifest, &mut uploaded).await? {
-            done = true;
-            break;
-        }
-    }
-    if !done {
-        return Err(SyncError::TooManyConflicts);
-    }
-    if session.local.keypair.is_none() {
+    let (merged, state) = sync_space(&mut session, space, personal.clone(), &mut counters).await?;
+    let mut data = absorb(data, Space::Personal, &personal, &merged)?;
+    local.state = state;
+
+    if local.keypair.is_none() {
         let token = session.token().await?;
-        session.local.keypair =
-            keypair::try_fetch_or_create(&session.api, &token, &session.local.vault_key).await;
+        local.keypair = keypair::try_fetch_or_create(&session.api, &token, &local.vault_key).await;
     }
+    let team_problems = sync_teams(&mut session, &mut local, &mut data, &mut counters).await;
+    local.token = session.into_token();
     Ok(SyncOutcome {
         data,
         local,
-        rejected,
-        downloaded,
-        uploaded,
+        rejected: counters.rejected,
+        downloaded: counters.downloaded,
+        uploaded: counters.uploaded,
+        team_problems,
     })
+}
+
+/// Actualiza la lista de Teams y sincroniza cada uno.
+async fn sync_teams(
+    session: &mut Session,
+    local: &mut SyncLocal,
+    data: &mut VaultData,
+    counters: &mut Counters,
+) -> Vec<TeamProblem> {
+    if local.keypair.is_none() {
+        return Vec::new();
+    }
+    let mut problems = match teams::refresh(session, local, data).await {
+        Ok((next, new_data, problems)) => {
+            *local = next;
+            *data = new_data;
+            problems
+        }
+        Err(e) => {
+            return vec![TeamProblem {
+                team: String::new(),
+                message: e.to_string(),
+            }];
+        }
+    };
+    let ids: Vec<String> = local
+        .teams
+        .iter()
+        .map(|t| t.id.clone())
+        .filter(|id| !problems.iter().any(|p| &p.team == id))
+        .collect();
+    for id in ids {
+        if let Err(e) = sync_team(session, local, data, &id, counters).await {
+            problems.push(TeamProblem {
+                team: id,
+                message: e.to_string(),
+            });
+        }
+    }
+    problems
+}
+
+async fn sync_team(
+    session: &mut Session,
+    local: &mut SyncLocal,
+    data: &mut VaultData,
+    id: &str,
+    counters: &mut Counters,
+) -> Result<(), SyncError> {
+    let team = local
+        .team(id)
+        .cloned()
+        .ok_or(SyncError::NotFound(id.into()))?;
+    if team.rekey_needed && team.role == TeamRole::Admin {
+        let (next, new_data) = teams::rotate_with(session, local, data, id).await?;
+        *local = next;
+        *data = new_data;
+        return Ok(());
+    }
+    let part = partition(data, Space::Team(id));
+    let space = SpaceSync {
+        team: Some(id),
+        key: &team.key,
+        epoch: Some(team.epoch),
+        state: team.state.clone(),
+    };
+    match sync_space(session, space, part.clone(), counters).await {
+        Ok((merged, state)) => {
+            *data = absorb(data, Space::Team(id), &part, &merged)?;
+            if let Some(t) = local.teams.iter_mut().find(|t| t.id == id) {
+                t.state = state;
+            }
+            Ok(())
+        }
+        // Alguien salió del Team y aún no se renovó la clave: lo hace cualquier admin.
+        Err(SyncError::RekeyNeeded) if team.role == TeamRole::Admin => {
+            let (next, new_data) = teams::rotate_with(session, local, data, id).await?;
+            *local = next;
+            *data = new_data;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }

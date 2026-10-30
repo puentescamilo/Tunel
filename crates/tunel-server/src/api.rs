@@ -265,8 +265,9 @@ impl From<DbError> for ApiError {
             | DbError::KeysExist
             | DbError::NoKeys
             | DbError::TeamExists
-            | DbError::AlreadyMember
-            | DbError::RekeyNeeded => Self::new(StatusCode::CONFLICT, e.to_string()),
+            | DbError::AlreadyMember => Self::new(StatusCode::CONFLICT, e.to_string()),
+            // Distinto de 409: no se arregla volviendo a descargar.
+            DbError::RekeyNeeded => Self::new(StatusCode::LOCKED, e.to_string()),
             DbError::RegistrationClosed | DbError::Limit(_) => {
                 Self::new(StatusCode::FORBIDDEN, e.to_string())
             }

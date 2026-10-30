@@ -80,6 +80,9 @@ pub enum ProxyConfig {
 #[serde(default)]
 pub struct Host {
     pub id: HostId,
+    /// Team al que pertenece; `None` si es de la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub label: String,
     pub address: String,
     pub port: Option<u16>,
@@ -143,6 +146,9 @@ impl Host {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Group {
     pub id: GroupId,
+    /// Team al que pertenece; `None` si es de la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub name: String,
     pub parent: Option<GroupId>,
     pub identity: Option<IdentityId>,
@@ -166,6 +172,9 @@ impl Group {
 #[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Identity {
     pub id: IdentityId,
+    /// Team al que pertenece; `None` si es de la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub label: String,
     pub username: String,
     pub password: Option<String>,
@@ -189,6 +198,9 @@ impl Identity {
 #[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SshKey {
     pub id: KeyId,
+    /// Team al que pertenece; `None` si es de la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub label: String,
     pub private_key: String,
     pub public_key: Option<String>,
@@ -271,6 +283,9 @@ impl std::fmt::Debug for SshKey {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Snippet {
     pub id: SnippetId,
+    /// Team al que pertenece; `None` si es de la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub label: String,
     pub script: String,
     pub tags: Vec<String>,
@@ -280,6 +295,7 @@ impl Snippet {
     pub fn new(label: impl Into<String>, script: impl Into<String>) -> Self {
         Self {
             id: SnippetId::new(),
+            team: None,
             label: label.into(),
             script: script.into(),
             tags: Vec::new(),
@@ -301,6 +317,9 @@ pub enum ForwardKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortForward {
     pub id: ForwardId,
+    /// Team al que pertenece; `None` si es de la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub label: String,
     pub host: HostId,
     pub kind: ForwardKind,
@@ -320,6 +339,7 @@ impl PortForward {
     ) -> Self {
         Self {
             id: ForwardId::new(),
+            team: None,
             label: String::new(),
             host,
             kind: ForwardKind::Local,

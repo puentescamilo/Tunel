@@ -77,6 +77,9 @@ pub async fn create_account(
         token: Some(Zeroizing::new(session.token)),
         state: SyncState::adopt(device, data, now_millis())?,
         keypair,
+        teams: Vec::new(),
+        invitations: Vec::new(),
+        contacts: Default::default(),
     })
 }
 
@@ -113,6 +116,9 @@ pub async fn sign_in(
         token: Some(Zeroizing::new(session.token)),
         state: SyncState::adopt(device, data, now_millis())?,
         keypair,
+        teams: Vec::new(),
+        invitations: Vec::new(),
+        contacts: Default::default(),
     })
 }
 

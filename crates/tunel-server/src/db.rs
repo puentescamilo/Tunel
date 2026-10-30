@@ -741,7 +741,8 @@ impl Db {
     pub async fn teams_of(&self, account: i64) -> Result<Vec<TeamSummary>, DbError> {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT t.id, t.name, m.role, t.epoch, m.key, a.email, a.public_key, m.accepted
+                "SELECT t.id, t.name, m.role, t.epoch, m.key, a.email, a.public_key, m.accepted,
+                        t.rekey_needed
                  FROM team_members m
                  JOIN teams t ON t.id = m.team_id
                  JOIN accounts a ON a.id = m.wrapped_by
@@ -758,10 +759,12 @@ impl Db {
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, bool>(7)?,
+                    row.get::<_, bool>(8)?,
                 ))
             })?;
             rows.map(|row| {
-                let (id, name, role, epoch, key, wrapped_by, wrapped_by_key, accepted) = row?;
+                let (id, name, role, epoch, key, wrapped_by, wrapped_by_key, accepted, rekey) =
+                    row?;
                 let (name, key) = if accepted {
                     (
                         Some(serde_json::from_str(&name)?),
@@ -779,6 +782,7 @@ impl Db {
                     wrapped_by,
                     wrapped_by_key: parse_public_key(&wrapped_by_key)?,
                     pending: !accepted,
+                    rekey_needed: accepted && rekey,
                 })
             })
             .collect()

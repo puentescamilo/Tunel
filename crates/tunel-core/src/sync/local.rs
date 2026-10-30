@@ -6,9 +6,13 @@
 //! la contraseña de la cuenta.
 
 use super::keys::VaultKey;
+use super::protocol::TeamRole;
+use super::space::{Space, partition};
 use super::state::SyncState;
-use super::team::AccountKeypair;
+use super::team::{AccountKeypair, PublicKey};
+use crate::vault::VaultData;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use zeroize::Zeroizing;
 
@@ -23,9 +27,151 @@ pub struct SyncLocal {
     /// Token de la sesión actual, si hay una.
     pub token: Option<Zeroizing<String>>,
     pub state: SyncState,
-    /// Par de claves de la cuenta para los equipos; `None` hasta recuperarlo o crearlo.
+    /// Par de claves de la cuenta para los Teams; `None` hasta recuperarlo o crearlo.
     #[serde(default)]
     pub keypair: Option<AccountKeypair>,
+    /// Teams de los que la cuenta es miembro, con su clave y su estado.
+    #[serde(default)]
+    pub teams: Vec<TeamLocal>,
+    /// Invitaciones a Teams sin responder.
+    #[serde(default)]
+    pub invitations: Vec<Invitation>,
+    /// Clave pública de cada cuenta con la que se comparte algo, fijada la primera vez
+    /// que se vio. Si el servidor entrega otra, alguien intenta suplantarla.
+    #[serde(default)]
+    pub contacts: BTreeMap<String, Contact>,
+}
+
+/// Un Team visto desde este equipo.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TeamLocal {
+    pub id: String,
+    pub name: String,
+    pub role: TeamRole,
+    /// Época de `key`; nunca retrocede.
+    pub epoch: u64,
+    pub key: VaultKey,
+    pub state: SyncState,
+    /// Alguien salió y la clave está pendiente de renovar.
+    #[serde(default)]
+    pub rekey_needed: bool,
+}
+
+/// Lleva la clave del Team: no se muestra.
+impl fmt::Debug for TeamLocal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TeamLocal")
+            .field("id", &self.id)
+            .field("role", &self.role)
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Invitación pendiente: de qué Team y quién invita. El nombre del Team no se conoce
+/// hasta aceptar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Invitation {
+    pub team: String,
+    pub from: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Contact {
+    pub key: PublicKey,
+    /// La persona comparó la huella en persona.
+    #[serde(default)]
+    pub verified: bool,
+}
+
+/// El servidor entregó para una cuenta una clave distinta de la fijada.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("la clave de {email} no es la que se conocía; puede ser una suplantación")]
+pub struct KeyChanged {
+    pub email: String,
+}
+
+impl SyncLocal {
+    /// Anota los cambios locales de `old` a `new` en el espacio al que pertenece cada uno.
+    pub fn record_local(
+        &self,
+        old: &VaultData,
+        new: &VaultData,
+        wall_millis: u64,
+    ) -> Result<Self, serde_json::Error> {
+        let state = self.state.record_local(
+            &partition(old, Space::Personal),
+            &partition(new, Space::Personal),
+            wall_millis,
+        )?;
+        let teams = self
+            .teams
+            .iter()
+            .map(|team| {
+                let space = Space::Team(&team.id);
+                let state = team.state.record_local(
+                    &partition(old, space),
+                    &partition(new, space),
+                    wall_millis,
+                )?;
+                Ok(TeamLocal {
+                    state,
+                    ..team.clone()
+                })
+            })
+            .collect::<Result<_, serde_json::Error>>()?;
+        Ok(Self {
+            state,
+            teams,
+            ..self.clone()
+        })
+    }
+
+    /// Cambios de todos los espacios que esperan a subir.
+    pub fn pending(&self) -> usize {
+        self.state.pending.len()
+            + self
+                .teams
+                .iter()
+                .map(|t| t.state.pending.len())
+                .sum::<usize>()
+    }
+
+    pub fn team(&self, id: &str) -> Option<&TeamLocal> {
+        self.teams.iter().find(|t| t.id == id)
+    }
+
+    /// Comprueba la clave que da el servidor para `email` contra la fijada y, si es la
+    /// primera vez que se ve, la fija. La propia cuenta se compara con su par de claves.
+    pub fn pin(&self, email: &str, key: PublicKey) -> Result<Self, KeyChanged> {
+        let changed = || KeyChanged {
+            email: email.to_string(),
+        };
+        if email == self.email {
+            return match &self.keypair {
+                Some(own) if own.public() == key => Ok(self.clone()),
+                _ => Err(changed()),
+            };
+        }
+        match self.contacts.get(email) {
+            Some(contact) if contact.key == key => Ok(self.clone()),
+            Some(_) => Err(changed()),
+            None => {
+                let mut contacts = self.contacts.clone();
+                contacts.insert(
+                    email.to_string(),
+                    Contact {
+                        key,
+                        verified: false,
+                    },
+                );
+                Ok(Self {
+                    contacts,
+                    ..self.clone()
+                })
+            }
+        }
+    }
 }
 
 /// Lleva claves: solo se muestra a qué servidor y cuenta está unido el equipo.
@@ -34,7 +180,8 @@ impl fmt::Debug for SyncLocal {
         f.debug_struct("SyncLocal")
             .field("server", &self.server)
             .field("email", &self.email)
-            .field("pending", &self.state.pending.len())
+            .field("pending", &self.pending())
+            .field("teams", &self.teams.len())
             .finish_non_exhaustive()
     }
 }
@@ -42,6 +189,7 @@ impl fmt::Debug for SyncLocal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Host;
     use uuid::Uuid;
 
     fn sample() -> SyncLocal {
@@ -53,6 +201,9 @@ mod tests {
             token: Some(Zeroizing::new("token-secreto".into())),
             state: SyncState::new(Uuid::from_u128(1)),
             keypair: Some(AccountKeypair::generate()),
+            teams: Vec::new(),
+            invitations: Vec::new(),
+            contacts: BTreeMap::new(),
         }
     }
 
@@ -83,6 +234,77 @@ mod tests {
         json.as_object_mut().unwrap().remove("keypair");
         let back: SyncLocal = serde_json::from_value(json).unwrap();
         assert!(back.keypair.is_none());
+    }
+
+    fn with_team(local: SyncLocal) -> SyncLocal {
+        SyncLocal {
+            teams: vec![TeamLocal {
+                id: TEAM.into(),
+                name: "Infra".into(),
+                role: TeamRole::Member,
+                epoch: 0,
+                key: VaultKey::generate(),
+                state: SyncState::new(Uuid::from_u128(1)),
+                rekey_needed: false,
+            }],
+            ..local
+        }
+    }
+
+    const TEAM: &str = "6c2b8f0e-6f4e-4d55-9a37-1e2f3a4b5c6d";
+
+    #[test]
+    fn each_change_is_queued_in_its_own_space() {
+        let local = with_team(sample());
+        let old = VaultData::default();
+        let mut shared = Host::new("compartido", "2.2.2.2");
+        shared.team = Some(TEAM.into());
+        let new = old
+            .with_host(Host::new("personal", "1.1.1.1"))
+            .with_host(shared);
+        let next = local.record_local(&old, &new, 10).unwrap();
+        assert_eq!(next.state.pending.len(), 1);
+        assert_eq!(next.teams[0].state.pending.len(), 1);
+        assert_eq!(next.pending(), 2);
+    }
+
+    #[test]
+    fn moving_a_host_into_a_team_deletes_it_from_the_personal_space() {
+        let local = with_team(sample());
+        let host = Host::new("web", "1.1.1.1");
+        let old = VaultData::default().with_host(host.clone());
+        let moved = Host {
+            team: Some(TEAM.into()),
+            ..host
+        };
+        let new = VaultData::default().with_host(moved);
+        let next = local.record_local(&old, &new, 10).unwrap();
+        let personal = next
+            .state
+            .outgoing(&partition(&new, Space::Personal))
+            .unwrap();
+        assert!(personal[0].value.is_none());
+        let team = next.teams[0]
+            .state
+            .outgoing(&partition(&new, Space::Team(TEAM)))
+            .unwrap();
+        assert!(team[0].value.is_some());
+    }
+
+    #[test]
+    fn keys_are_pinned_on_first_sight_and_changes_are_refused() {
+        let local = sample();
+        let bob = AccountKeypair::generate().public();
+        let pinned = local.pin("bob@ejemplo.com", bob).unwrap();
+        assert_eq!(pinned.contacts["bob@ejemplo.com"].key, bob);
+        assert!(pinned.pin("bob@ejemplo.com", bob).is_ok());
+        let impostor = AccountKeypair::generate().public();
+        assert!(pinned.pin("bob@ejemplo.com", impostor).is_err());
+
+        // La propia cuenta se comprueba contra su par de claves.
+        let own = local.keypair.as_ref().unwrap().public();
+        assert!(local.pin("ana@ejemplo.com", own).is_ok());
+        assert!(local.pin("ana@ejemplo.com", impostor).is_err());
     }
 
     #[test]

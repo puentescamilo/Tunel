@@ -134,6 +134,9 @@ pub struct TeamSummary {
     /// Invitación que la cuenta todavía no ha aceptado: solo sabe quién la invita.
     #[serde(default)]
     pub pending: bool,
+    /// Alguien salió y la clave está pendiente de renovar; lo hace un administrador.
+    #[serde(default)]
+    pub rekey_needed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
