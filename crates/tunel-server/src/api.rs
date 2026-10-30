@@ -28,6 +28,10 @@ use tunel_core::sync::{SealedBlob, SealedRecord};
 pub struct Config {
     /// Cualquiera puede crear una cuenta. Si es `false`, solo se puede crear la primera.
     pub open_registration: bool,
+    /// Dominios de correo con los que se pueden crear cuentas, en minúsculas. Vacío admite
+    /// cualquiera. Si hay alguno, el registro queda abierto para esos dominios aunque
+    /// `open_registration` sea `false`.
+    pub allowed_domains: Vec<String>,
     /// Argon2id con el que el servidor guarda el hash de las claves de acceso nuevas.
     pub auth_kdf: KdfParams,
     /// Hashes de Argon2id que se calculan a la vez como mucho.
@@ -61,6 +65,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             open_registration: false,
+            allowed_domains: Vec::new(),
             auth_kdf: KdfParams {
                 memory_kib: 19 * 1024,
                 iterations: 2,
@@ -324,6 +329,46 @@ fn normalize_email(email: &str) -> ApiResult<String> {
     }
 }
 
+/// Lee la lista de dominios permitidos, separados por comas o espacios, como
+/// `gammaingenieros.com, @otro.com`. Falla con el primero que no parezca un dominio.
+pub fn parse_allowed_domains(text: &str) -> Result<Vec<String>, String> {
+    let mut domains = Vec::new();
+    for item in text.split(|c: char| c == ',' || c.is_whitespace()) {
+        let domain = item.trim().trim_start_matches('@').to_lowercase();
+        if domain.is_empty() {
+            continue;
+        }
+        let valid = domain.len() <= 253
+            && domain.contains('.')
+            && domain.split('.').all(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            });
+        if !valid {
+            return Err(format!(
+                "«{}» no es un dominio de correo válido",
+                item.trim()
+            ));
+        }
+        if !domains.contains(&domain) {
+            domains.push(domain);
+        }
+    }
+    Ok(domains)
+}
+
+/// El correo, ya normalizado, es de un dominio permitido (o no hay restricción). Se
+/// compara el dominio entero: `ejemplo.com` no admite `dev.ejemplo.com`.
+fn domain_allowed(allowed: &[String], email: &str) -> bool {
+    allowed.is_empty()
+        || email
+            .rsplit_once('@')
+            .is_some_and(|(_, domain)| allowed.iter().any(|a| a == domain))
+}
+
 fn check_blob(blob: &SealedBlob, max_ciphertext: usize) -> ApiResult<()> {
     let nonce_ok = B64.decode(&blob.nonce).is_ok_and(|n| n.len() == NONCE_LEN);
     if !nonce_ok || blob.ciphertext.len() > max_ciphertext || B64.decode(&blob.ciphertext).is_err()
@@ -384,6 +429,18 @@ async fn register(
 ) -> ApiResult<StatusCode> {
     take_unauthenticated(&state)?;
     let email = normalize_email(&request.email)?;
+    let allowed = &state.config.allowed_domains;
+    if !domain_allowed(allowed, &email) {
+        let list = allowed
+            .iter()
+            .map(|d| format!("@{d}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!("este servidor solo admite cuentas con correos {list}"),
+        ));
+    }
     let salt = B64
         .decode(&request.salt)
         .map_err(|_| ApiError::bad_request("sal no válida"))?;
@@ -412,7 +469,7 @@ async fn register(
                 vault_key: request.vault_key,
                 created_at: now(),
             },
-            !state.config.open_registration,
+            !state.config.open_registration && allowed.is_empty(),
         )
         .await?;
     Ok(StatusCode::CREATED)
@@ -829,4 +886,41 @@ async fn rotate_team(
         .rotate_team(team, rotation, session.account, state.config.team_quota)
         .await?;
     Ok(Json(PushResponse { cursor }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowed_domains_are_normalized_and_deduplicated() {
+        assert_eq!(
+            parse_allowed_domains(" GammaIngenieros.com, @otro.org\nOTRO.org ").unwrap(),
+            ["gammaingenieros.com", "otro.org"]
+        );
+        assert!(parse_allowed_domains("").unwrap().is_empty());
+        assert!(parse_allowed_domains(" , ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn invalid_domains_are_rejected() {
+        for bad in [
+            "localhost",
+            "ana@ejemplo.com",
+            "ejemplo..com",
+            "-x.com",
+            "ej mplo.com/x",
+        ] {
+            assert!(parse_allowed_domains(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_the_exact_domain_is_allowed() {
+        let allowed = vec!["ejemplo.com".to_string()];
+        assert!(domain_allowed(&allowed, "ana@ejemplo.com"));
+        assert!(!domain_allowed(&allowed, "ana@dev.ejemplo.com"));
+        assert!(!domain_allowed(&allowed, "ana@ejemplo.com.evil"));
+        assert!(domain_allowed(&[], "ana@cualquiera.net"));
+    }
 }

@@ -9,5 +9,5 @@ pub mod api;
 pub mod auth;
 pub mod db;
 
-pub use api::{AppState, Config, router, spawn_session_sweeper};
+pub use api::{AppState, Config, parse_allowed_domains, router, spawn_session_sweeper};
 pub use db::{Db, Quota};

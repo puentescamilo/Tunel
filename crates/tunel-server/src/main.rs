@@ -4,6 +4,8 @@
 //! - `TUNEL_DB`: archivo SQLite (por defecto `tunel.db`).
 //! - `TUNEL_ESCUCHA`: dirección y puerto (por defecto `127.0.0.1:8080`).
 //! - `TUNEL_REGISTRO_ABIERTO=1`: permite crear cuentas a cualquiera; si no, solo la primera.
+//! - `TUNEL_DOMINIOS_PERMITIDOS=ejemplo.com,otro.com`: solo se crean cuentas con correos
+//!   de esos dominios, y para ellos el registro queda abierto.
 //!
 //! Sirve HTTP sin cifrar: ponlo detrás de un proxy con HTTPS (Caddy, nginx, Traefik).
 //!
@@ -12,7 +14,7 @@
 
 use anyhow::Context as _;
 use std::path::PathBuf;
-use tunel_server::{AppState, Config, Db, router, spawn_session_sweeper};
+use tunel_server::{AppState, Config, Db, parse_allowed_domains, router, spawn_session_sweeper};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 
@@ -48,8 +50,12 @@ async fn main() -> anyhow::Result<()> {
     let db_path =
         std::env::var_os("TUNEL_DB").map_or_else(|| PathBuf::from("tunel.db"), PathBuf::from);
     let listen = listen_address();
+    let allowed_domains =
+        parse_allowed_domains(&std::env::var("TUNEL_DOMINIOS_PERMITIDOS").unwrap_or_default())
+            .map_err(|e| anyhow::anyhow!("TUNEL_DOMINIOS_PERMITIDOS: {e}"))?;
     let config = Config {
         open_registration: std::env::var("TUNEL_REGISTRO_ABIERTO").is_ok_and(|v| v == "1"),
+        allowed_domains,
         ..Config::default()
     };
 
@@ -60,7 +66,15 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&listen)
         .await
         .with_context(|| format!("no se pudo escuchar en {listen}"))?;
-    tracing::info!(%listen, db = %db_path.display(), "servidor de Túnel en marcha");
+    let registration = match (
+        &state.config.allowed_domains[..],
+        state.config.open_registration,
+    ) {
+        ([], true) => "abierto".to_string(),
+        ([], false) => "solo la primera cuenta".to_string(),
+        (domains, _) => format!("solo {}", domains.join(", ")),
+    };
+    tracing::info!(%listen, db = %db_path.display(), %registration, "servidor de Túnel en marcha");
     axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await?;

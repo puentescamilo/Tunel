@@ -15,8 +15,13 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - tunel-datos:/datos
-    # environment:
-    #   TUNEL_REGISTRO_ABIERTO: "1"   # permite crear más de una cuenta
+    # Se fijan en crates/tunel-server/.env, por ejemplo:
+    #   TUNEL_REGISTRO_ABIERTO=1                     cualquiera puede crear una cuenta
+    #   TUNEL_DOMINIOS_PERMITIDOS=ejemplo.com,otro.com   solo correos de esos dominios
+    # Sin ellas, solo se puede crear la primera cuenta.
+    environment:
+      TUNEL_REGISTRO_ABIERTO: ${TUNEL_REGISTRO_ABIERTO:-0}
+      TUNEL_DOMINIOS_PERMITIDOS: ${TUNEL_DOMINIOS_PERMITIDOS:-}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
