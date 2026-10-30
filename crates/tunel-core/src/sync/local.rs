@@ -68,12 +68,14 @@ impl fmt::Debug for TeamLocal {
     }
 }
 
-/// Invitación pendiente: de qué Team y quién invita. El nombre del Team no se conoce
-/// hasta aceptar.
+/// Invitación pendiente: de qué Team y quién invita, con la clave que el servidor da
+/// para esa persona. El nombre del Team no se conoce hasta aceptar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invitation {
     pub team: String,
     pub from: String,
+    /// Su huella se muestra antes de aceptar: aceptar es confiar en ella.
+    pub from_key: PublicKey,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,11 +86,20 @@ pub struct Contact {
     pub verified: bool,
 }
 
-/// El servidor entregó para una cuenta una clave distinta de la fijada.
+/// Una clave pública que no se puede usar sin que la persona intervenga.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("la clave de {email} no es la que se conocía; puede ser una suplantación")]
-pub struct KeyChanged {
-    pub email: String,
+pub enum KeyProblem {
+    /// El servidor entregó otra clave que la fijada.
+    #[error("la clave de {0} no es la que se conocía; puede ser una suplantación")]
+    Changed(String),
+    /// Nunca se confirmó la clave de esta cuenta.
+    #[error("confirma la clave de {0} comparando su huella")]
+    Unconfirmed(String),
+}
+
+/// Los correos se comparan en minúsculas y sin espacios, como los guarda el servidor.
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
 }
 
 impl SyncLocal {
@@ -141,35 +152,53 @@ impl SyncLocal {
         self.teams.iter().find(|t| t.id == id)
     }
 
-    /// Comprueba la clave que da el servidor para `email` contra la fijada y, si es la
-    /// primera vez que se ve, la fija. La propia cuenta se compara con su par de claves.
-    pub fn pin(&self, email: &str, key: PublicKey) -> Result<Self, KeyChanged> {
-        let changed = || KeyChanged {
-            email: email.to_string(),
-        };
-        if email == self.email {
+    /// Comprueba que la clave que da el servidor para `email` es la fijada (o, para la
+    /// propia cuenta, la de su par de claves). No fija nada: una cuenta nueva es un error.
+    pub fn check_key(&self, email: &str, key: PublicKey) -> Result<(), KeyProblem> {
+        let email = normalize_email(email);
+        if email == normalize_email(&self.email) {
             return match &self.keypair {
-                Some(own) if own.public() == key => Ok(self.clone()),
-                _ => Err(changed()),
+                Some(own) if own.public() == key => Ok(()),
+                _ => Err(KeyProblem::Changed(email)),
             };
         }
-        match self.contacts.get(email) {
-            Some(contact) if contact.key == key => Ok(self.clone()),
-            Some(_) => Err(changed()),
-            None => {
-                let mut contacts = self.contacts.clone();
-                contacts.insert(
-                    email.to_string(),
-                    Contact {
-                        key,
-                        verified: false,
-                    },
-                );
-                Ok(Self {
-                    contacts,
-                    ..self.clone()
-                })
-            }
+        match self.contacts.get(&email) {
+            Some(contact) if contact.key == key => Ok(()),
+            Some(_) => Err(KeyProblem::Changed(email)),
+            None => Err(KeyProblem::Unconfirmed(email)),
+        }
+    }
+
+    /// Fija la clave de `email` porque la persona lo decidió (al invitar o al aceptar una
+    /// invitación). Si ya había otra fijada, falla: cambiarla es [`Self::replace_key`].
+    pub fn pin(&self, email: &str, key: PublicKey) -> Result<Self, KeyProblem> {
+        match self.check_key(email, key) {
+            Ok(()) => Ok(self.clone()),
+            Err(KeyProblem::Unconfirmed(email)) => Ok(self.with_contact(email, key, false)),
+            Err(changed) => Err(changed),
+        }
+    }
+
+    /// La persona comparó la huella y acepta esta clave para `email`, aunque sustituya a
+    /// la fijada.
+    pub fn replace_key(&self, email: &str, key: PublicKey) -> Self {
+        self.with_contact(normalize_email(email), key, true)
+    }
+
+    /// Marca como comparada en persona la huella ya fijada de `email`.
+    pub fn mark_verified(&self, email: &str) -> Self {
+        match self.contacts.get(&normalize_email(email)) {
+            Some(contact) => self.with_contact(normalize_email(email), contact.key, true),
+            None => self.clone(),
+        }
+    }
+
+    fn with_contact(&self, email: String, key: PublicKey, verified: bool) -> Self {
+        let mut contacts = self.contacts.clone();
+        contacts.insert(email, Contact { key, verified });
+        Self {
+            contacts,
+            ..self.clone()
         }
     }
 }
@@ -292,19 +321,27 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_pinned_on_first_sight_and_changes_are_refused() {
+    fn keys_are_pinned_on_request_and_changes_are_refused() {
         let local = sample();
         let bob = AccountKeypair::generate().public();
+        assert_eq!(
+            local.check_key("bob@ejemplo.com", bob),
+            Err(KeyProblem::Unconfirmed("bob@ejemplo.com".into()))
+        );
         let pinned = local.pin("bob@ejemplo.com", bob).unwrap();
         assert_eq!(pinned.contacts["bob@ejemplo.com"].key, bob);
-        assert!(pinned.pin("bob@ejemplo.com", bob).is_ok());
+        assert!(pinned.check_key("Bob@Ejemplo.com ", bob).is_ok());
         let impostor = AccountKeypair::generate().public();
         assert!(pinned.pin("bob@ejemplo.com", impostor).is_err());
+        let replaced = pinned.replace_key("bob@ejemplo.com", impostor);
+        assert!(replaced.contacts["bob@ejemplo.com"].verified);
+        assert!(replaced.check_key("bob@ejemplo.com", impostor).is_ok());
 
-        // La propia cuenta se comprueba contra su par de claves.
+        // La propia cuenta se comprueba contra su par de claves, escrita como sea.
         let own = local.keypair.as_ref().unwrap().public();
-        assert!(local.pin("ana@ejemplo.com", own).is_ok());
-        assert!(local.pin("ana@ejemplo.com", impostor).is_err());
+        assert!(local.check_key("ana@ejemplo.com", own).is_ok());
+        assert!(local.check_key("ANA@ejemplo.com", impostor).is_err());
+        assert!(local.pin("Ana@ejemplo.com", impostor).is_err());
     }
 
     #[test]

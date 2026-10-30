@@ -6,7 +6,7 @@ use crate::{SyncError, keypair, now_millis, teams};
 use tunel_core::sync::protocol::{MAX_PUSH_RECORDS, ManifestBlob, PushRequest, TeamRole};
 use tunel_core::sync::space::{Space, absorb, partition};
 use tunel_core::sync::state::Rejected;
-use tunel_core::sync::{Manifest, ManifestError, SyncLocal, SyncState, VaultKey};
+use tunel_core::sync::{Manifest, ManifestError, RecordKind, SyncLocal, SyncState, VaultKey};
 use tunel_core::vault::VaultData;
 
 /// Rondas de descargar y subir antes de rendirse si otros equipos suben a la vez.
@@ -64,9 +64,11 @@ pub(crate) async fn pull(
     counters: &mut Counters,
 ) -> Result<Manifest, SyncError> {
     let mut retried_from_start = false;
+    // Los apartados de otros espacios no cuentan aquí ni se pierden al reintentar.
+    let first_rejected = counters.rejected.len();
     loop {
         let manifest_blob = pull_pages(session, space, data, counters).await?;
-        match check_manifest(space, manifest_blob, &counters.rejected) {
+        match check_manifest(space, manifest_blob, &counters.rejected[first_rejected..]) {
             Ok(manifest) => {
                 space.state.manifest_version = manifest.version;
                 return Ok(manifest);
@@ -79,7 +81,7 @@ pub(crate) async fn pull(
             {
                 retried_from_start = true;
                 space.state.cursor = 0;
-                counters.rejected.clear();
+                counters.rejected.truncate(first_rejected);
             }
             Err(e) => return Err(e),
         }
@@ -110,6 +112,12 @@ async fn pull_pages(
             .iter()
             .map(|r| space.key.open_record(r))
             .collect::<Result<Vec<_>, _>>()?;
+        // Un Team no puede traer claves de host conocidas (ver `space::absorb`); ni
+        // siquiera se anotan en su estado.
+        let envelopes: Vec<_> = envelopes
+            .into_iter()
+            .filter(|e| team.is_none() || e.key.kind != RecordKind::KnownHost)
+            .collect();
         counters.downloaded += envelopes.len();
         let merged = space
             .state

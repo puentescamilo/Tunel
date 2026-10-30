@@ -5,7 +5,7 @@
 use tunel_core::crypto::KdfParams;
 use tunel_core::model::Host;
 use tunel_core::sync::protocol::TeamRole;
-use tunel_core::sync::{AccountKeypair, Contact, SyncLocal};
+use tunel_core::sync::{AccountKeypair, Contact, KeyProblem, SyncLocal};
 use tunel_core::vault::VaultData;
 use tunel_server::{AppState, Config, Db, router};
 use tunel_sync::teams::{self, KeyStatus};
@@ -73,11 +73,12 @@ impl Person {
         id
     }
 
+    /// Invita tras ver la huella del invitado, como haría la interfaz.
     async fn invite(&mut self, team: &str, email: &str) {
-        let (local, _) = teams::invite(&self.local, team, email, TeamRole::Member)
+        let (local, key) = teams::lookup_key(&self.local, email).await.unwrap();
+        self.local = teams::invite(&local, team, email, TeamRole::Member, key)
             .await
             .unwrap();
-        self.local = local;
     }
 
     async fn accept(&mut self, team: &str) {
@@ -238,8 +239,38 @@ async fn an_invitation_with_a_swapped_key_is_refused() {
             verified: true,
         },
     );
-    let result = teams::invite(&ana.local, &team, "bob@ejemplo.com", TeamRole::Member).await;
-    assert!(matches!(result, Err(SyncError::KeyChanged(_))));
+    let (_, key) = teams::lookup_key(&ana.local, "bob@ejemplo.com")
+        .await
+        .unwrap();
+    let result = teams::invite(&ana.local, &team, "bob@ejemplo.com", TeamRole::Member, key).await;
+    assert!(matches!(
+        result,
+        Err(SyncError::Key(KeyProblem::Changed(_)))
+    ));
+}
+
+#[tokio::test]
+async fn an_invitation_fails_if_the_key_changed_after_seeing_its_fingerprint() {
+    let server = start_server().await;
+    let mut ana = Person::new(&server, "ana@ejemplo.com", VaultData::default()).await;
+    let mut bob = Person::new(&server, "bob@ejemplo.com", VaultData::default()).await;
+    ana.sync().await;
+    bob.sync().await;
+    let team = ana.create_team("Equipo").await;
+    let shown = AccountKeypair::generate().public();
+    let result = teams::invite(
+        &ana.local,
+        &team,
+        "bob@ejemplo.com",
+        TeamRole::Member,
+        shown,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(SyncError::Key(KeyProblem::Changed(_)))
+    ));
+    assert!(!ana.local.contacts.contains_key("bob@ejemplo.com"));
 }
 
 #[tokio::test]
@@ -260,10 +291,75 @@ async fn a_team_key_wrapped_by_an_unknown_key_is_not_accepted() {
         },
     );
     bob.sync().await;
-    bob.local = teams::accept_invitation(&bob.local, &team).await.unwrap();
-    let outcome = bob.sync().await;
+    let result = teams::accept_invitation(&bob.local, &team).await;
+    assert!(matches!(
+        result,
+        Err(SyncError::Key(KeyProblem::Changed(_)))
+    ));
     assert!(bob.local.team(&team).is_none());
-    assert_eq!(outcome.team_problems.len(), 1);
+}
+
+#[tokio::test]
+async fn the_key_is_never_renewed_for_a_member_nobody_confirmed() {
+    let server = start_server().await;
+    let (mut ana, mut bob, team) = shared_team(&server).await;
+    let mut carol = Person::new(&server, "carol@ejemplo.com", VaultData::default()).await;
+    carol.sync().await;
+    // Bob, ya admin, invita a carol; ana nunca vio su huella.
+    ana.local = teams::set_role(&ana.local, &team, "bob@ejemplo.com", TeamRole::Admin)
+        .await
+        .unwrap();
+    bob.sync().await;
+    bob.invite(&team, "carol@ejemplo.com").await;
+    carol.accept(&team).await;
+
+    let result = teams::remove_member(&ana.local, &ana.data, &team, "bob@ejemplo.com").await;
+    assert!(matches!(
+        result,
+        Err(SyncError::Key(KeyProblem::Unconfirmed(_)))
+    ));
+
+    // Ana compara la huella de carol y la confirma: la siguiente ronda renueva la clave.
+    let (local, key) = teams::lookup_key(&ana.local, "carol@ejemplo.com")
+        .await
+        .unwrap();
+    ana.local = local.pin("carol@ejemplo.com", key).unwrap();
+    let outcome = ana.sync().await;
+    assert!(
+        outcome.team_problems.is_empty(),
+        "{:?}",
+        outcome.team_problems
+    );
+    assert_eq!(ana.local.team(&team).unwrap().epoch, 1);
+}
+
+#[tokio::test]
+async fn a_member_who_never_confirmed_the_renewing_admin_does_not_take_the_new_key() {
+    let server = start_server().await;
+    let (mut ana, mut bob, team) = shared_team(&server).await;
+    let mut carol = Person::new(&server, "carol@ejemplo.com", VaultData::default()).await;
+    carol.sync().await;
+    ana.local = teams::set_role(&ana.local, &team, "bob@ejemplo.com", TeamRole::Admin)
+        .await
+        .unwrap();
+    bob.sync().await;
+    bob.invite(&team, "carol@ejemplo.com").await;
+    carol.accept(&team).await;
+    // Ana confirma a carol y saca a bob: la clave nueva la envuelve ana, a quien carol
+    // nunca confirmó.
+    let (local, key) = teams::lookup_key(&ana.local, "carol@ejemplo.com")
+        .await
+        .unwrap();
+    ana.local = local.pin("carol@ejemplo.com", key).unwrap();
+    let (local, data) = teams::remove_member(&ana.local, &ana.data, &team, "bob@ejemplo.com")
+        .await
+        .unwrap();
+    ana.local = local;
+    ana.data = data;
+
+    let outcome = carol.sync().await;
+    assert_eq!(carol.local.team(&team).unwrap().epoch, 0);
+    assert!(outcome.team_problems[0].message.contains("confirma"));
 }
 
 #[tokio::test]
@@ -286,7 +382,7 @@ async fn members_show_the_state_of_their_keys() {
     let status = |email: &str| members.iter().find(|m| m.email == email).unwrap().key;
     assert_eq!(status("ana@ejemplo.com"), KeyStatus::Own);
     assert_eq!(status("bob@ejemplo.com"), KeyStatus::Pinned);
-    let verified = teams::mark_verified(&ana.local, "bob@ejemplo.com");
+    let verified = ana.local.mark_verified("bob@ejemplo.com");
     let (_, members) = teams::members(&verified, &team).await.unwrap();
     assert!(members.iter().any(|m| m.key == KeyStatus::Verified));
 }
@@ -295,7 +391,8 @@ async fn members_show_the_state_of_their_keys() {
 async fn only_admins_manage_the_team() {
     let server = start_server().await;
     let (_, bob, team) = shared_team(&server).await;
-    let result = teams::invite(&bob.local, &team, "ana@ejemplo.com", TeamRole::Member).await;
+    let key = AccountKeypair::generate().public();
+    let result = teams::invite(&bob.local, &team, "ana@ejemplo.com", TeamRole::Member, key).await;
     assert!(matches!(result, Err(SyncError::Forbidden(_))));
     let result = teams::remove_member(&bob.local, &bob.data, &team, "ana@ejemplo.com").await;
     assert!(matches!(result, Err(SyncError::Forbidden(_))));

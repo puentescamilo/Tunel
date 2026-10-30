@@ -8,7 +8,7 @@
 //! Lo que llega de un Team nunca toca elementos de otro espacio, así un miembro no puede
 //! sobrescribir la bóveda personal de nadie aunque conozca el identificador de algo suyo.
 
-use super::record::{self, Change};
+use super::record::{self, Change, RecordKind};
 use crate::vault::VaultData;
 use serde_json::Value;
 
@@ -102,7 +102,12 @@ pub fn absorb(
         .into_iter()
         .filter(|c| match space {
             Space::Personal => true,
-            Space::Team(_) => !everything.contains_key(&c.key) || mine.contains_key(&c.key),
+            // Las claves de host conocidas nunca vienen de un Team: un miembro podría
+            // hacer que se confiara en el servidor de un atacante sin preguntar.
+            Space::Team(_) => {
+                c.key.kind != RecordKind::KnownHost
+                    && (!everything.contains_key(&c.key) || mine.contains_key(&c.key))
+            }
         })
         .filter(|c| c.value.is_some() || mine.contains_key(&c.key))
         .map(|c| Change {
@@ -222,6 +227,24 @@ mod tests {
         };
         let merged = absorb(&data, Space::Team(TEAM), &with_personal, &before).unwrap();
         assert!(merged.hosts.contains(&personal));
+    }
+
+    #[test]
+    fn a_team_cannot_add_trusted_host_keys() {
+        let data = mixed();
+        let before = partition(&data, Space::Team(TEAM));
+        let planted = KnownHost {
+            host: "banco.ejemplo.com".into(),
+            port: 22,
+            algorithm: "ssh-ed25519".into(),
+            fingerprint: "SHA256:atacante".into(),
+        };
+        let after = VaultData {
+            known_hosts: vec![planted],
+            ..before.clone()
+        };
+        let merged = absorb(&data, Space::Team(TEAM), &before, &after).unwrap();
+        assert_eq!(merged.known_hosts, data.known_hosts);
     }
 
     #[test]

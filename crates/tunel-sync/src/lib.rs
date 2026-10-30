@@ -15,7 +15,7 @@ pub use account::{create_account, sign_in, sign_out};
 pub use api::{ServerUrl, check_server_url};
 pub use run::{SyncOutcome, TeamProblem, sync_once};
 
-use tunel_core::sync::{KeyChanged, ManifestError, SyncCryptoError};
+use tunel_core::sync::{KeyProblem, ManifestError, SyncCryptoError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
@@ -62,7 +62,11 @@ pub enum SyncError {
     #[error("la cuenta todavía no tiene claves para Teams; sincroniza primero")]
     NoKeypair,
     #[error(transparent)]
-    KeyChanged(#[from] KeyChanged),
+    Key(#[from] KeyProblem),
+    #[error(
+        "hay registros del Team que esta versión de Túnel no reconoce; actualízala antes de renovar la clave"
+    )]
+    RejectedRecords,
     #[error("la clave del Team cambió; se actualizará en la próxima sincronización")]
     StaleKey,
     #[error("el servidor devolvió una clave del Team anterior a la que ya se tenía")]

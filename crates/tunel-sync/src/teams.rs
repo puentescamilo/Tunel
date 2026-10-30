@@ -1,13 +1,18 @@
 //! Teams: bóvedas compartidas con otras cuentas del mismo servidor.
 //!
 //! Cada operación recibe la configuración y, si hace falta, la bóveda, y devuelve las
-//! nuevas; quien llama las guarda. Las claves públicas de los demás se fijan la primera
-//! vez que se ven ([`SyncLocal::pin`]): si el servidor entrega otra, la operación falla
-//! en lugar de envolver la clave del Team para un impostor o aceptar una suya.
+//! nuevas; quien llama las guarda.
+//!
+//! Las claves públicas de los demás solo se fijan cuando la persona decide: al invitar
+//! (tras ver la huella del invitado) o al aceptar una invitación (tras ver la de quien
+//! invita). Después, cualquier clave que dé el servidor tiene que coincidir con la fijada;
+//! una distinta o una nunca confirmada detiene la operación en lugar de envolver la clave
+//! del Team para un impostor o aceptar una suya.
 
 use crate::SyncError;
 use crate::run::{Counters, MAX_ROUNDS, SpaceSync, TeamProblem, pull};
 use crate::session::{Session, call};
+use tunel_core::sync::local::normalize_email;
 use tunel_core::sync::protocol::{
     AddMemberRequest, CreateTeamRequest, ManifestBlob, MemberKey, RotateTeamRequest, TeamRole,
     TeamSummary,
@@ -16,8 +21,8 @@ use tunel_core::sync::record::records;
 use tunel_core::sync::space::{Space, absorb, partition};
 use tunel_core::sync::team::{open_team_name, seal_team_name, unwrap_team_key, wrap_team_key};
 use tunel_core::sync::{
-    AccountKeypair, Invitation, Manifest, PublicKey, RecordEnvelope, SyncLocal, SyncState,
-    TeamKeyContext, TeamLocal, VaultKey,
+    AccountKeypair, Invitation, KeyProblem, Manifest, PublicKey, RecordEnvelope, SyncLocal,
+    SyncState, TeamKeyContext, TeamLocal, VaultKey,
 };
 use tunel_core::vault::VaultData;
 use uuid::Uuid;
@@ -110,22 +115,22 @@ fn without_team(data: &VaultData, team: &str) -> VaultData {
 
 /// Recibe un Team de la lista del servidor: comprueba quién envolvió la clave, que la
 /// época no retrocede y, si es nueva, la abre.
-fn adopt(local: &SyncLocal, summary: &TeamSummary) -> Result<(SyncLocal, TeamLocal), SyncError> {
-    let pinned = local.pin(&summary.wrapped_by, summary.wrapped_by_key)?;
+fn adopt(local: &SyncLocal, summary: &TeamSummary) -> Result<TeamLocal, SyncError> {
     let existing = local.team(&summary.id);
     if let Some(team) = existing {
         if summary.epoch < team.epoch {
             return Err(SyncError::KeyRollback);
         }
         if summary.epoch == team.epoch {
-            let team = TeamLocal {
+            return Ok(TeamLocal {
                 role: summary.role,
                 rekey_needed: summary.rekey_needed,
                 ..team.clone()
-            };
-            return Ok((pinned, team));
+            });
         }
     }
+    // Una clave nueva solo se acepta de alguien cuya clave ya se confirmó.
+    local.check_key(&summary.wrapped_by, summary.wrapped_by_key)?;
     let wrapped = summary
         .key
         .as_ref()
@@ -157,7 +162,7 @@ fn adopt(local: &SyncLocal, summary: &TeamSummary) -> Result<(SyncLocal, TeamLoc
         state,
         rekey_needed: summary.rekey_needed,
     };
-    Ok((pinned, team))
+    Ok(team)
 }
 
 /// Pone al día la lista de Teams e invitaciones. De los Teams que ya no aparecen (se
@@ -177,6 +182,7 @@ pub(crate) async fn refresh(
             .map(|s| Invitation {
                 team: s.id.clone(),
                 from: s.wrapped_by.clone(),
+                from_key: s.wrapped_by_key,
             })
             .collect(),
         ..local.clone()
@@ -185,10 +191,7 @@ pub(crate) async fn refresh(
     let mut problems = Vec::new();
     for summary in summaries.iter().filter(|s| !s.pending) {
         match adopt(&next, summary) {
-            Ok((pinned, team)) => {
-                next = pinned;
-                teams.push(team);
-            }
+            Ok(team) => teams.push(team),
             Err(e) => {
                 // Se conserva lo que había; el problema se muestra y no se sincroniza.
                 if let Some(old) = local.team(&summary.id) {
@@ -201,13 +204,25 @@ pub(crate) async fn refresh(
             }
         }
     }
-    let gone: Vec<&str> = local
-        .teams
-        .iter()
-        .map(|t| t.id.as_str())
-        .filter(|id| !summaries.iter().any(|s| !s.pending && s.id == *id))
-        .collect();
-    let data = gone.iter().fold(data.clone(), |d, id| without_team(&d, id));
+    // Un Team que falta de la lista se borra solo si el servidor confirma que ya no se es
+    // miembro; si no, se conserva y se avisa, para no perder cambios por un error.
+    let mut data = data.clone();
+    for team in &local.teams {
+        if summaries.iter().any(|s| !s.pending && s.id == team.id) {
+            continue;
+        }
+        match call!(session, |api, token| api.members(token, &team.id)) {
+            Err(SyncError::NotFound(_)) => data = without_team(&data, &team.id),
+            _ => {
+                teams.push(team.clone());
+                problems.push(TeamProblem {
+                    team: team.id.clone(),
+                    message: "el servidor no lista este Team pero no confirma que se haya salido"
+                        .into(),
+                });
+            }
+        }
+    }
     next.teams = teams;
     Ok((next, data, problems))
 }
@@ -275,19 +290,36 @@ pub async fn create_team(local: &SyncLocal, name: &str) -> Result<(SyncLocal, St
     Ok((finish(session, next), id))
 }
 
-/// Invita a `email`. Su clave queda fijada; devuelve su huella para compararla.
+/// Clave pública que da el servidor para `email`, para mostrar su huella antes de
+/// invitarlo. No fija nada.
+pub async fn lookup_key(
+    local: &SyncLocal,
+    email: &str,
+) -> Result<(SyncLocal, PublicKey), SyncError> {
+    let email = normalize_email(email);
+    let mut session = Session::new(local)?;
+    let found = call!(&mut session, |api, token| api.user_key(token, &email))?;
+    Ok((finish(session, local.clone()), found.public_key))
+}
+
+/// Invita a `email` con la clave `confirmed`, cuya huella vio la persona (ver
+/// [`lookup_key`]). Si el servidor da ahora otra, o ya había otra fijada, falla.
 pub async fn invite(
     local: &SyncLocal,
     team: &str,
     email: &str,
     role: TeamRole,
-) -> Result<(SyncLocal, PublicKey), SyncError> {
-    let email = email.trim().to_lowercase();
+    confirmed: PublicKey,
+) -> Result<SyncLocal, SyncError> {
+    let email = normalize_email(email);
     let pair = keypair(local)?;
     let team = admin_team(local, team)?;
     let mut session = Session::new(local)?;
     let found = call!(&mut session, |api, token| api.user_key(token, &email))?;
-    let next = local.pin(&email, found.public_key)?;
+    if found.public_key != confirmed {
+        return Err(KeyProblem::Changed(email).into());
+    }
+    let next = local.pin(&email, confirmed)?;
     let context = TeamKeyContext {
         team: &team.id,
         epoch: team.epoch,
@@ -296,15 +328,22 @@ pub async fn invite(
         email: email.clone(),
         role,
         epoch: team.epoch,
-        key: wrap_team_key(&team.key, context, pair, &found.public_key)?,
+        key: wrap_team_key(&team.key, context, pair, &confirmed)?,
     };
     call!(&mut session, |api, token| api
         .add_member(token, &team.id, &request))?;
-    Ok((finish(session, next), found.public_key))
+    Ok(finish(session, next))
 }
 
-/// Acepta una invitación; el Team se recibe en la siguiente sincronización.
+/// Acepta una invitación, fijando la clave de quien invita, cuya huella vio la persona;
+/// el Team se recibe en la siguiente sincronización.
 pub async fn accept_invitation(local: &SyncLocal, team: &str) -> Result<SyncLocal, SyncError> {
+    let invitation = local
+        .invitations
+        .iter()
+        .find(|i| i.team == team)
+        .ok_or_else(|| SyncError::NotFound(team.into()))?;
+    let pinned = local.pin(&invitation.from, invitation.from_key)?;
     let mut session = Session::new(local)?;
     call!(&mut session, |api, token| api.accept(token, team))?;
     let next = SyncLocal {
@@ -314,7 +353,7 @@ pub async fn accept_invitation(local: &SyncLocal, team: &str) -> Result<SyncLoca
             .filter(|i| i.team != team)
             .cloned()
             .collect(),
-        ..local.clone()
+        ..pinned
     };
     Ok(finish(session, next))
 }
@@ -362,17 +401,13 @@ pub async fn set_role(
 }
 
 fn key_status(local: &SyncLocal, email: &str, key: PublicKey) -> KeyStatus {
-    if email == local.email {
-        return match local.pin(email, key) {
-            Ok(_) => KeyStatus::Own,
-            Err(_) => KeyStatus::Changed,
-        };
-    }
-    match local.contacts.get(email) {
-        None => KeyStatus::New,
-        Some(c) if c.key != key => KeyStatus::Changed,
-        Some(c) if c.verified => KeyStatus::Verified,
-        Some(_) => KeyStatus::Pinned,
+    let own = normalize_email(email) == normalize_email(&local.email);
+    match local.check_key(email, key) {
+        Ok(()) if own => KeyStatus::Own,
+        Ok(()) if local.contacts[&normalize_email(email)].verified => KeyStatus::Verified,
+        Ok(()) => KeyStatus::Pinned,
+        Err(KeyProblem::Unconfirmed(_)) => KeyStatus::New,
+        Err(KeyProblem::Changed(_)) => KeyStatus::Changed,
     }
 }
 
@@ -432,14 +467,21 @@ pub(crate) async fn rotate_with(
             state: team.state.clone(),
         };
         let mut merged = part.clone();
-        let manifest = pull(session, &mut space, &mut merged, &mut Counters::default()).await?;
+        let mut counters = Counters::default();
+        let manifest = pull(session, &mut space, &mut merged, &mut counters).await?;
+        // Lo apartado no está en el estado y no se volvería a subir: se perdería para todos.
+        if !counters.rejected.is_empty() {
+            return Err(SyncError::RejectedRecords);
+        }
         let state = space.state;
 
         let members = call!(session, |api, token| api.members(token, team_id))?;
-        let mut pinned = local.clone();
+        // La clave nueva solo se envuelve para claves ya confirmadas: el servidor podría
+        // haber añadido a alguien con una suya.
         for member in &members {
-            pinned = pinned.pin(&member.email, member.public_key)?;
+            local.check_key(&member.email, member.public_key)?;
         }
+        let pinned = local.clone();
 
         let epoch = team.epoch + 1;
         let key = VaultKey::generate();
@@ -520,32 +562,4 @@ pub(crate) async fn rotate_with(
         }
     }
     Err(SyncError::TooManyConflicts)
-}
-
-/// Marca como comprobada en persona la huella de `email`.
-pub fn mark_verified(local: &SyncLocal, email: &str) -> SyncLocal {
-    let mut contacts = local.contacts.clone();
-    if let Some(contact) = contacts.get_mut(email) {
-        contact.verified = true;
-    }
-    SyncLocal {
-        contacts,
-        ..local.clone()
-    }
-}
-
-/// Para la interfaz: el usuario aceptó la clave nueva de `email` tras comprobarla.
-pub fn trust_new_key(local: &SyncLocal, email: &str, key: PublicKey) -> SyncLocal {
-    let mut contacts = local.contacts.clone();
-    contacts.insert(
-        email.to_string(),
-        tunel_core::sync::Contact {
-            key,
-            verified: true,
-        },
-    );
-    SyncLocal {
-        contacts,
-        ..local.clone()
-    }
 }
