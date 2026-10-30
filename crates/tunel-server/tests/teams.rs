@@ -163,6 +163,17 @@ async fn invite(app: &Router, admin: &User, email: &str, key: &VaultKey, epoch: 
     send(app, "POST", &uri, admin.token(), Some(body)).await.0
 }
 
+async fn accept(app: &Router, user: &User) -> StatusCode {
+    let uri = format!("/v1/teams/{TEAM}/accept");
+    send(app, "POST", &uri, user.token(), None).await.0
+}
+
+/// Invita y acepta.
+async fn join(app: &Router, admin: &User, member: &User, email: &str, key: &VaultKey) {
+    assert_eq!(invite(app, admin, email, key, 0).await, StatusCode::CREATED);
+    assert_eq!(accept(app, member).await, StatusCode::NO_CONTENT);
+}
+
 async fn teams(app: &Router, user: &User) -> Vec<TeamSummary> {
     let (status, body) = send(app, "GET", "/v1/teams", user.token(), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -172,7 +183,7 @@ async fn teams(app: &Router, user: &User) -> Vec<TeamSummary> {
 /// Recupera la clave del equipo como haría el cliente, comprobando quién la envolvió.
 fn open_key(user: &User, team: &TeamSummary) -> VaultKey {
     unwrap_team_key(
-        &team.key,
+        team.key.as_ref().unwrap(),
         context(team.epoch),
         &user.keys,
         &team.wrapped_by_key,
@@ -239,10 +250,7 @@ async fn a_member_downloads_what_the_admin_shares() {
     let ana = user(&app, "ana@ejemplo.com").await;
     let bob = user(&app, "bob@ejemplo.com").await;
     let key = create_team(&app, &ana, "Infraestructura").await;
-    assert_eq!(
-        invite(&app, &ana, "bob@ejemplo.com", &key, 0).await,
-        StatusCode::CREATED
-    );
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
 
     let data = VaultData {
         hosts: vec![host("web")],
@@ -257,7 +265,7 @@ async fn a_member_downloads_what_the_admin_shares() {
     assert_eq!(summary.wrapped_by_key, ana.public());
     let bob_key = open_key(&bob, &summary);
     assert_eq!(
-        open_team_name(&bob_key, TEAM, &summary.name).unwrap(),
+        open_team_name(&bob_key, TEAM, summary.name.as_ref().unwrap()).unwrap(),
         "Infraestructura"
     );
 
@@ -278,7 +286,7 @@ async fn outsiders_see_nothing_and_members_cannot_manage_the_team() {
     let bob = user(&app, "bob@ejemplo.com").await;
     let eve = user(&app, "eve@ejemplo.com").await;
     let key = create_team(&app, &ana, "Equipo").await;
-    invite(&app, &ana, "bob@ejemplo.com", &key, 0).await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
 
     // A quien no es miembro se le responde como si el equipo no existiera.
     assert_eq!(pull_team(&app, &eve).await.0, StatusCode::NOT_FOUND);
@@ -357,6 +365,7 @@ async fn the_key_pair_is_uploaded_once_and_any_device_can_fetch_it() {
 
 #[tokio::test]
 async fn only_accounts_with_keys_can_be_invited() {
+    // Sin claves o sin cuenta, la respuesta es la misma.
     let app = app().await;
     let ana = user(&app, "ana@ejemplo.com").await;
     register_without_keys(&app, "old@ejemplo.com").await;
@@ -408,7 +417,7 @@ async fn the_team_never_runs_out_of_admins() {
     let ana = user(&app, "ana@ejemplo.com").await;
     let bob = user(&app, "bob@ejemplo.com").await;
     let key = create_team(&app, &ana, "Equipo").await;
-    invite(&app, &ana, "bob@ejemplo.com", &key, 0).await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
 
     let ana_uri = format!("/v1/teams/{TEAM}/members/ana@ejemplo.com");
     let demote = json!({"role": "member"});
@@ -444,8 +453,8 @@ async fn removing_a_member_and_rotating_the_key_locks_them_out() {
     let bob = user(&app, "bob@ejemplo.com").await;
     let carol = user(&app, "carol@ejemplo.com").await;
     let key = create_team(&app, &ana, "Equipo").await;
-    invite(&app, &ana, "bob@ejemplo.com", &key, 0).await;
-    invite(&app, &ana, "carol@ejemplo.com", &key, 0).await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
+    join(&app, &ana, &carol, "carol@ejemplo.com", &key).await;
     let data = VaultData {
         hosts: vec![host("db")],
         ..VaultData::default()
@@ -537,7 +546,7 @@ async fn deleting_a_team_removes_it_for_everyone() {
     let ana = user(&app, "ana@ejemplo.com").await;
     let bob = user(&app, "bob@ejemplo.com").await;
     let key = create_team(&app, &ana, "Equipo").await;
-    invite(&app, &ana, "bob@ejemplo.com", &key, 0).await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
     let uri = format!("/v1/teams/{TEAM}");
     assert_eq!(
         send(&app, "DELETE", &uri, ana.token(), None).await.0,
@@ -583,4 +592,144 @@ async fn team_pushes_must_say_which_key_they_used() {
         send(&app, "POST", &uri, ana.token(), Some(body)).await.0,
         StatusCode::BAD_REQUEST
     );
+}
+
+#[tokio::test]
+async fn an_invitation_gives_nothing_until_it_is_accepted() {
+    let app = app().await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let key = create_team(&app, &ana, "Equipo").await;
+    assert_eq!(
+        invite(&app, &ana, "bob@ejemplo.com", &key, 0).await,
+        StatusCode::CREATED
+    );
+
+    let invitation = teams(&app, &bob).await.remove(0);
+    assert!(invitation.pending);
+    assert_eq!(invitation.wrapped_by, "ana@ejemplo.com");
+    assert!(invitation.key.is_none() && invitation.name.is_none());
+    assert_eq!(pull_team(&app, &bob).await.0, StatusCode::NOT_FOUND);
+    let members = format!("/v1/teams/{TEAM}/members");
+    assert_eq!(
+        send(&app, "GET", &members, bob.token(), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // Ana ve la invitación pendiente.
+    let (_, body) = send(&app, "GET", &members, ana.token(), None).await;
+    let listed: Vec<TeamMember> = serde_json::from_value(body).unwrap();
+    assert!(
+        listed
+            .iter()
+            .any(|m| m.email == "bob@ejemplo.com" && m.pending)
+    );
+
+    assert_eq!(accept(&app, &bob).await, StatusCode::NO_CONTENT);
+    assert_eq!(accept(&app, &bob).await, StatusCode::NOT_FOUND);
+    let joined = teams(&app, &bob).await.remove(0);
+    assert!(!joined.pending);
+    open_key(&bob, &joined);
+    assert_eq!(pull_team(&app, &bob).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn declining_an_invitation_needs_no_new_key() {
+    let app = app().await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let key = create_team(&app, &ana, "Equipo").await;
+    invite(&app, &ana, "bob@ejemplo.com", &key, 0).await;
+    let bob_uri = format!("/v1/teams/{TEAM}/members/bob@ejemplo.com");
+    assert_eq!(
+        send(&app, "DELETE", &bob_uri, bob.token(), None).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert!(teams(&app, &bob).await.is_empty());
+    let data = VaultData {
+        hosts: vec![host("web")],
+        ..VaultData::default()
+    };
+    let (status, _) = push_team(&app, &ana, &key, 0, &data, &Manifest::empty()).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn after_removing_a_member_nothing_is_written_until_the_key_is_renewed() {
+    let app = app().await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    user(&app, "carol@ejemplo.com").await;
+    let key = create_team(&app, &ana, "Equipo").await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
+    let bob_uri = format!("/v1/teams/{TEAM}/members/bob@ejemplo.com");
+    assert_eq!(
+        send(&app, "DELETE", &bob_uri, ana.token(), None).await.0,
+        StatusCode::NO_CONTENT
+    );
+
+    let data = VaultData {
+        hosts: vec![host("web")],
+        ..VaultData::default()
+    };
+    let (status, _) = push_team(&app, &ana, &key, 0, &data, &Manifest::empty()).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        invite(&app, &ana, "carol@ejemplo.com", &key, 0).await,
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
+async fn invitations_cannot_fill_up_someone_elses_account() {
+    let app = app().await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let config = Config::default();
+    // Aunque le lleguen invitaciones de sobra, bob puede seguir creando equipos.
+    for i in 0..config.max_pending_invitations + 1 {
+        let spammer = user(&app, &format!("spam{i}@ejemplo.com")).await;
+        let team = Uuid::new_v4().to_string();
+        let key = VaultKey::generate();
+        let body = serde_json::to_value(CreateTeamRequest {
+            id: team.clone(),
+            name: seal_team_name(&key, &team, "x").unwrap(),
+            key: wrap_team_key(
+                &key,
+                TeamKeyContext {
+                    team: &team,
+                    epoch: 0,
+                },
+                &spammer.keys,
+                &spammer.public(),
+            )
+            .unwrap(),
+        })
+        .unwrap();
+        send(&app, "POST", "/v1/teams", spammer.token(), Some(body)).await;
+        let body = serde_json::to_value(AddMemberRequest {
+            email: "bob@ejemplo.com".into(),
+            role: TeamRole::Member,
+            epoch: 0,
+            key: wrap_team_key(
+                &key,
+                TeamKeyContext {
+                    team: &team,
+                    epoch: 0,
+                },
+                &spammer.keys,
+                &bob.public(),
+            )
+            .unwrap(),
+        })
+        .unwrap();
+        let uri = format!("/v1/teams/{team}/members");
+        let (status, _) = send(&app, "POST", &uri, spammer.token(), Some(body)).await;
+        let expected = if i < config.max_pending_invitations {
+            StatusCode::CREATED
+        } else {
+            StatusCode::FORBIDDEN
+        };
+        assert_eq!(status, expected, "invitación {i}");
+    }
+    create_team(&app, &bob, "Propio").await;
 }

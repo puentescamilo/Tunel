@@ -121,15 +121,19 @@ pub enum TeamRole {
 pub struct TeamSummary {
     /// UUID que elige quien crea el equipo.
     pub id: String,
-    /// Nombre cifrado con la clave del equipo.
-    pub name: SealedBlob,
+    /// Nombre cifrado con la clave del equipo; `None` en una invitación pendiente.
+    pub name: Option<SealedBlob>,
     pub role: TeamRole,
     pub epoch: u64,
-    /// Clave del equipo envuelta para esta cuenta.
-    pub key: SealedBlob,
+    /// Clave del equipo envuelta para esta cuenta; `None` en una invitación pendiente,
+    /// así quien la rechaza nunca tuvo la clave y no hace falta renovarla.
+    pub key: Option<SealedBlob>,
     /// Administrador que la envolvió, y su clave pública, para abrirla.
     pub wrapped_by: String,
     pub wrapped_by_key: PublicKey,
+    /// Invitación que la cuenta todavía no ha aceptado: solo sabe quién la invita.
+    #[serde(default)]
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +149,9 @@ pub struct TeamMember {
     pub email: String,
     pub role: TeamRole,
     pub public_key: PublicKey,
+    /// Invitado que todavía no ha aceptado.
+    #[serde(default)]
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

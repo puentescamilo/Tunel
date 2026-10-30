@@ -50,6 +50,8 @@ pub enum DbError {
     MembersMismatch,
     #[error("se alcanzó el máximo de {0}")]
     Limit(&'static str),
+    #[error("hay que renovar la clave del equipo antes de seguir")]
+    RekeyNeeded,
 }
 
 /// Límites de almacenamiento de cada cuenta.
@@ -102,6 +104,8 @@ CREATE TABLE IF NOT EXISTS teams (
     seq INTEGER NOT NULL DEFAULT 0,
     manifest_version INTEGER NOT NULL DEFAULT 0,
     manifest TEXT,
+    -- Se sacó a alguien y todavía no se ha renovado la clave.
+    rekey_needed INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS team_members (
@@ -110,6 +114,8 @@ CREATE TABLE IF NOT EXISTS team_members (
     role TEXT NOT NULL,
     key TEXT NOT NULL,
     wrapped_by INTEGER NOT NULL REFERENCES accounts(id),
+    -- Una invitación no cuenta hasta que el invitado la acepta.
+    accepted INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (team_id, account_id)
 );
 CREATE INDEX IF NOT EXISTS team_members_by_account ON team_members (account_id);
@@ -253,9 +259,21 @@ fn check_quota(tx: &rusqlite::Transaction<'_>, space: &Space, quota: Quota) -> R
     Ok(())
 }
 
+/// Equipos de los que la cuenta ya es miembro, sin contar invitaciones pendientes.
+fn accepted_teams(tx: &rusqlite::Transaction<'_>, account: i64) -> Result<u64, DbError> {
+    let count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM team_members WHERE account_id = ?1 AND accepted = 1",
+        params![account],
+        |row| row.get(0),
+    )?;
+    Ok(count as u64)
+}
+
+/// Administradores que ya aceptaron; una invitación pendiente no cuenta.
 fn team_admins(tx: &rusqlite::Transaction<'_>, team: &str) -> Result<i64, DbError> {
     Ok(tx.query_row(
-        "SELECT COUNT(*) FROM team_members WHERE team_id = ?1 AND role = 'admin'",
+        "SELECT COUNT(*) FROM team_members
+         WHERE team_id = ?1 AND role = 'admin' AND accepted = 1",
         params![team],
         |row| row.get(0),
     )?)
@@ -575,11 +593,14 @@ impl Db {
                 return Err(DbError::Conflict);
             }
             if let Space::Team(team) = &space {
-                let current_epoch: i64 = tx.query_row(
-                    "SELECT epoch FROM teams WHERE id = ?1",
+                let (current_epoch, rekey_needed): (i64, bool) = tx.query_row(
+                    "SELECT epoch, rekey_needed FROM teams WHERE id = ?1",
                     params![team],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
+                if rekey_needed {
+                    return Err(DbError::RekeyNeeded);
+                }
                 if epoch != Some(current_epoch as u64) {
                     return Err(DbError::Conflict);
                 }
@@ -694,12 +715,7 @@ impl Db {
             if !has_keys {
                 return Err(DbError::NoKeys);
             }
-            let teams: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM team_members WHERE account_id = ?1",
-                params![account],
-                |row| row.get(0),
-            )?;
-            if teams as u64 >= max_teams {
+            if accepted_teams(&tx, account)? >= max_teams {
                 return Err(DbError::Limit("equipos por cuenta"));
             }
             let inserted = tx.execute(
@@ -711,8 +727,8 @@ impl Db {
                 return Err(DbError::TeamExists);
             }
             tx.execute(
-                "INSERT INTO team_members (team_id, account_id, role, key, wrapped_by)
-                 VALUES (?1, ?2, 'admin', ?3, ?2)",
+                "INSERT INTO team_members (team_id, account_id, role, key, wrapped_by, accepted)
+                 VALUES (?1, ?2, 'admin', ?3, ?2, 1)",
                 params![id, account, serde_json::to_string(&key)?],
             )?;
             tx.commit()?;
@@ -725,7 +741,7 @@ impl Db {
     pub async fn teams_of(&self, account: i64) -> Result<Vec<TeamSummary>, DbError> {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT t.id, t.name, m.role, t.epoch, m.key, a.email, a.public_key
+                "SELECT t.id, t.name, m.role, t.epoch, m.key, a.email, a.public_key, m.accepted
                  FROM team_members m
                  JOIN teams t ON t.id = m.team_id
                  JOIN accounts a ON a.id = m.wrapped_by
@@ -741,18 +757,28 @@ impl Db {
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, bool>(7)?,
                 ))
             })?;
             rows.map(|row| {
-                let (id, name, role, epoch, key, wrapped_by, wrapped_by_key) = row?;
+                let (id, name, role, epoch, key, wrapped_by, wrapped_by_key, accepted) = row?;
+                let (name, key) = if accepted {
+                    (
+                        Some(serde_json::from_str(&name)?),
+                        Some(serde_json::from_str(&key)?),
+                    )
+                } else {
+                    (None, None)
+                };
                 Ok(TeamSummary {
                     id,
-                    name: serde_json::from_str(&name)?,
+                    name,
                     role: parse_role(&role)?,
                     epoch: epoch as u64,
-                    key: serde_json::from_str(&key)?,
+                    key,
                     wrapped_by,
                     wrapped_by_key: parse_public_key(&wrapped_by_key)?,
+                    pending: !accepted,
                 })
             })
             .collect()
@@ -760,17 +786,50 @@ impl Db {
         .await
     }
 
-    /// Rol de la cuenta en el equipo; `None` si no es miembro o el equipo no existe.
-    pub async fn team_role(&self, team: String, account: i64) -> Result<Option<TeamRole>, DbError> {
+    /// Rol de la cuenta en el equipo y si ya aceptó la invitación; `None` si no es
+    /// miembro ni está invitada, o si el equipo no existe.
+    pub async fn membership(
+        &self,
+        team: String,
+        account: i64,
+    ) -> Result<Option<(TeamRole, bool)>, DbError> {
         self.call(move |conn| {
-            let role: Option<String> = conn
+            let row: Option<(String, bool)> = conn
                 .query_row(
-                    "SELECT role FROM team_members WHERE team_id = ?1 AND account_id = ?2",
+                    "SELECT role, accepted FROM team_members
+                     WHERE team_id = ?1 AND account_id = ?2",
                     params![team, account],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
-            role.as_deref().map(parse_role).transpose()
+            row.map(|(role, accepted)| Ok((parse_role(&role)?, accepted)))
+                .transpose()
+        })
+        .await
+    }
+
+    /// Acepta una invitación pendiente.
+    pub async fn accept_invitation(
+        &self,
+        team: String,
+        account: i64,
+        max_teams: u64,
+    ) -> Result<(), DbError> {
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            if accepted_teams(&tx, account)? >= max_teams {
+                return Err(DbError::Limit("equipos por cuenta"));
+            }
+            let updated = tx.execute(
+                "UPDATE team_members SET accepted = 1
+                 WHERE team_id = ?1 AND account_id = ?2 AND accepted = 0",
+                params![team, account],
+            )?;
+            if updated == 0 {
+                return Err(DbError::NotFound);
+            }
+            tx.commit()?;
+            Ok(())
         })
         .await
     }
@@ -778,7 +837,7 @@ impl Db {
     pub async fn team_members(&self, team: String) -> Result<Vec<TeamMember>, DbError> {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT a.email, m.role, a.public_key
+                "SELECT a.email, m.role, a.public_key, m.accepted
                  FROM team_members m JOIN accounts a ON a.id = m.account_id
                  WHERE m.team_id = ?1 ORDER BY a.email",
             )?;
@@ -787,14 +846,16 @@ impl Db {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
                 ))
             })?;
             rows.map(|row| {
-                let (email, role, public_key) = row?;
+                let (email, role, public_key, accepted) = row?;
                 Ok(TeamMember {
                     email,
                     role: parse_role(&role)?,
                     public_key: parse_public_key(&public_key)?,
+                    pending: !accepted,
                 })
             })
             .collect()
@@ -802,7 +863,9 @@ impl Db {
         .await
     }
 
-    /// Añade a la cuenta de `email` con la clave del equipo envuelta por `wrapped_by`.
+    /// Invita a la cuenta de `email` con la clave del equipo envuelta por `wrapped_by`.
+    /// No es miembro hasta que acepta. Una cuenta sin claves se trata como inexistente,
+    /// para no revelar qué correos tienen cuenta.
     #[allow(clippy::too_many_arguments)]
     pub async fn add_member(
         &self,
@@ -813,26 +876,27 @@ impl Db {
         key: SealedBlob,
         wrapped_by: i64,
         max_members: u64,
-        max_teams: u64,
+        max_pending: u64,
     ) -> Result<(), DbError> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
-            let (account, has_keys): (i64, bool) = tx
+            let (account, _): (i64, bool) = tx
                 .query_row(
                     "SELECT id, public_key IS NOT NULL FROM accounts WHERE email = ?1",
                     params![email],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?
+                .filter(|(_, has_keys)| *has_keys)
                 .ok_or(DbError::NotFound)?;
-            if !has_keys {
-                return Err(DbError::NoKeys);
-            }
-            let current: i64 = tx.query_row(
-                "SELECT epoch FROM teams WHERE id = ?1",
+            let (current, rekey_needed): (i64, bool) = tx.query_row(
+                "SELECT epoch, rekey_needed FROM teams WHERE id = ?1",
                 params![team],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
+            if rekey_needed {
+                return Err(DbError::RekeyNeeded);
+            }
             if current as u64 != epoch {
                 return Err(DbError::Conflict);
             }
@@ -844,13 +908,13 @@ impl Db {
             if members as u64 >= max_members {
                 return Err(DbError::Limit("miembros por equipo"));
             }
-            let teams: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM team_members WHERE account_id = ?1",
+            let pending: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM team_members WHERE account_id = ?1 AND accepted = 0",
                 params![account],
                 |row| row.get(0),
             )?;
-            if teams as u64 >= max_teams {
-                return Err(DbError::Limit("equipos por cuenta"));
+            if pending as u64 >= max_pending {
+                return Err(DbError::Limit("invitaciones pendientes"));
             }
             let inserted = tx.execute(
                 "INSERT INTO team_members (team_id, account_id, role, key, wrapped_by)
@@ -899,20 +963,32 @@ impl Db {
         .await
     }
 
-    /// Saca a un miembro; el equipo no puede quedarse sin administradores.
+    /// Saca a un miembro o retira una invitación; el equipo no puede quedarse sin
+    /// administradores. Si era miembro, el equipo queda pendiente de renovar la clave.
     pub async fn remove_member(&self, team: String, email: String) -> Result<(), DbError> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
-            let removed = tx.execute(
-                "DELETE FROM team_members
-                 WHERE team_id = ?1 AND account_id = (SELECT id FROM accounts WHERE email = ?2)",
-                params![team, email],
-            )?;
-            if removed == 0 {
-                return Err(DbError::NotFound);
-            }
+            let was_accepted: bool = tx
+                .query_row(
+                    "DELETE FROM team_members
+                     WHERE team_id = ?1
+                       AND account_id = (SELECT id FROM accounts WHERE email = ?2)
+                     RETURNING accepted",
+                    params![team, email],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or(DbError::NotFound)?;
             if team_admins(&tx, &team)? == 0 {
                 return Err(DbError::LastAdmin);
+            }
+            // Quien sale se lleva la clave: hasta que se renueve no se sube nada más. Una
+            // invitación pendiente nunca la recibió.
+            if was_accepted {
+                tx.execute(
+                    "UPDATE teams SET rekey_needed = 1 WHERE id = ?1",
+                    params![team],
+                )?;
             }
             tx.commit()?;
             Ok(())
@@ -995,7 +1071,7 @@ impl Db {
             check_quota(&tx, &space, quota)?;
             tx.execute(
                 "UPDATE teams SET name = ?1, epoch = ?2, seq = ?3, manifest_version = ?4,
-                     manifest = ?5
+                     manifest = ?5, rekey_needed = 0
                  WHERE id = ?6",
                 params![
                     serde_json::to_string(&rotation.name)?,

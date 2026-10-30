@@ -48,6 +48,13 @@ pub struct Config {
     /// Equipos de los que puede ser miembro una cuenta.
     pub max_teams_per_account: u64,
     pub max_team_members: u64,
+    /// Invitaciones sin responder que puede acumular una cuenta.
+    pub max_pending_invitations: u64,
+    /// Límites de cada equipo. Más pequeños que los de una cuenta: al renovar la clave
+    /// todo el equipo se sube en una sola petición de como mucho `MAX_ROTATE_BODY`.
+    pub team_quota: Quota,
+    /// Renovaciones de clave que se procesan a la vez como mucho.
+    pub concurrent_rotations: usize,
 }
 
 impl Default for Config {
@@ -73,8 +80,14 @@ impl Default for Config {
             max_tracked_logins: 10_000,
             request_timeout: Duration::from_secs(30),
             max_concurrent_requests: 256,
-            max_teams_per_account: 50,
+            max_teams_per_account: 20,
             max_team_members: 200,
+            max_pending_invitations: 20,
+            team_quota: Quota {
+                records: 5_000,
+                bytes: 32 * 1024 * 1024,
+            },
+            concurrent_rotations: 2,
         }
     }
 }
@@ -86,8 +99,9 @@ pub const ACCOUNT_KDF: KdfParams = KdfParams::RECOMMENDED;
 const MAX_AUTH_BODY: usize = 8 * 1024;
 /// Tamaño máximo del cuerpo al subir registros.
 const MAX_PUSH_BODY: usize = 16 * 1024 * 1024;
-/// Al renovar la clave de un equipo se sube todo su contenido de una vez.
-const MAX_ROTATE_BODY: usize = 64 * 1024 * 1024;
+/// Al renovar la clave de un equipo se sube todo su contenido de una vez: cabe la cuota
+/// de un equipo con el JSON alrededor.
+const MAX_ROTATE_BODY: usize = 48 * 1024 * 1024;
 /// El nombre de un equipo cifrado, con relleno de sobra.
 const MAX_TEAM_NAME_CIPHERTEXT: usize = 512;
 /// Tamaño máximo del manifiesto cifrado en base64.
@@ -104,6 +118,7 @@ pub struct AppState {
     hasher: AuthHasher,
     limiter: LoginLimiter,
     unauthenticated: RateBucket,
+    rotations: tokio::sync::Semaphore,
     secret: [u8; 32],
 }
 
@@ -125,6 +140,7 @@ impl AppState {
                 config.unauthenticated_per_second,
                 config.unauthenticated_burst,
             ),
+            rotations: tokio::sync::Semaphore::new(config.concurrent_rotations),
             db,
             config,
             secret,
@@ -148,6 +164,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/users/{email}/key", get(user_key))
         .route("/v1/teams", get(list_teams).post(create_team))
         .route("/v1/teams/{team}", delete(delete_team))
+        .route("/v1/teams/{team}/accept", post(accept_invitation))
         .route(
             "/v1/teams/{team}/members",
             get(list_members).post(add_member),
@@ -248,7 +265,8 @@ impl From<DbError> for ApiError {
             | DbError::KeysExist
             | DbError::NoKeys
             | DbError::TeamExists
-            | DbError::AlreadyMember => Self::new(StatusCode::CONFLICT, e.to_string()),
+            | DbError::AlreadyMember
+            | DbError::RekeyNeeded => Self::new(StatusCode::CONFLICT, e.to_string()),
             DbError::RegistrationClosed | DbError::Limit(_) => {
                 Self::new(StatusCode::FORBIDDEN, e.to_string())
             }
@@ -518,6 +536,10 @@ async fn push_space(
     }
     check_blob(&request.manifest.blob, MAX_MANIFEST_CIPHERTEXT)?;
     check_records(&request.records)?;
+    let quota = match space {
+        Space::Account(_) => state.config.quota,
+        Space::Team(_) => state.config.team_quota,
+    };
     let cursor = state
         .db
         .push(
@@ -526,7 +548,7 @@ async fn push_space(
             request.epoch,
             request.manifest,
             request.records,
-            state.config.quota,
+            quota,
         )
         .await?;
     Ok(Json(PushResponse { cursor }))
@@ -587,15 +609,27 @@ fn check_team_id(id: &str) -> ApiResult<()> {
     }
 }
 
-/// Rol de la sesión en el equipo. A quien no es miembro se le responde lo mismo que si
-/// el equipo no existiera.
-async fn team_role(state: &AppState, session: &Session, team: &str) -> ApiResult<TeamRole> {
+/// Rol de la sesión en el equipo y si ya aceptó. A quien no es miembro ni está
+/// invitado se le responde lo mismo que si el equipo no existiera.
+async fn membership(
+    state: &AppState,
+    session: &Session,
+    team: &str,
+) -> ApiResult<(TeamRole, bool)> {
     check_team_id(team)?;
     state
         .db
-        .team_role(team.to_string(), session.account)
+        .membership(team.to_string(), session.account)
         .await?
         .ok_or_else(|| ApiError::not_found("equipo"))
+}
+
+/// Rol de la sesión en el equipo; una invitación pendiente todavía no da acceso.
+async fn team_role(state: &AppState, session: &Session, team: &str) -> ApiResult<TeamRole> {
+    match membership(state, session, team).await? {
+        (role, true) => Ok(role),
+        (_, false) => Err(ApiError::not_found("equipo")),
+    }
 }
 
 async fn require_admin(state: &AppState, session: &Session, team: &str) -> ApiResult<()> {
@@ -647,6 +681,19 @@ async fn delete_team(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn accept_invitation(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+) -> ApiResult<StatusCode> {
+    check_team_id(&team)?;
+    state
+        .db
+        .accept_invitation(team, session.account, state.config.max_teams_per_account)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn list_members(
     State(state): State<Arc<AppState>>,
     session: Session,
@@ -675,7 +722,7 @@ async fn add_member(
             request.key,
             session.account,
             state.config.max_team_members,
-            state.config.max_teams_per_account,
+            state.config.max_pending_invitations,
         )
         .await?;
     Ok(StatusCode::CREATED)
@@ -693,13 +740,15 @@ async fn update_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Un administrador saca a un miembro, o un miembro se sale del equipo.
+/// Un administrador saca a un miembro o retira una invitación, o un miembro se sale del
+/// equipo o rechaza su invitación.
 async fn remove_member(
     State(state): State<Arc<AppState>>,
     session: Session,
     Path((team, email)): Path<(String, String)>,
 ) -> ApiResult<StatusCode> {
-    let role = team_role(&state, &session, &team).await?;
+    let (role, accepted) = membership(&state, &session, &team).await?;
+    let role = if accepted { role } else { TeamRole::Member };
     let email = normalize_email(&email)?;
     let leaving = state.db.account_email(session.account).await? == email;
     if role != TeamRole::Admin && !leaving {
@@ -744,7 +793,13 @@ async fn rotate_team(
     Json(request): Json<RotateTeamRequest>,
 ) -> ApiResult<Json<PushResponse>> {
     require_admin(&state, &session, &team).await?;
-    if request.records.len() as u64 > state.config.quota.records
+    let _permit = state.rotations.try_acquire().map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "servidor ocupado; inténtalo en un momento",
+        )
+    })?;
+    if request.records.len() as u64 > state.config.team_quota.records
         || request.keys.len() as u64 > state.config.max_team_members
     {
         return Err(ApiError::bad_request("demasiados registros o miembros"));
@@ -770,7 +825,7 @@ async fn rotate_team(
     };
     let cursor = state
         .db
-        .rotate_team(team, rotation, session.account, state.config.quota)
+        .rotate_team(team, rotation, session.account, state.config.team_quota)
         .await?;
     Ok(Json(PushResponse { cursor }))
 }
