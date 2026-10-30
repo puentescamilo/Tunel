@@ -124,7 +124,7 @@ Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puente
 e instálalo con:
 
 ```bash
-sudo apt install ./tunel_0.3.0_amd64.deb
+sudo apt install ./tunel_0.4.0_amd64.deb
 ```
 
 Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
