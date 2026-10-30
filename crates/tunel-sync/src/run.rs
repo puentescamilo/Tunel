@@ -1,6 +1,7 @@
 //! Una ronda de sincronización: descargar, fusionar, comprobar y subir.
 
 use crate::api::Api;
+use crate::keypair;
 use crate::{SyncError, check_server_url, now_millis};
 use tunel_core::sync::protocol::{
     MAX_PUSH_RECORDS, ManifestBlob, PullResponse, PushRequest, PushResponse,
@@ -54,10 +55,10 @@ impl Session<'_> {
 
     async fn pull(&mut self, since: u64) -> Result<PullResponse, SyncError> {
         let token = self.token().await?;
-        match self.api.pull(&token, since).await {
+        match self.api.pull(&token, None, since).await {
             Err(SyncError::Unauthorized) => {
                 let token = self.renew().await?;
-                self.api.pull(&token, since).await
+                self.api.pull(&token, None, since).await
             }
             other => other,
         }
@@ -65,10 +66,10 @@ impl Session<'_> {
 
     async fn push(&mut self, request: &PushRequest) -> Result<PushResponse, SyncError> {
         let token = self.token().await?;
-        match self.api.push(&token, request).await {
+        match self.api.push(&token, None, request).await {
             Err(SyncError::Unauthorized) => {
                 let token = self.renew().await?;
-                self.api.push(&token, request).await
+                self.api.push(&token, None, request).await
             }
             other => other,
         }
@@ -181,6 +182,7 @@ async fn push(
         let vault_key = &session.local.vault_key;
         let next = manifest.with_pushed(chunk.iter().map(|e| (vault_key.record_id(&e.key), e.hlc)));
         let request = PushRequest {
+            epoch: None,
             base_version: manifest.version,
             manifest: ManifestBlob {
                 version: next.version,
@@ -238,6 +240,11 @@ async fn run_round(local: &SyncLocal, data: &VaultData) -> Result<SyncOutcome, S
     }
     if !done {
         return Err(SyncError::TooManyConflicts);
+    }
+    if session.local.keypair.is_none() {
+        let token = session.token().await?;
+        session.local.keypair =
+            keypair::try_fetch_or_create(&session.api, &token, &session.local.vault_key).await;
     }
     Ok(SyncOutcome {
         data,

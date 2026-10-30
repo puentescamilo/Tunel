@@ -7,6 +7,7 @@
 
 use super::keys::VaultKey;
 use super::state::SyncState;
+use super::team::AccountKeypair;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::Zeroizing;
@@ -22,6 +23,9 @@ pub struct SyncLocal {
     /// Token de la sesión actual, si hay una.
     pub token: Option<Zeroizing<String>>,
     pub state: SyncState,
+    /// Par de claves de la cuenta para los equipos; `None` hasta recuperarlo o crearlo.
+    #[serde(default)]
+    pub keypair: Option<AccountKeypair>,
 }
 
 /// Lleva claves: solo se muestra a qué servidor y cuenta está unido el equipo.
@@ -48,6 +52,7 @@ mod tests {
             vault_key: VaultKey::generate(),
             token: Some(Zeroizing::new("token-secreto".into())),
             state: SyncState::new(Uuid::from_u128(1)),
+            keypair: Some(AccountKeypair::generate()),
         }
     }
 
@@ -63,9 +68,21 @@ mod tests {
         );
         assert_eq!(back.state, local.state);
         assert_eq!(
+            back.keypair.map(|k| k.public()),
+            local.keypair.map(|k| k.public())
+        );
+        assert_eq!(
             back.token.as_deref().map(String::as_str),
             Some("token-secreto")
         );
+    }
+
+    #[test]
+    fn configurations_saved_before_teams_still_load() {
+        let mut json = serde_json::to_value(sample()).unwrap();
+        json.as_object_mut().unwrap().remove("keypair");
+        let back: SyncLocal = serde_json::from_value(json).unwrap();
+        assert!(back.keypair.is_none());
     }
 
     #[test]

@@ -105,7 +105,7 @@ impl Api {
             StatusCode::UNAUTHORIZED => SyncError::Unauthorized,
             StatusCode::CONFLICT => SyncError::Conflict(message),
             StatusCode::TOO_MANY_REQUESTS => SyncError::TooManyAttempts,
-            StatusCode::FORBIDDEN => SyncError::RegistrationClosed,
+            StatusCode::FORBIDDEN => SyncError::Forbidden(message),
             StatusCode::SERVICE_UNAVAILABLE => SyncError::Busy,
             StatusCode::INSUFFICIENT_STORAGE => SyncError::QuotaExceeded,
             other => SyncError::Server {
@@ -144,6 +144,7 @@ impl Api {
         match self.execute(self.post("/v1/accounts", request)).await {
             Ok(_) => Ok(()),
             Err(SyncError::Conflict(_)) => Err(SyncError::AccountExists),
+            Err(SyncError::Forbidden(_)) => Err(SyncError::RegistrationClosed),
             Err(e) => Err(e),
         }
     }
@@ -169,23 +170,164 @@ impl Api {
         .map(|_| ())
     }
 
-    pub async fn pull(&self, token: &str, since: u64) -> Result<PullResponse, SyncError> {
-        self.send(
-            self.client
-                .get(format!("{}/v1/records?since={since}", self.base))
-                .bearer_auth(token),
-        )
-        .await
+    fn get(&self, token: &str, path: &str) -> reqwest::RequestBuilder {
+        self.client
+            .get(format!("{}{path}", self.base))
+            .bearer_auth(token)
+    }
+
+    /// Ruta de los registros de la bóveda personal (`team` es `None`) o de un equipo.
+    fn records_path(team: Option<&str>) -> String {
+        match team {
+            None => "/v1/records".into(),
+            Some(team) => format!("/v1/teams/{}/records", segment(team)),
+        }
+    }
+
+    pub async fn pull(
+        &self,
+        token: &str,
+        team: Option<&str>,
+        since: u64,
+    ) -> Result<PullResponse, SyncError> {
+        let path = format!("{}?since={since}", Self::records_path(team));
+        self.send(self.get(token, &path)).await
     }
 
     pub async fn push(
         &self,
         token: &str,
+        team: Option<&str>,
         request: &PushRequest,
     ) -> Result<PushResponse, SyncError> {
-        self.send(self.post("/v1/records", request).bearer_auth(token))
+        self.send(
+            self.post(&Self::records_path(team), request)
+                .bearer_auth(token),
+        )
+        .await
+    }
+
+    /// Par de claves de la cuenta; `None` si todavía no se ha subido ninguno.
+    pub async fn keys(&self, token: &str) -> Result<Option<AccountKeysBlob>, SyncError> {
+        match self.send(self.get(token, "/v1/keys")).await {
+            Ok(keys) => Ok(Some(keys)),
+            Err(SyncError::Server { status: 404, .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn upload_keys(&self, token: &str, keys: &AccountKeysBlob) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .put(format!("{}/v1/keys", self.base))
+            .bearer_auth(token)
+            .json(keys);
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn user_key(&self, token: &str, email: &str) -> Result<UserKeyResponse, SyncError> {
+        let path = format!("/v1/users/{}/key", segment(email));
+        self.send(self.get(token, &path)).await
+    }
+
+    pub async fn teams(&self, token: &str) -> Result<Vec<TeamSummary>, SyncError> {
+        self.send(self.get(token, "/v1/teams")).await
+    }
+
+    pub async fn create_team(
+        &self,
+        token: &str,
+        request: &CreateTeamRequest,
+    ) -> Result<(), SyncError> {
+        let request = self.post("/v1/teams", request).bearer_auth(token);
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn delete_team(&self, token: &str, team: &str) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .delete(format!("{}/v1/teams/{}", self.base, segment(team)))
+            .bearer_auth(token);
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn members(&self, token: &str, team: &str) -> Result<Vec<TeamMember>, SyncError> {
+        let path = format!("/v1/teams/{}/members", segment(team));
+        self.send(self.get(token, &path)).await
+    }
+
+    pub async fn add_member(
+        &self,
+        token: &str,
+        team: &str,
+        request: &AddMemberRequest,
+    ) -> Result<(), SyncError> {
+        let path = format!("/v1/teams/{}/members", segment(team));
+        self.execute(self.post(&path, request).bearer_auth(token))
+            .await
+            .map(|_| ())
+    }
+
+    fn member_url(&self, team: &str, email: &str) -> String {
+        format!(
+            "{}/v1/teams/{}/members/{}",
+            self.base,
+            segment(team),
+            segment(email)
+        )
+    }
+
+    pub async fn set_role(
+        &self,
+        token: &str,
+        team: &str,
+        email: &str,
+        role: TeamRole,
+    ) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .patch(self.member_url(team, email))
+            .bearer_auth(token)
+            .json(&UpdateMemberRequest { role });
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn remove_member(
+        &self,
+        token: &str,
+        team: &str,
+        email: &str,
+    ) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .delete(self.member_url(team, email))
+            .bearer_auth(token);
+        self.execute(request).await.map(|_| ())
+    }
+
+    pub async fn rotate_team(
+        &self,
+        token: &str,
+        team: &str,
+        request: &RotateTeamRequest,
+    ) -> Result<PushResponse, SyncError> {
+        let path = format!("/v1/teams/{}/rotate", segment(team));
+        self.send(self.post(&path, request).bearer_auth(token))
             .await
     }
+}
+
+/// Codifica un trozo de ruta: un correo o identificador no puede añadir segmentos. Los
+/// puntos también, porque `..` se resolvería como «subir un nivel».
+fn segment(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'~' | b'@' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -224,6 +366,13 @@ mod tests {
         ] {
             assert!(check_server_url(remote).is_err(), "{remote}");
         }
+    }
+
+    #[test]
+    fn path_segments_cannot_escape_their_route() {
+        assert_eq!(segment("ana@ejemplo.com"), "ana@ejemplo%2Ecom");
+        assert_eq!(segment("../x?y#z"), "%2E%2E%2Fx%3Fy%23z");
+        assert_eq!(segment("a b"), "a%20b");
     }
 
     #[test]

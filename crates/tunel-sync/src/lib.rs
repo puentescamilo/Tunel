@@ -6,6 +6,7 @@
 
 pub mod account;
 pub mod api;
+mod keypair;
 pub mod run;
 
 pub use account::{create_account, sign_in, sign_out};
@@ -26,6 +27,8 @@ pub enum SyncError {
     AccountExists,
     #[error("este servidor no admite cuentas nuevas")]
     RegistrationClosed,
+    #[error("no permitido: {0}")]
+    Forbidden(String),
     #[error("demasiados intentos; espera unos minutos")]
     TooManyAttempts,
     #[error("el servidor está ocupado; se reintentará")]

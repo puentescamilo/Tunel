@@ -1,12 +1,12 @@
 //! Rutas HTTP del servidor de sincronización.
 
 use crate::auth::{self, AuthHasher, HashError, LoginLimiter, RateBucket};
-use crate::db::{Db, DbError, NewAccount, Quota};
-use axum::extract::{DefaultBodyLimit, FromRequestParts, Query, State};
+use crate::db::{Db, DbError, NewAccount, Quota, Rotation, Space};
+use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -45,6 +45,16 @@ pub struct Config {
     pub max_tracked_logins: usize,
     pub request_timeout: Duration,
     pub max_concurrent_requests: usize,
+    /// Equipos de los que puede ser miembro una cuenta.
+    pub max_teams_per_account: u64,
+    pub max_team_members: u64,
+    /// Invitaciones sin responder que puede acumular una cuenta.
+    pub max_pending_invitations: u64,
+    /// Límites de cada equipo. Más pequeños que los de una cuenta: al renovar la clave
+    /// todo el equipo se sube en una sola petición de como mucho `MAX_ROTATE_BODY`.
+    pub team_quota: Quota,
+    /// Renovaciones de clave que se procesan a la vez como mucho.
+    pub concurrent_rotations: usize,
 }
 
 impl Default for Config {
@@ -70,6 +80,14 @@ impl Default for Config {
             max_tracked_logins: 10_000,
             request_timeout: Duration::from_secs(30),
             max_concurrent_requests: 256,
+            max_teams_per_account: 20,
+            max_team_members: 200,
+            max_pending_invitations: 20,
+            team_quota: Quota {
+                records: 5_000,
+                bytes: 32 * 1024 * 1024,
+            },
+            concurrent_rotations: 2,
         }
     }
 }
@@ -81,6 +99,11 @@ pub const ACCOUNT_KDF: KdfParams = KdfParams::RECOMMENDED;
 const MAX_AUTH_BODY: usize = 8 * 1024;
 /// Tamaño máximo del cuerpo al subir registros.
 const MAX_PUSH_BODY: usize = 16 * 1024 * 1024;
+/// Al renovar la clave de un equipo se sube todo su contenido de una vez: cabe la cuota
+/// de un equipo con el JSON alrededor.
+const MAX_ROTATE_BODY: usize = 48 * 1024 * 1024;
+/// El nombre de un equipo cifrado, con relleno de sobra.
+const MAX_TEAM_NAME_CIPHERTEXT: usize = 512;
 /// Tamaño máximo del manifiesto cifrado en base64.
 const MAX_MANIFEST_CIPHERTEXT: usize = 8 * 1024 * 1024;
 /// La clave de bóveda envuelta ocupa unos 64 bytes en base64; se deja margen.
@@ -95,6 +118,7 @@ pub struct AppState {
     hasher: AuthHasher,
     limiter: LoginLimiter,
     unauthenticated: RateBucket,
+    rotations: tokio::sync::Semaphore,
     secret: [u8; 32],
 }
 
@@ -116,6 +140,7 @@ impl AppState {
                 config.unauthenticated_per_second,
                 config.unauthenticated_burst,
             ),
+            rotations: tokio::sync::Semaphore::new(config.concurrent_rotations),
             db,
             config,
             secret,
@@ -132,11 +157,32 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(DefaultBodyLimit::max(MAX_AUTH_BODY));
     let record_routes = Router::new()
         .route("/v1/records", get(pull).post(push))
+        .route("/v1/teams/{team}/records", get(team_pull).post(team_push))
         .layer(DefaultBodyLimit::max(MAX_PUSH_BODY));
+    let team_routes = Router::new()
+        .route("/v1/keys", get(own_keys).put(upload_keys))
+        .route("/v1/users/{email}/key", get(user_key))
+        .route("/v1/teams", get(list_teams).post(create_team))
+        .route("/v1/teams/{team}", delete(delete_team))
+        .route("/v1/teams/{team}/accept", post(accept_invitation))
+        .route(
+            "/v1/teams/{team}/members",
+            get(list_members).post(add_member),
+        )
+        .route(
+            "/v1/teams/{team}/members/{email}",
+            patch(update_member).delete(remove_member),
+        )
+        .layer(DefaultBodyLimit::max(MAX_AUTH_BODY));
+    let rotate_routes = Router::new()
+        .route("/v1/teams/{team}/rotate", post(rotate_team))
+        .layer(DefaultBodyLimit::max(MAX_ROTATE_BODY));
     let config = &state.config;
     Router::new()
         .merge(auth_routes)
         .merge(record_routes)
+        .merge(team_routes)
+        .merge(rotate_routes)
         .route("/health", get(|| async { "ok" }))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -187,6 +233,10 @@ impl ApiError {
         Self::new(StatusCode::UNAUTHORIZED, "credenciales no válidas")
     }
 
+    fn not_found(what: &str) -> Self {
+        Self::new(StatusCode::NOT_FOUND, format!("{what} no encontrado"))
+    }
+
     fn too_many() -> Self {
         Self::new(
             StatusCode::TOO_MANY_REQUESTS,
@@ -210,10 +260,18 @@ impl IntoResponse for ApiError {
 impl From<DbError> for ApiError {
     fn from(e: DbError) -> Self {
         match e {
-            DbError::AccountExists | DbError::Conflict => {
-                Self::new(StatusCode::CONFLICT, e.to_string())
+            DbError::AccountExists
+            | DbError::Conflict
+            | DbError::KeysExist
+            | DbError::NoKeys
+            | DbError::TeamExists
+            | DbError::AlreadyMember
+            | DbError::RekeyNeeded => Self::new(StatusCode::CONFLICT, e.to_string()),
+            DbError::RegistrationClosed | DbError::Limit(_) => {
+                Self::new(StatusCode::FORBIDDEN, e.to_string())
             }
-            DbError::RegistrationClosed => Self::new(StatusCode::FORBIDDEN, e.to_string()),
+            DbError::NotFound => Self::new(StatusCode::NOT_FOUND, e.to_string()),
+            DbError::LastAdmin | DbError::MembersMismatch => Self::bad_request(e.to_string()),
             DbError::QuotaExceeded => Self::new(StatusCode::INSUFFICIENT_STORAGE, e.to_string()),
             DbError::BadVersion => Self::bad_request(e.to_string()),
             other => {
@@ -432,27 +490,41 @@ struct PullQuery {
     since: u64,
 }
 
-async fn pull(
-    State(state): State<Arc<AppState>>,
-    session: Session,
-    Query(query): Query<PullQuery>,
-) -> ApiResult<Json<PullResponse>> {
-    let page = state
-        .db
-        .pull(session.account, query.since, PULL_PAGE_SIZE)
-        .await?;
+async fn pull_space(state: &AppState, space: Space, since: u64) -> ApiResult<Json<PullResponse>> {
+    let page = state.db.pull(space, since, PULL_PAGE_SIZE).await?;
     Ok(Json(PullResponse {
         records: page.records,
         cursor: page.cursor,
         more: page.more,
         manifest: page.manifest,
+        epoch: page.epoch,
     }))
 }
 
-async fn push(
+async fn pull(
     State(state): State<Arc<AppState>>,
     session: Session,
-    Json(request): Json<PushRequest>,
+    Query(query): Query<PullQuery>,
+) -> ApiResult<Json<PullResponse>> {
+    pull_space(&state, Space::Account(session.account), query.since).await
+}
+
+/// Comprueba los registros de una subida: identificadores válidos y sin repetir.
+fn check_records(records: &[SealedRecord]) -> ApiResult<()> {
+    let mut ids = std::collections::HashSet::new();
+    for record in records {
+        check_record(record)?;
+        if !ids.insert(&record.id) {
+            return Err(ApiError::bad_request("registro repetido en la petición"));
+        }
+    }
+    Ok(())
+}
+
+async fn push_space(
+    state: &AppState,
+    space: Space,
+    request: PushRequest,
 ) -> ApiResult<Json<PushResponse>> {
     if request.records.len() > MAX_PUSH_RECORDS {
         return Err(ApiError::bad_request(
@@ -463,22 +535,297 @@ async fn push(
         return Err(ApiError::bad_request("versión de manifiesto no válida"));
     }
     check_blob(&request.manifest.blob, MAX_MANIFEST_CIPHERTEXT)?;
-    let mut ids = std::collections::HashSet::new();
-    for record in &request.records {
-        check_record(record)?;
-        if !ids.insert(&record.id) {
-            return Err(ApiError::bad_request("registro repetido en la petición"));
-        }
-    }
+    check_records(&request.records)?;
+    let quota = match space {
+        Space::Account(_) => state.config.quota,
+        Space::Team(_) => state.config.team_quota,
+    };
     let cursor = state
         .db
         .push(
-            session.account,
+            space,
             request.base_version,
+            request.epoch,
             request.manifest,
             request.records,
-            state.config.quota,
+            quota,
         )
+        .await?;
+    Ok(Json(PushResponse { cursor }))
+}
+
+async fn push(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Json(request): Json<PushRequest>,
+) -> ApiResult<Json<PushResponse>> {
+    push_space(&state, Space::Account(session.account), request).await
+}
+
+async fn own_keys(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+) -> ApiResult<Json<AccountKeysBlob>> {
+    state
+        .db
+        .account_keys(session.account)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("par de claves"))
+}
+
+/// Guarda el par de claves de la cuenta, una sola vez.
+async fn upload_keys(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Json(request): Json<AccountKeysBlob>,
+) -> ApiResult<StatusCode> {
+    check_blob(&request.private_key, MAX_VAULT_KEY_CIPHERTEXT)?;
+    state.db.set_account_keys(session.account, request).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Clave pública de otra cuenta. Solo con sesión: revela qué correos tienen cuenta en
+/// este servidor, algo que ya sabe quien comparte equipos en él.
+async fn user_key(
+    State(state): State<Arc<AppState>>,
+    _session: Session,
+    Path(email): Path<String>,
+) -> ApiResult<Json<UserKeyResponse>> {
+    let email = normalize_email(&email)?;
+    let public_key = state
+        .db
+        .public_key_by_email(email.clone())
+        .await?
+        .ok_or_else(|| ApiError::not_found("usuario con claves"))?;
+    Ok(Json(UserKeyResponse { email, public_key }))
+}
+
+/// El identificador de un equipo es un UUID en su forma canónica.
+fn check_team_id(id: &str) -> ApiResult<()> {
+    match uuid::Uuid::parse_str(id) {
+        Ok(uuid) if uuid.hyphenated().to_string() == id => Ok(()),
+        _ => Err(ApiError::bad_request("identificador de equipo no válido")),
+    }
+}
+
+/// Rol de la sesión en el equipo y si ya aceptó. A quien no es miembro ni está
+/// invitado se le responde lo mismo que si el equipo no existiera.
+async fn membership(
+    state: &AppState,
+    session: &Session,
+    team: &str,
+) -> ApiResult<(TeamRole, bool)> {
+    check_team_id(team)?;
+    state
+        .db
+        .membership(team.to_string(), session.account)
+        .await?
+        .ok_or_else(|| ApiError::not_found("equipo"))
+}
+
+/// Rol de la sesión en el equipo; una invitación pendiente todavía no da acceso.
+async fn team_role(state: &AppState, session: &Session, team: &str) -> ApiResult<TeamRole> {
+    match membership(state, session, team).await? {
+        (role, true) => Ok(role),
+        (_, false) => Err(ApiError::not_found("equipo")),
+    }
+}
+
+async fn require_admin(state: &AppState, session: &Session, team: &str) -> ApiResult<()> {
+    match team_role(state, session, team).await? {
+        TeamRole::Admin => Ok(()),
+        TeamRole::Member => Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "solo un administrador del equipo puede hacerlo",
+        )),
+    }
+}
+
+async fn list_teams(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+) -> ApiResult<Json<Vec<TeamSummary>>> {
+    Ok(Json(state.db.teams_of(session.account).await?))
+}
+
+async fn create_team(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Json(request): Json<CreateTeamRequest>,
+) -> ApiResult<StatusCode> {
+    check_team_id(&request.id)?;
+    check_blob(&request.name, MAX_TEAM_NAME_CIPHERTEXT)?;
+    check_blob(&request.key, MAX_VAULT_KEY_CIPHERTEXT)?;
+    state
+        .db
+        .create_team(
+            session.account,
+            request.id,
+            request.name,
+            request.key,
+            now(),
+            state.config.max_teams_per_account,
+        )
+        .await?;
+    Ok(StatusCode::CREATED)
+}
+
+async fn delete_team(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+) -> ApiResult<StatusCode> {
+    require_admin(&state, &session, &team).await?;
+    state.db.delete_team(team).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn accept_invitation(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+) -> ApiResult<StatusCode> {
+    check_team_id(&team)?;
+    state
+        .db
+        .accept_invitation(team, session.account, state.config.max_teams_per_account)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_members(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+) -> ApiResult<Json<Vec<TeamMember>>> {
+    team_role(&state, &session, &team).await?;
+    Ok(Json(state.db.team_members(team).await?))
+}
+
+async fn add_member(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+    Json(request): Json<AddMemberRequest>,
+) -> ApiResult<StatusCode> {
+    require_admin(&state, &session, &team).await?;
+    let email = normalize_email(&request.email)?;
+    check_blob(&request.key, MAX_VAULT_KEY_CIPHERTEXT)?;
+    state
+        .db
+        .add_member(
+            team,
+            email,
+            request.role,
+            request.epoch,
+            request.key,
+            session.account,
+            state.config.max_team_members,
+            state.config.max_pending_invitations,
+        )
+        .await?;
+    Ok(StatusCode::CREATED)
+}
+
+async fn update_member(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path((team, email)): Path<(String, String)>,
+    Json(request): Json<UpdateMemberRequest>,
+) -> ApiResult<StatusCode> {
+    require_admin(&state, &session, &team).await?;
+    let email = normalize_email(&email)?;
+    state.db.set_member_role(team, email, request.role).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Un administrador saca a un miembro o retira una invitación, o un miembro se sale del
+/// equipo o rechaza su invitación.
+async fn remove_member(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path((team, email)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    let (role, accepted) = membership(&state, &session, &team).await?;
+    let role = if accepted { role } else { TeamRole::Member };
+    let email = normalize_email(&email)?;
+    let leaving = state.db.account_email(session.account).await? == email;
+    if role != TeamRole::Admin && !leaving {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "solo un administrador del equipo puede sacar a otros",
+        ));
+    }
+    state.db.remove_member(team, email).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn team_pull(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+    Query(query): Query<PullQuery>,
+) -> ApiResult<Json<PullResponse>> {
+    team_role(&state, &session, &team).await?;
+    pull_space(&state, Space::Team(team), query.since).await
+}
+
+async fn team_push(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+    Json(request): Json<PushRequest>,
+) -> ApiResult<Json<PushResponse>> {
+    team_role(&state, &session, &team).await?;
+    if request.epoch.is_none() {
+        return Err(ApiError::bad_request(
+            "falta la época de la clave del equipo",
+        ));
+    }
+    push_space(&state, Space::Team(team), request).await
+}
+
+async fn rotate_team(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+    Json(request): Json<RotateTeamRequest>,
+) -> ApiResult<Json<PushResponse>> {
+    require_admin(&state, &session, &team).await?;
+    let _permit = state.rotations.try_acquire().map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "servidor ocupado; inténtalo en un momento",
+        )
+    })?;
+    if request.records.len() as u64 > state.config.team_quota.records
+        || request.keys.len() as u64 > state.config.max_team_members
+    {
+        return Err(ApiError::bad_request("demasiados registros o miembros"));
+    }
+    check_blob(&request.name, MAX_TEAM_NAME_CIPHERTEXT)?;
+    check_blob(&request.manifest.blob, MAX_MANIFEST_CIPHERTEXT)?;
+    check_records(&request.records)?;
+    let mut keys = Vec::with_capacity(request.keys.len());
+    for member in request.keys {
+        check_blob(&member.key, MAX_VAULT_KEY_CIPHERTEXT)?;
+        keys.push(MemberKey {
+            email: normalize_email(&member.email)?,
+            key: member.key,
+        });
+    }
+    let rotation = Rotation {
+        epoch: request.epoch,
+        base_version: request.base_version,
+        name: request.name,
+        keys,
+        manifest: request.manifest,
+        records: request.records,
+    };
+    let cursor = state
+        .db
+        .rotate_team(team, rotation, session.account, state.config.team_quota)
         .await?;
     Ok(Json(PushResponse { cursor }))
 }
