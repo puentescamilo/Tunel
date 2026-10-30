@@ -150,10 +150,11 @@ impl AccountKeypair {
         Ok(pair)
     }
 
-    /// Clave que comparten esta cuenta y `peer`, distinta para cada sentido:
-    /// `sender → recipient`.
-    fn wrapping_key(
+    /// Clave que comparten esta cuenta y `peer`, distinta para cada uso (`domain`) y cada
+    /// sentido: `sender → recipient`.
+    pub(super) fn wrapping_key(
         &self,
+        domain: &[u8],
         peer: &PublicKey,
         sender: &PublicKey,
         recipient: &PublicKey,
@@ -163,7 +164,7 @@ impl AccountKeypair {
         if shared.iter().all(|b| *b == 0) {
             return Err(SyncCryptoError::Corrupt);
         }
-        let info = [INFO_TEAM_WRAP, sender.as_bytes(), recipient.as_bytes()].concat();
+        let info = [domain, sender.as_bytes(), recipient.as_bytes()].concat();
         Ok(MasterKey::from_bytes(expand(shared.as_ref(), &info)))
     }
 }
@@ -222,7 +223,7 @@ pub fn wrap_team_key(
     sender: &AccountKeypair,
     recipient: &PublicKey,
 ) -> Result<SealedBlob, SyncCryptoError> {
-    let wrapping = sender.wrapping_key(recipient, &sender.public, recipient)?;
+    let wrapping = sender.wrapping_key(INFO_TEAM_WRAP, recipient, &sender.public, recipient)?;
     let sealed = crypto::seal(&wrapping, key.as_bytes(), &context.aad())?;
     Ok(SealedBlob::from_sealed(&sealed))
 }
@@ -234,7 +235,7 @@ pub fn unwrap_team_key(
     recipient: &AccountKeypair,
     sender: &PublicKey,
 ) -> Result<VaultKey, SyncCryptoError> {
-    let wrapping = recipient.wrapping_key(sender, sender, &recipient.public)?;
+    let wrapping = recipient.wrapping_key(INFO_TEAM_WRAP, sender, sender, &recipient.public)?;
     let plain = crypto::open(&wrapping, &blob.to_sealed()?, &context.aad())?;
     let bytes: [u8; KEY_LEN] = plain
         .as_slice()

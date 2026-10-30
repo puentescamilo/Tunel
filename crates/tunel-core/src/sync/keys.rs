@@ -48,6 +48,8 @@ pub enum SyncCryptoError {
     Mismatch,
     #[error("parámetros de cifrado de la cuenta demasiado débiles")]
     WeakKdf,
+    #[error("falta, sobra o se repite un fotograma de la sesión compartida")]
+    Replayed,
 }
 
 pub(super) fn expand(root: &[u8], info: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {

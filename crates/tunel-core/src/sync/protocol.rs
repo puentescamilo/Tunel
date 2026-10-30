@@ -198,3 +198,105 @@ pub struct RotateTeamRequest {
 pub struct ErrorResponse {
     pub error: String,
 }
+
+/// Anuncia una sesión compartida con un Team. El anuncio va cifrado con la clave del Team
+/// en la época indicada (ver [`super::live`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveAnnouncement {
+    pub epoch: u64,
+    pub meta: SealedBlob,
+}
+
+/// Abre una sesión compartida. El identificador lo elige quien comparte, un UUID, porque
+/// el anuncio va cifrado ligado a él.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateLiveRequest {
+    pub id: String,
+    #[serde(flatten)]
+    pub announcement: LiveAnnouncement,
+}
+
+/// Una sesión compartida en curso, tal como la ven los miembros del Team.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveSummary {
+    pub id: String,
+    /// Correo de quien comparte.
+    pub owner: String,
+    pub epoch: u64,
+    pub meta: SealedBlob,
+    /// Personas mirando ahora mismo.
+    pub viewers: u32,
+}
+
+/// Identifica, dentro de una sesión, la conexión de cada persona que mira.
+pub type ConnId = u32;
+
+/// Mensajes de quien comparte al servidor, por WebSocket.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+pub enum HostMessage {
+    /// Fotograma para todos los que miran.
+    Output {
+        frame: SealedBlob,
+    },
+    /// La pantalla para quien acaba de llegar.
+    Join {
+        to: ConnId,
+        frame: SealedBlob,
+    },
+    /// Da el control a una persona con la clave de control envuelta para ella.
+    Grant {
+        to: ConnId,
+        grant: u64,
+        key: SealedBlob,
+    },
+    Revoke {
+        to: ConnId,
+    },
+    /// Echa a una persona de la sesión.
+    Kick {
+        to: ConnId,
+    },
+}
+
+/// Mensajes del servidor a quien comparte.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+pub enum HostEvent {
+    /// Llega alguien; `nonce` es el número aleatorio con que se conectó, en base64.
+    Joined {
+        conn: ConnId,
+        email: String,
+        nonce: String,
+    },
+    Left {
+        conn: ConnId,
+    },
+    /// La persona pide el control.
+    Request {
+        conn: ConnId,
+    },
+    /// Lo que escribe una persona con el control, cifrado con su clave de control.
+    Input {
+        conn: ConnId,
+        frame: SealedBlob,
+    },
+}
+
+/// Mensajes de quien mira al servidor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+pub enum ViewerMessage {
+    Request,
+    Input { frame: SealedBlob },
+}
+
+/// Mensajes del servidor a quien mira.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+pub enum ViewerEvent {
+    Output { frame: SealedBlob },
+    Join { frame: SealedBlob },
+    Grant { grant: u64, key: SealedBlob },
+    Revoke,
+}
