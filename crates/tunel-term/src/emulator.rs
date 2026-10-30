@@ -11,6 +11,8 @@ use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle as AnsiCursorStyle,
 use std::sync::{Arc, Mutex};
 use tunel_core::theme::CursorStyle;
 
+mod snapshot;
+
 /// Eventos que el emulador produce y que la aplicación debe atender.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TermEvent {
@@ -139,12 +141,16 @@ pub struct Emulator {
 
 pub const MIN_COLS: u16 = 2;
 pub const MIN_ROWS: u16 = 1;
+/// Tope de columnas y filas: la pantalla se reserva entera, y en una sesión compartida el
+/// tamaño lo decide otra persona.
+pub const MAX_COLS: u16 = 1000;
+pub const MAX_ROWS: u16 = 1000;
 
 impl Emulator {
     pub fn new(cols: u16, rows: u16, scrollback: usize) -> Self {
         let size = Size {
-            cols: usize::from(cols.max(MIN_COLS)),
-            rows: usize::from(rows.max(MIN_ROWS)),
+            cols: usize::from(cols.clamp(MIN_COLS, MAX_COLS)),
+            rows: usize::from(rows.clamp(MIN_ROWS, MAX_ROWS)),
         };
         let listener = Listener::default();
         let config = Config {
@@ -190,8 +196,8 @@ impl Emulator {
     /// Cambia el tamaño; devuelve `true` si realmente cambió.
     pub fn resize(&mut self, cols: u16, rows: u16) -> bool {
         let size = Size {
-            cols: usize::from(cols.max(MIN_COLS)),
-            rows: usize::from(rows.max(MIN_ROWS)),
+            cols: usize::from(cols.clamp(MIN_COLS, MAX_COLS)),
+            rows: usize::from(rows.clamp(MIN_ROWS, MAX_ROWS)),
         };
         if size == self.size {
             return false;
@@ -401,6 +407,14 @@ mod tests {
     fn bell_produces_event() {
         let mut emu = Emulator::new(10, 2, 0);
         assert_eq!(emu.feed(b"\x07"), vec![TermEvent::Bell]);
+    }
+
+    #[test]
+    fn absurd_sizes_are_clamped() {
+        let mut emu = Emulator::new(u16::MAX, u16::MAX, 0);
+        assert_eq!(emu.size(), (MAX_COLS, MAX_ROWS));
+        emu.resize(0, 0);
+        assert_eq!(emu.size(), (MIN_COLS, MIN_ROWS));
     }
 
     #[test]

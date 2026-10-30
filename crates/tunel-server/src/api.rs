@@ -2,6 +2,7 @@
 
 use crate::auth::{self, AuthHasher, HashError, LoginLimiter, RateBucket};
 use crate::db::{Db, DbError, NewAccount, Quota, Rotation, Space};
+use crate::live::{self, LiveLimits, LiveRegistry};
 use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
@@ -59,6 +60,7 @@ pub struct Config {
     pub team_quota: Quota,
     /// Renovaciones de clave que se procesan a la vez como mucho.
     pub concurrent_rotations: usize,
+    pub live: LiveLimits,
 }
 
 impl Default for Config {
@@ -93,6 +95,7 @@ impl Default for Config {
                 bytes: 32 * 1024 * 1024,
             },
             concurrent_rotations: 2,
+            live: LiveLimits::default(),
         }
     }
 }
@@ -124,6 +127,7 @@ pub struct AppState {
     limiter: LoginLimiter,
     unauthenticated: RateBucket,
     rotations: tokio::sync::Semaphore,
+    pub(crate) live: LiveRegistry,
     secret: [u8; 32],
 }
 
@@ -146,6 +150,7 @@ impl AppState {
                 config.unauthenticated_burst,
             ),
             rotations: tokio::sync::Semaphore::new(config.concurrent_rotations),
+            live: LiveRegistry::default(),
             db,
             config,
             secret,
@@ -188,6 +193,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(record_routes)
         .merge(team_routes)
         .merge(rotate_routes)
+        .merge(live::routes())
         .route("/health", get(|| async { "ok" }))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -223,14 +229,14 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
             message: message.into(),
         }
     }
 
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
 
@@ -238,7 +244,7 @@ impl ApiError {
         Self::new(StatusCode::UNAUTHORIZED, "credenciales no válidas")
     }
 
-    fn not_found(what: &str) -> Self {
+    pub(crate) fn not_found(what: &str) -> Self {
         Self::new(StatusCode::NOT_FOUND, format!("{what} no encontrado"))
     }
 
@@ -307,9 +313,9 @@ impl From<anyhow::Error> for ApiError {
     }
 }
 
-type ApiResult<T> = Result<T, ApiError>;
+pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
@@ -369,7 +375,7 @@ fn domain_allowed(allowed: &[String], email: &str) -> bool {
             .is_some_and(|(_, domain)| allowed.iter().any(|a| a == domain))
 }
 
-fn check_blob(blob: &SealedBlob, max_ciphertext: usize) -> ApiResult<()> {
+pub(crate) fn check_blob(blob: &SealedBlob, max_ciphertext: usize) -> ApiResult<()> {
     let nonce_ok = B64.decode(&blob.nonce).is_ok_and(|n| n.len() == NONCE_LEN);
     if !nonce_ok || blob.ciphertext.len() > max_ciphertext || B64.decode(&blob.ciphertext).is_err()
     {
@@ -506,8 +512,8 @@ async fn login(
 
 /// Cuenta de la sesión indicada en `Authorization: Bearer <token>`.
 pub struct Session {
-    account: i64,
-    token_hash: [u8; 32],
+    pub(crate) account: i64,
+    pub(crate) token_hash: [u8; 32],
 }
 
 impl FromRequestParts<Arc<AppState>> for Session {
@@ -539,6 +545,7 @@ impl FromRequestParts<Arc<AppState>> for Session {
 
 async fn logout(State(state): State<Arc<AppState>>, session: Session) -> ApiResult<StatusCode> {
     state.db.delete_session(session.token_hash).await?;
+    state.live.revoke_token(&session.token_hash);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -683,7 +690,11 @@ async fn membership(
 }
 
 /// Rol de la sesión en el equipo; una invitación pendiente todavía no da acceso.
-async fn team_role(state: &AppState, session: &Session, team: &str) -> ApiResult<TeamRole> {
+pub(crate) async fn team_role(
+    state: &AppState,
+    session: &Session,
+    team: &str,
+) -> ApiResult<TeamRole> {
     match membership(state, session, team).await? {
         (role, true) => Ok(role),
         (_, false) => Err(ApiError::not_found("equipo")),
@@ -735,7 +746,8 @@ async fn delete_team(
     Path(team): Path<String>,
 ) -> ApiResult<StatusCode> {
     require_admin(&state, &session, &team).await?;
-    state.db.delete_team(team).await?;
+    state.db.delete_team(team.clone()).await?;
+    state.live.end_team(&team);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -815,7 +827,8 @@ async fn remove_member(
             "solo un administrador del equipo puede sacar a otros",
         ));
     }
-    state.db.remove_member(team, email).await?;
+    state.db.remove_member(team.clone(), email.clone()).await?;
+    state.live.revoke_member(&team, &email);
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -308,16 +308,26 @@ En Túnel, el servidor es `https://tunel.tudominio.com`.
 docker compose -f crates/tunel-server/compose.yaml up -d --build
 ```
 
-Con nginx, por ejemplo:
+Con nginx, por ejemplo. Las sesiones compartidas usan WebSocket: sin las cabeceras `Upgrade`
+y `Connection`, todo lo demás funciona pero no se puede compartir ni mirar una terminal.
 
 ```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 443 ssl;
     server_name tunel.tudominio.com;
     # ssl_certificate y ssl_certificate_key de tu certificado
-    client_max_body_size 16m;
+    # Al renovar la clave de un Team se sube todo su contenido de una vez.
+    client_max_body_size 48m;
     location / {
         proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
     }
 }
 ```

@@ -58,6 +58,8 @@ subtle = "2.6"
 tower = { version = "0.5.3", features = ["util", "limit"] }
 tower-http = { version = "0.7.1", features = ["timeout", "set-header"] }
 http-body-util = "0.1.5"
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "http2"] }
 
 # Argon2 sin optimizar tarda segundos con 64 MiB; así las pruebas y la app en modo

@@ -10,6 +10,7 @@
 
 pub mod hlc;
 pub mod keys;
+pub mod live;
 pub mod local;
 pub mod manifest;
 pub mod protocol;
