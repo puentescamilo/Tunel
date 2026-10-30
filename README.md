@@ -262,6 +262,34 @@ que cada cual ponga las suyas. Los hosts compartidos muestran el nombre del Team
   nuevo antes de aceptarla.
 - Las claves de host conocidas no se comparten: cada persona decide de qué servidores se fía.
 
+### Sesiones compartidas
+
+Puedes dejar que los miembros de un Team vean en vivo una terminal abierta y darle el control
+a alguno, por ejemplo para resolver juntos una incidencia. Haz clic derecho en la pestaña y
+elige **Compartir con** y el Team. Quien comparte ve encima de la terminal quién está mirando
+y, a cada persona, le da o le quita el control, o la saca de la sesión.
+
+![Una terminal compartida con un Team](docs/screenshots/sesion-compartida.png)
+
+Los demás miembros ven la sesión en **Hosts → En vivo** y pulsan **Mirar**. Se abre en una
+pestaña de solo lectura con el tamaño de la terminal de quien comparte; con **Pedir el
+control** pueden pedir permiso para escribir.
+
+![Sesiones en vivo de un Team](docs/screenshots/en-vivo.png)
+
+- **Cifrado de extremo a extremo:** el servidor reenvía la sesión sin poder leerla ni
+  cambiarla. Detecta además si quita, repite o reordena algo, y si a quien llega le da una
+  pantalla antigua.
+- **Control:** solo escribe quien tiene el control, con una clave propia que quien comparte
+  le envuelve. Para darlo hace falta haber confirmado la huella de esa persona; si no, Túnel
+  la muestra para compararla antes.
+- **Suplantación:** la sesión muestra si la clave de quien comparte es la que ya conocías. Si
+  no la has confirmado, avisa antes de que escribas nada; si cambió, no deja mirarla.
+- La sesión termina al cerrar la pestaña o pulsar **Dejar de compartir**. Quien sale del Team
+  deja de verla al momento.
+- Con nginx delante del servidor, hace falta la configuración de WebSocket de
+  [Arrancarlo](#2-arrancarlo).
+
 ## Montar el servidor de sincronización con Docker
 
 `tunel-server` guarda las bóvedas cifradas de extremo a extremo: solo recibe datos cifrados
@@ -452,7 +480,7 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
 | Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
 | Sincronización entre equipos (servidor propio, cifrado de extremo a extremo) | ✅ |
 | Teams: hosts compartidos entre cuentas | ✅ |
-| Sesiones compartidas | ⏳ fase 3 |
+| Sesiones compartidas | ✅ |
 
 ## Desarrollo
 
@@ -500,6 +528,8 @@ Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_
 `TUNEL_DEV_THEME=<id de tema>`, `TUNEL_DEV_CURSOR=bloque|barra|subrayado`,
 `TUNEL_DEV_SCROLL=temas` (baja en Ajustes hasta los temas),
 `TUNEL_DEV_TEAM=1` (despliega en Ajustes el primer Team con sus miembros),
+`TUNEL_DEV_LIVE=compartir` (comparte la primera terminal con el primer Team y da el control a
+quien lo pida) o `TUNEL_DEV_LIVE=mirar` (mira la primera sesión en vivo y pide el control),
 `TUNEL_DEV_SYNC=crear|<servidor>|<correo>|<contraseña>` (o `entrar|…`, une el equipo a una
 cuenta), `TUNEL_DEV_VERSION=<versión>` (simula otra versión instalada para ver el aviso de
 actualización) y `TUNEL_DEV_POSITION=x,y` (posición de la ventana; en un Mac con dos pantallas

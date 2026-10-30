@@ -287,6 +287,8 @@ enum TabAction {
     Select(Option<usize>),
     Close(usize),
     ToggleSplit(usize),
+    Share { tab: u64, team: String },
+    StopSharing(u64),
 }
 
 /// Dibuja una pestaña; devuelve (clic en la pestaña, clic en cerrar).
@@ -366,6 +368,54 @@ fn tab(
     )
 }
 
+/// Teams con los que se puede compartir una terminal: identificador y nombre.
+fn shareable_teams(app: &TunelApp) -> Vec<(String, String)> {
+    let ready = app.sync.local().is_some_and(|l| l.keypair.is_some());
+    if ready {
+        crate::sync::teams::names(app)
+    } else {
+        Vec::new()
+    }
+}
+
+/// «Compartir con…» en el menú de una pestaña de terminal.
+fn share_menu(
+    ui: &mut egui::Ui,
+    tab: &crate::app::Tab,
+    teams: &[(String, String)],
+    action: &mut Option<TabAction>,
+) {
+    let crate::app::Tab::Terminal(session) = tab else {
+        return;
+    };
+    match &session.live {
+        Some(crate::live::Live::Host(_)) => {
+            if ui
+                .button(ui::with_icon(icons::STOP, "Dejar de compartir"))
+                .clicked()
+            {
+                *action = Some(TabAction::StopSharing(session.key));
+                ui.close();
+            }
+        }
+        Some(crate::live::Live::Viewer(_)) => {}
+        None if session.is_alive() && !teams.is_empty() => {
+            ui.menu_button(ui::with_icon(icons::BROADCAST, "Compartir con"), |ui| {
+                for (id, name) in teams {
+                    if ui.button(name).clicked() {
+                        *action = Some(TabAction::Share {
+                            tab: session.key,
+                            team: id.clone(),
+                        });
+                        ui.close();
+                    }
+                }
+            });
+        }
+        None => {}
+    }
+}
+
 pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
     let p = ui::pal(ui);
     let frame = egui::Frame::new()
@@ -378,6 +428,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
         })
         .stroke(Stroke::new(1.0, p.border));
     let mut action = None;
+    let teams = shareable_teams(app);
     egui::Panel::top("pestañas")
         .exact_size(TAB_BAR_HEIGHT)
         .frame(frame)
@@ -412,6 +463,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                                 action = Some(TabAction::Close(i));
                             }
                             response.context_menu(|ui| {
+                                share_menu(ui, t, &teams, &mut action);
                                 let label = if app.split == Some(i) {
                                     "Quitar de la vista dividida"
                                 } else {
@@ -445,6 +497,8 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
     match action {
         Some(TabAction::Select(index)) => app.active = index,
         Some(TabAction::Close(i)) => app.close_tab(i),
+        Some(TabAction::Share { tab, team }) => crate::live::start_sharing(app, tab, team),
+        Some(TabAction::StopSharing(tab)) => crate::live::stop_sharing(app, tab),
         Some(TabAction::ToggleSplit(i)) => {
             app.split = if app.split == Some(i) || app.active == Some(i) {
                 None

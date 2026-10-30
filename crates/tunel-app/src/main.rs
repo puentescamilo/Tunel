@@ -7,6 +7,7 @@ mod app;
 mod chrome;
 mod editor;
 mod engine;
+mod live;
 mod lock;
 mod prompts;
 mod quick_connect;

@@ -4,6 +4,7 @@ pub mod forwards;
 pub mod hosts;
 pub mod keychain;
 pub mod known_hosts;
+pub mod live;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;

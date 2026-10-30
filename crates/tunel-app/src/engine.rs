@@ -67,6 +67,7 @@ pub enum AppEvent {
         round: u64,
         result: Result<Box<crate::sync::teams::TeamDone>, SyncError>,
     },
+    Live(crate::live::LiveEvent),
 }
 
 /// Unir el equipo a una cuenta nueva o a una que ya existe.
@@ -142,6 +143,10 @@ impl Engine {
     }
 
     /// Reenvía la salida al hilo de la UI y pide repintar en cuanto llega algo.
+    pub fn wake(&self, io: SessionIo) -> SessionIo {
+        self.wake_on_output(io)
+    }
+
     fn wake_on_output(&self, io: SessionIo) -> SessionIo {
         let SessionIo { input, mut output } = io;
         let (tx, rx) = mpsc::unbounded_channel();
@@ -419,6 +424,57 @@ impl Engine {
             let result = crate::sync::teams::run(op, local, data).await.map(Box::new);
             let _ = events.send(AppEvent::TeamDone { round, result });
             ctx.request_repaint();
+        });
+    }
+
+    /// Lanza una operación de sesiones compartidas y entrega su resultado como evento.
+    fn live_task(&self, task: impl Future<Output = crate::live::LiveEvent> + Send + 'static) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let _ = events.send(AppEvent::Live(task.await));
+            ctx.request_repaint();
+        });
+    }
+
+    pub fn live_share(&self, tab: u64, local: SyncLocal, team: String, epoch: u64, title: String) {
+        self.live_task(async move {
+            let result = crate::live::share(local, team.clone(), title).await;
+            crate::live::LiveEvent::Shared {
+                tab,
+                team,
+                epoch,
+                result,
+            }
+        });
+    }
+
+    pub fn live_list(&self, local: SyncLocal, team: String) {
+        self.live_task(async move {
+            let result = crate::live::list(local, team.clone()).await;
+            crate::live::LiveEvent::Listed { team, result }
+        });
+    }
+
+    pub fn live_watch(&self, local: SyncLocal, listing: tunel_sync::live::LiveListing) {
+        self.live_task(async move {
+            let result = crate::live::watch(local, listing.clone()).await;
+            crate::live::LiveEvent::Watching {
+                listing: Box::new(listing),
+                result,
+            }
+        });
+    }
+
+    pub fn live_lookup(&self, tab: u64, conn: u32, email: String, local: SyncLocal) {
+        self.live_task(async move {
+            let result = crate::live::lookup(local, email.clone()).await;
+            crate::live::LiveEvent::Key {
+                tab,
+                conn,
+                email,
+                result,
+            }
         });
     }
 

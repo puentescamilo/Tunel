@@ -1,12 +1,18 @@
 //! Una pestaña de terminal: emulador + canales hacia su backend.
 
+use crate::live::{Live, Watcher};
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tunel_core::HostId;
 use tunel_core::io::{SessionInput, SessionIo, SessionOutput};
+use tunel_sync::live::{HostUpdate, ViewerUpdate};
 use tunel_term::{Emulator, TermEvent};
 
 /// Límite de bytes procesados por fotograma para que la UI siga respondiendo ante salidas enormes.
 const MAX_BYTES_PER_FRAME: usize = 512 * 1024;
+
+/// Identificador de cada pestaña de terminal; los índices cambian al cerrar pestañas.
+static NEXT_KEY: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionStatus {
@@ -17,6 +23,7 @@ pub enum SessionStatus {
 }
 
 pub struct TerminalSession {
+    pub key: u64,
     pub title: String,
     pub host: Option<HostId>,
     pub emulator: Emulator,
@@ -28,6 +35,10 @@ pub struct TerminalSession {
     log: Option<std::fs::File>,
     /// Texto que el servidor pidió copiar (OSC 52); espera a que el usuario lo permita.
     pending_clipboard: Option<String>,
+    /// Compartida con un Team, o una sesión de otra persona que se está mirando.
+    pub live: Option<Live>,
+    /// Avisos para la interfaz (llegadas, control, fin de la sesión compartida).
+    notices: Vec<String>,
 }
 
 impl TerminalSession {
@@ -40,6 +51,7 @@ impl TerminalSession {
         io: SessionIo,
     ) -> Self {
         Self {
+            key: NEXT_KEY.fetch_add(1, Ordering::Relaxed),
             title,
             host,
             emulator: Emulator::new(cols, rows, scrollback),
@@ -49,7 +61,18 @@ impl TerminalSession {
             io,
             log: None,
             pending_clipboard: None,
+            live: None,
+            notices: Vec::new(),
         }
+    }
+
+    /// Se mira la sesión de otra persona: el tamaño y las respuestas son cosa suya.
+    pub fn is_watching(&self) -> bool {
+        matches!(self.live, Some(Live::Viewer(_)))
+    }
+
+    pub fn take_notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notices)
     }
 
     pub fn is_alive(&self) -> bool {
@@ -74,6 +97,9 @@ impl TerminalSession {
                     if self.status == SessionStatus::Connecting {
                         self.status = SessionStatus::Connected;
                     }
+                    if let Some(Live::Host(share)) = &self.live {
+                        share.host.output(&bytes);
+                    }
                     if let Some(log) = self.log.as_mut()
                         && let Err(e) = log.write_all(&bytes)
                     {
@@ -93,6 +119,89 @@ impl TerminalSession {
                 }
             }
         }
+        self.pump_live() || changed
+    }
+
+    /// Atiende la sesión compartida; devuelve `true` si cambió algo visible.
+    fn pump_live(&mut self) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        let mut typed = Vec::new();
+        let mut ended = None;
+        match live {
+            Live::Host(share) => {
+                while let Some(update) = share.host.try_update() {
+                    changed = true;
+                    match update {
+                        HostUpdate::Joined { conn, email } => {
+                            let (cols, rows) = self.emulator.size();
+                            share
+                                .host
+                                .welcome(conn, cols, rows, self.emulator.snapshot());
+                            self.notices
+                                .push(format!("{email} está mirando «{}»", self.title));
+                            share.viewers.insert(
+                                conn,
+                                Watcher {
+                                    email,
+                                    control: false,
+                                },
+                            );
+                        }
+                        HostUpdate::Left { conn } => share.forget(conn),
+                        HostUpdate::ControlRequested { conn } => {
+                            if share.viewers.contains_key(&conn) && !share.requests.contains(&conn)
+                            {
+                                share.requests.push(conn);
+                            }
+                        }
+                        HostUpdate::Input { conn, data } => {
+                            if share.viewers.get(&conn).is_some_and(|v| v.control) {
+                                typed.push(data);
+                            }
+                        }
+                        HostUpdate::ControlLost { conn } => {
+                            if let Some(viewer) = share.viewers.get_mut(&conn) {
+                                viewer.control = false;
+                                self.notices.push(format!(
+                                    "{} perdió el control: llegó entrada dañada o incompleta",
+                                    viewer.email
+                                ));
+                            }
+                        }
+                        HostUpdate::Ended(reason) => ended = Some(reason),
+                    }
+                }
+                if share.host.needs_resync() {
+                    let (cols, rows) = self.emulator.size();
+                    share.host.resync(cols, rows, self.emulator.snapshot());
+                }
+            }
+            Live::Viewer(watching) => {
+                while let Some(ViewerUpdate::Control(control)) = watching.viewer.try_update() {
+                    changed = true;
+                    watching.control = control;
+                    watching.requested = false;
+                    self.notices.push(if control {
+                        format!("Tienes el control de «{}»", self.title)
+                    } else {
+                        format!("Ya no tienes el control de «{}»", self.title)
+                    });
+                }
+            }
+        }
+        for data in typed {
+            self.send(data);
+        }
+        if let Some(reason) = ended {
+            self.live = None;
+            self.notices.push(match reason {
+                Some(reason) => format!("Se dejó de compartir «{}»: {reason}", self.title),
+                None => format!("Se dejó de compartir «{}»", self.title),
+            });
+        }
         changed
     }
 
@@ -101,6 +210,9 @@ impl TerminalSession {
             TermEvent::Title(title) if !title.trim().is_empty() => self.title = title,
             TermEvent::Title(_) => {}
             TermEvent::Bell => self.bell = true,
+            // Quien comparte ya responde desde su terminal; responder también desde aquí
+            // escribiría en la suya.
+            TermEvent::Reply(_) if self.is_watching() => {}
             TermEvent::Reply(text) => self.send(text.into_bytes()),
             TermEvent::CopyToClipboard(text) => self.pending_clipboard = Some(text),
         }
@@ -123,8 +235,16 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        // Al mirar, el tamaño es el de quien comparte.
+        if self.is_watching() {
+            return;
+        }
         if self.emulator.resize(cols, rows) {
             let _ = self.io.input.send(SessionInput::Resize { cols, rows });
+            if let Some(Live::Host(share)) = &self.live {
+                let (cols, rows) = self.emulator.size();
+                share.host.resize(cols, rows);
+            }
         }
     }
 
@@ -216,6 +336,48 @@ mod tests {
         assert_eq!(s.title, "srv");
         assert_eq!(s.status, SessionStatus::Failed("rechazado".into()));
         assert!(!s.is_alive());
+    }
+
+    fn watching() -> (TerminalSession, tunel_core::io::BackendIo) {
+        let (mut s, backend) = session();
+        s.live = Some(Live::Viewer(Box::new(crate::live::Watching {
+            viewer: tunel_sync::live::LiveViewer::detached(),
+            owner: "ana@ejemplo.com".into(),
+            team_name: "Ops".into(),
+            control: false,
+            requested: false,
+            unverified: None,
+        })));
+        (s, backend)
+    }
+
+    #[test]
+    fn a_watched_session_does_not_answer_terminal_queries() {
+        // Las respuestas ya las da la terminal de quien comparte; repetirlas escribiría en
+        // su shell.
+        let (mut s, mut backend) = watching();
+        backend
+            .output
+            .send(SessionOutput::Data(b"\x1b[6n\x1b[c".to_vec()))
+            .unwrap();
+        s.pump();
+        assert!(backend.input.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_watched_session_keeps_the_size_of_the_shared_terminal() {
+        let (mut s, mut backend) = watching();
+        backend
+            .output
+            .send(SessionOutput::Resize {
+                cols: 120,
+                rows: 40,
+            })
+            .unwrap();
+        s.pump();
+        s.resize(80, 24);
+        assert_eq!(s.emulator.size(), (120, 40));
+        assert!(backend.input.try_recv().is_err());
     }
 
     #[test]
