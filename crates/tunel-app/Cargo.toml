@@ -26,6 +26,8 @@ zeroize.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 reqwest.workspace = true
+# Ya la trae egui; aquí comprueba que una fuente descargada es válida antes de cargarla.
+skrifa = "0.44"
 
 [dev-dependencies]
 uuid.workspace = true

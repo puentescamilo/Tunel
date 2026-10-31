@@ -60,6 +60,10 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 - **Tema por host o por grupo**, por ejemplo uno distinto para producción. Los hosts sin tema
   propio usan el de su grupo y, si tampoco lo tiene, el general.
 - Cursor en bloque, barra o subrayado. Los programas como vim pueden cambiarlo mientras se ejecutan.
+- **Fuentes de Google Fonts** para la terminal (JetBrains Mono, Source Code Pro, Ubuntu Mono,
+  Fira Code…) y para la interfaz (Open Sans, Inter, Roboto…), o cualquier otra familia de
+  Google Fonts escribiendo su nombre. Se descargan la primera vez y quedan en la caché del
+  equipo.
 
 ![Terminal con el tema Túnel Oscuro](docs/screenshots/terminal.png)
 
@@ -527,7 +531,7 @@ TUNEL_VAULT=/tmp/demo.json TUNEL_DEV_PASSWORD=demo-password TUNEL_DEV_SECTION=se
 
 Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_TAGS=<etiqueta>,…` (filtra los hosts por etiquetas), `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_RUN=<comando>`),
 `TUNEL_DEV_QUICK=<texto>`, `TUNEL_DEV_EDIT=<host>`, `TUNEL_DEV_PROMPT=cambio|nuevo|llave`,
-`TUNEL_DEV_THEME=<id de tema>`, `TUNEL_DEV_CURSOR=bloque|barra|subrayado`,
+`TUNEL_DEV_THEME=<id de tema>`, `TUNEL_DEV_FONTS=<interfaz>|<terminal>` (elige las fuentes; vacío = del sistema), `TUNEL_DEV_CURSOR=bloque|barra|subrayado`,
 `TUNEL_DEV_SCROLL=temas` (baja en Ajustes hasta los temas),
 `TUNEL_DEV_TEAM=1` (despliega en Ajustes el primer Team con sus miembros),
 `TUNEL_DEV_LIVE=compartir` (comparte la primera terminal con el primer Team y da el control a
