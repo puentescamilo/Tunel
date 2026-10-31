@@ -300,3 +300,75 @@ pub enum ViewerEvent {
     Grant { grant: u64, key: SealedBlob },
     Revoke,
 }
+
+/// Un proveedor de identidad (Google, Microsoft 365, OpenID Connect) configurado en el
+/// servidor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthProvider {
+    /// Identificador para las rutas: `google`, `microsoft` u `oidc`.
+    pub id: String,
+    /// Nombre para el botón, como «Google».
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AuthProviders {
+    pub providers: Vec<AuthProvider>,
+}
+
+/// Canjea el código que el servidor dejó en el equipo al terminar el inicio de sesión
+/// con el proveedor. `verifier` demuestra que lo pide quien empezó (PKCE).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthTokenRequest {
+    pub code: String,
+    pub verifier: String,
+}
+
+/// Resultado de iniciar sesión con un proveedor de identidad.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "estado", rename_all = "snake_case")]
+pub enum OAuthLogin {
+    /// La cuenta ya existe: su sesión y la clave de bóveda, envuelta con la clave que sale
+    /// de la contraseña maestra de Túnel.
+    Existing {
+        email: String,
+        token: String,
+        kdf: KdfParams,
+        /// Sal en base64.
+        salt: String,
+        vault_key: SealedBlob,
+    },
+    /// No hay cuenta con ese correo y se puede crear con `ticket` (ver
+    /// [`OAuthRegisterRequest`]).
+    New { email: String, ticket: String },
+}
+
+/// Crea la cuenta de quien inició sesión con un proveedor de identidad. No lleva clave
+/// de acceso: la identidad la confirmó el proveedor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthRegisterRequest {
+    pub ticket: String,
+    pub kdf: KdfParams,
+    /// Sal en base64.
+    pub salt: String,
+    /// Clave de bóveda envuelta con la clave que sale de la contraseña maestra.
+    pub vault_key: SealedBlob,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthRegisterResponse {
+    pub token: String,
+}
+
+/// Vuelve a envolver la clave de bóveda de una cuenta de proveedor de identidad, al
+/// cambiar la contraseña maestra.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaultKeyUpdate {
+    /// La clave envuelta que se sustituye, tal como se recibió al iniciar sesión: sin ella
+    /// no se puede cambiar, así una sesión robada no basta para dejar la bóveda inservible.
+    pub previous: SealedBlob,
+    pub kdf: KdfParams,
+    /// Sal en base64.
+    pub salt: String,
+    pub vault_key: SealedBlob,
+}

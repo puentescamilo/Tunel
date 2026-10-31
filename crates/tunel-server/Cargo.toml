@@ -26,6 +26,8 @@ zeroize.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 uuid.workspace = true
+# Para hablar con los proveedores de identidad (OpenID Connect).
+reqwest = { workspace = true, features = ["form"] }
 
 [dev-dependencies]
 tunel-core = { workspace = true, features = ["test-kdf"] }

@@ -330,9 +330,11 @@ docker compose -f crates/tunel-server/compose.yaml \
 En Túnel, el servidor es `https://tunel.tudominio.com`.
 
 **B. Detrás de un proxy que ya tienes** (nginx, Traefik, Caddy). El servidor escucha solo en
-`127.0.0.1:8080`; apunta allí tu proxy:
+`127.0.0.1:8080`; apunta allí tu proxy. Si el 8080 ya está ocupado, elige otro con
+`TUNEL_PUERTO` en el `.env` (ver [Configuración](#configuración)):
 
 ```bash
+cp crates/tunel-server/.env.example crates/tunel-server/.env   # y edítalo si hace falta
 docker compose -f crates/tunel-server/compose.yaml up -d --build
 ```
 
@@ -360,8 +362,8 @@ server {
 }
 ```
 
-**C. Solo en tu red local, para probar.** En `crates/tunel-server/compose.yaml`, cambia
-`"127.0.0.1:8080:8080"` por `"8080:8080"` y arranca como en la opción B. En Túnel, el servidor
+**C. Solo en tu red local, para probar.** En `crates/tunel-server/.env`, pon `TUNEL_IP=0.0.0.0`
+y arranca como en la opción B. En Túnel, el servidor
 es `http://<IP-del-servidor>:8080`. Túnel solo acepta HTTP con direcciones de red local y avisa
 de que la conexión no va cifrada; el contenido sigue cifrado de extremo a extremo, pero no lo
 expongas así a Internet.
@@ -373,7 +375,8 @@ docker compose -f crates/tunel-server/compose.yaml ps   # debe decir (healthy)
 curl https://tunel.tudominio.com/health                  # responde: ok
 ```
 
-En la opción B o C, usa `curl http://127.0.0.1:8080/health` en el propio servidor.
+En la opción B o C, usa `curl http://127.0.0.1:8080/health` en el propio servidor (con el puerto
+de `TUNEL_PUERTO` si lo cambiaste).
 
 ### 4. Crear la cuenta
 
@@ -383,8 +386,8 @@ equipos, usa los mismos datos con **Iniciar sesión**.
 
 El servidor solo deja crear **la primera cuenta**, para que nadie más pueda usarlo. Para
 admitir más (por ejemplo, una por persona o para los [Teams](#teams-compartir-hosts-con-otras-personas)),
-crea `crates/tunel-server/.env` con una de estas opciones y vuelve a ejecutar el comando de
-arranque:
+pon una de estas opciones en `crates/tunel-server/.env` (cópialo de `.env.example` si aún no
+lo tienes) y vuelve a ejecutar el comando de arranque:
 
 ```bash
 # Solo correos de estos dominios, separados por comas. Cada persona crea su cuenta.
@@ -398,6 +401,55 @@ Con `TUNEL_DOMINIOS_PERMITIDOS`, el registro queda abierto solo para esos domini
 (`gammaingenieros.com` no incluye `dev.gammaingenieros.com`). Las cuentas que ya existían
 siguen funcionando aunque su correo sea de otro dominio. El servidor muestra al arrancar qué
 registro tiene: `docker compose -f crates/tunel-server/compose.yaml logs tunel-server`.
+
+### 5. Iniciar sesión con Google o Microsoft 365 (opcional)
+
+Con un proveedor de identidad (Túnel 0.6.0 o posterior), cada persona entra con su correo
+corporativo y no tiene una
+contraseña de cuenta que recordar. El proveedor solo confirma quién es: la sincronización se
+cifra con la contraseña maestra de Túnel, así que el servidor sigue sin poder leer nada. Sin
+ningún proveedor configurado, las cuentas se crean con correo y contraseña, como siempre, y
+las dos formas conviven en el mismo servidor.
+
+1. Registra una aplicación web en el proveedor con esta dirección de retorno (URI de
+   redirección), cambiando el dominio y el proveedor:
+   `https://tunel.tudominio.com/v1/auth/google/callback` (o `/microsoft/` u `/oidc/`).
+   - **Google:** Google Cloud Console → APIs y servicios → Credenciales → Crear ID de cliente
+     de OAuth → Aplicación web.
+   - **Microsoft 365:** Microsoft Entra → Registros de aplicaciones → Nuevo registro → Web.
+     Crea un secreto en «Certificados y secretos» y copia el «Id. de directorio (inquilino)».
+     En «Configuración de token» → «Agregar notificación opcional» → Id., añade `email` y
+     `xms_edov`: con ellas Microsoft confirma que el correo es de un dominio de tu
+     organización, y sin ellas no se puede entrar.
+   - **Otro proveedor OpenID Connect** (Keycloak, Authentik, Okta…): un cliente confidencial
+     con esa dirección de retorno.
+2. Pon en `crates/tunel-server/.env` la dirección pública, el ID y el secreto del cliente:
+
+   ```bash
+   TUNEL_URL_PUBLICA=https://tunel.tudominio.com
+   TUNEL_DOMINIOS_PERMITIDOS=tuempresa.com
+
+   TUNEL_GOOGLE_ID_CLIENTE=1234567890-abc.apps.googleusercontent.com
+   TUNEL_GOOGLE_SECRETO=GOCSPX-...
+
+   TUNEL_MICROSOFT_ID_CLIENTE=00000000-0000-0000-0000-000000000000
+   TUNEL_MICROSOFT_SECRETO=...
+   TUNEL_MICROSOFT_INQUILINO=11111111-1111-1111-1111-111111111111
+   ```
+
+3. Vuelve a ejecutar el comando de arranque. El registro del servidor muestra los proveedores y
+   la dirección de retorno de cada uno.
+
+- **Quién puede crear cuenta:** con Google o un emisor genérico hace falta
+  `TUNEL_DOMINIOS_PERMITIDOS`; si no, cualquiera con una cuenta de Google podría crear una.
+  Con Microsoft 365, el inquilino ya limita las cuentas a tu organización, y no se admiten
+  `common`, `organizations` ni `consumers`.
+- **Correos verificados:** solo se aceptan correos que el proveedor da por verificados.
+- **La cuenta es de la persona, no del correo:** queda ligada al identificador de la persona
+  en su proveedor. Si su correo cambia sigue siendo suya, y si el correo pasa a otra persona
+  (o lo afirma otro proveedor) esa persona no entra en ella.
+- **Cuentas con contraseña:** un correo que ya tiene cuenta con contraseña sigue entrando con
+  ella; el proveedor no la sustituye.
 
 ### Mantenimiento
 
@@ -438,10 +490,20 @@ si usas la opción A.
 | Variable | Para qué sirve | Valor en Docker |
 |---|---|---|
 | `TUNEL_DOMINIO` | Dominio del certificado HTTPS (solo opción A) | — |
+| `TUNEL_PUERTO` | Puerto de este equipo en el que escucha el contenedor | `8080` |
+| `TUNEL_IP` | Dirección de este equipo en la que escucha (`0.0.0.0` para la red local) | `127.0.0.1` |
 | `TUNEL_REGISTRO_ABIERTO` | `1` permite crear más de una cuenta | sin definir |
 | `TUNEL_DOMINIOS_PERMITIDOS` | Dominios de correo con los que se pueden crear cuentas, separados por comas | sin definir |
+| `TUNEL_URL_PUBLICA` | Dirección https del servidor, para los proveedores de identidad | sin definir |
+| `TUNEL_GOOGLE_ID_CLIENTE`, `TUNEL_GOOGLE_SECRETO` | Iniciar sesión con Google | sin definir |
+| `TUNEL_MICROSOFT_ID_CLIENTE`, `TUNEL_MICROSOFT_SECRETO`, `TUNEL_MICROSOFT_INQUILINO` | Iniciar sesión con Microsoft 365 | sin definir |
+| `TUNEL_OIDC_NOMBRE`, `TUNEL_OIDC_EMISOR`, `TUNEL_OIDC_ID_CLIENTE`, `TUNEL_OIDC_SECRETO` | Iniciar sesión con otro proveedor OpenID Connect | sin definir |
 | `TUNEL_DB` | Archivo de la base de datos SQLite | `/datos/tunel.db` |
 | `TUNEL_ESCUCHA` | Dirección y puerto en los que escucha | `0.0.0.0:8080` |
+
+Todas, salvo `TUNEL_DB` y `TUNEL_ESCUCHA`, se ponen en `crates/tunel-server/.env`, que git no
+sigue: así `git pull` no choca con tus cambios. El
+[`.env.example`](crates/tunel-server/.env.example) las explica una a una.
 
 El [`compose.yaml`](crates/tunel-server/compose.yaml) arranca el servidor sin privilegios, con
 el sistema de archivos de solo lectura y un límite de memoria. El servidor limita los intentos

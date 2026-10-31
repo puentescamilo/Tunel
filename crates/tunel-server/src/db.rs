@@ -131,7 +131,19 @@ CREATE INDEX IF NOT EXISTS team_records_by_seq ON team_records (team_id, seq);
 ";
 
 /// Columnas añadidas a `accounts` después de la primera versión, con su tipo.
-const ACCOUNT_COLUMNS: [(&str, &str); 2] = [("public_key", "TEXT"), ("private_key", "TEXT")];
+/// - `oauth_provider` y `oauth_subject`: proveedor de identidad de la cuenta (`google`,
+///   `microsoft`, `oidc`) y su identificador estable de la persona; nulos si entra con
+///   contraseña. La cuenta va ligada a ese identificador, no al correo, que puede
+///   reasignarse o cambiar.
+/// - `previous_vault_key`: la clave de bóveda envuelta antes del último cambio, por si
+///   hubiera que recuperarla.
+const ACCOUNT_COLUMNS: [(&str, &str); 5] = [
+    ("public_key", "TEXT"),
+    ("private_key", "TEXT"),
+    ("oauth_provider", "TEXT"),
+    ("oauth_subject", "TEXT"),
+    ("previous_vault_key", "TEXT"),
+];
 
 /// Datos de una cuenta necesarios para iniciar sesión.
 pub struct Account {
@@ -140,6 +152,66 @@ pub struct Account {
     pub salt: String,
     pub auth: StoredHash,
     pub vault_key: SealedBlob,
+    /// Proveedor de identidad de la cuenta; `None` si entra con contraseña.
+    pub oauth: Option<String>,
+}
+
+/// Columnas que se leen de una cuenta, en el orden de [`read_account`].
+const ACCOUNT_SELECT: &str = "SELECT id, kdf, salt, auth_salt, auth_hash, auth_kdf, vault_key,
+                                     oauth_provider
+                              FROM accounts";
+
+/// La cuenta que cumple `filter` (por ejemplo `WHERE email = ?1`).
+fn read_account(
+    conn: &Connection,
+    filter: &str,
+    params: impl rusqlite::Params,
+) -> Result<Option<Account>, DbError> {
+    let row = conn
+        .query_row(&format!("{ACCOUNT_SELECT} {filter}"), params, |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, Vec<u8>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        })
+        .optional()?;
+    row.map(
+        |(id, kdf, salt, auth_salt, auth_hash, auth_kdf, vault_key, oauth)| {
+            Ok(Account {
+                id,
+                kdf: serde_json::from_str(&kdf)?,
+                salt,
+                auth: StoredHash {
+                    salt: auth_salt,
+                    hash: auth_hash,
+                    kdf: serde_json::from_str(&auth_kdf)?,
+                },
+                vault_key: serde_json::from_str(&vault_key)?,
+                oauth,
+            })
+        },
+    )
+    .transpose()
+}
+
+/// Cuenta nueva de quien inició sesión con un proveedor de identidad. Su clave de acceso
+/// es aleatoria y nadie la conoce: solo entra a través del proveedor.
+pub struct NewOAuthAccount {
+    pub email: String,
+    pub provider: String,
+    /// Identificador estable de la persona en el proveedor.
+    pub subject: String,
+    pub kdf: KdfParams,
+    pub salt: String,
+    pub unusable_auth: StoredHash,
+    pub vault_key: SealedBlob,
+    pub created_at: i64,
 }
 
 pub struct NewAccount {
@@ -314,6 +386,10 @@ impl Db {
                 conn.execute_batch(&format!("ALTER TABLE accounts ADD COLUMN {name} {kind}"))?;
             }
         }
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS accounts_by_oauth
+                 ON accounts (oauth_provider, oauth_subject) WHERE oauth_subject IS NOT NULL",
+        )?;
         Ok(())
     }
 
@@ -394,44 +470,100 @@ impl Db {
         .await
     }
 
-    pub async fn account_by_email(&self, email: String) -> Result<Option<Account>, DbError> {
+    pub async fn insert_oauth_account(&self, account: NewOAuthAccount) -> Result<i64, DbError> {
         self.call(move |conn| {
-            let row = conn
-                .query_row(
-                    "SELECT id, kdf, salt, auth_salt, auth_hash, auth_kdf, vault_key
-                     FROM accounts WHERE email = ?1",
-                    params![email],
-                    |row| {
-                        Ok((
-                            row.get::<_, i64>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, Vec<u8>>(3)?,
-                            row.get::<_, Vec<u8>>(4)?,
-                            row.get::<_, String>(5)?,
-                            row.get::<_, String>(6)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            row.map(
-                |(id, kdf, salt, auth_salt, auth_hash, auth_kdf, vault_key)| {
-                    Ok(Account {
-                        id,
-                        kdf: serde_json::from_str(&kdf)?,
-                        salt,
-                        auth: StoredHash {
-                            salt: auth_salt,
-                            hash: auth_hash,
-                            kdf: serde_json::from_str(&auth_kdf)?,
-                        },
-                        vault_key: serde_json::from_str(&vault_key)?,
-                    })
-                },
-            )
-            .transpose()
+            let inserted = conn.execute(
+                "INSERT INTO accounts
+                     (email, kdf, salt, auth_salt, auth_hash, auth_kdf, vault_key, created_at,
+                      oauth_provider, oauth_subject)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    account.email,
+                    serde_json::to_string(&account.kdf)?,
+                    account.salt,
+                    account.unusable_auth.salt,
+                    account.unusable_auth.hash,
+                    serde_json::to_string(&account.unusable_auth.kdf)?,
+                    serde_json::to_string(&account.vault_key)?,
+                    account.created_at,
+                    account.provider,
+                    account.subject,
+                ],
+            );
+            match inserted {
+                Ok(_) => Ok(conn.last_insert_rowid()),
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    Err(DbError::AccountExists)
+                }
+                Err(e) => Err(e.into()),
+            }
         })
         .await
+    }
+
+    /// Cambia la clave de bóveda envuelta de una cuenta de proveedor de identidad, solo si
+    /// la actual es `previous`, y guarda la anterior. Las cuentas de contraseña no: su
+    /// clave de acceso sale de la misma contraseña y dejaría de servir.
+    pub async fn set_oauth_vault_key(
+        &self,
+        account: i64,
+        previous: SealedBlob,
+        kdf: KdfParams,
+        salt: String,
+        vault_key: SealedBlob,
+    ) -> Result<(), DbError> {
+        self.call(move |conn| {
+            let current: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT vault_key, oauth_provider FROM accounts WHERE id = ?1",
+                    params![account],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let Some((current, Some(_))) = current else {
+                return Err(DbError::NotFound);
+            };
+            if serde_json::from_str::<SealedBlob>(&current)? != previous {
+                return Err(DbError::Conflict);
+            }
+            conn.execute(
+                "UPDATE accounts
+                 SET previous_vault_key = vault_key, kdf = ?2, salt = ?3, vault_key = ?4
+                 WHERE id = ?1 AND vault_key = ?5",
+                params![
+                    account,
+                    serde_json::to_string(&kdf)?,
+                    salt,
+                    serde_json::to_string(&vault_key)?,
+                    current,
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Cuenta ligada a la persona `subject` del proveedor `provider`.
+    pub async fn account_by_oauth(
+        &self,
+        provider: String,
+        subject: String,
+    ) -> Result<Option<Account>, DbError> {
+        self.call(move |conn| {
+            read_account(
+                conn,
+                "WHERE oauth_provider = ?1 AND oauth_subject = ?2",
+                params![provider, subject],
+            )
+        })
+        .await
+    }
+
+    pub async fn account_by_email(&self, email: String) -> Result<Option<Account>, DbError> {
+        self.call(move |conn| read_account(conn, "WHERE email = ?1", params![email]))
+            .await
     }
 
     pub async fn insert_session(
