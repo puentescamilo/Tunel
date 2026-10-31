@@ -248,6 +248,77 @@ pub fn ui_mode_selector(ui: &mut egui::Ui, mode: &mut UiThemeMode) {
     );
 }
 
+/// Colores para el borde de la pestaña seleccionada.
+const TAB_BORDERS: [(&str, [u8; 3]); 7] = [
+    ("Turquesa", [0x3d, 0xd6, 0xb0]),
+    ("Azul", [0x5b, 0x9c, 0xff]),
+    ("Morado", [0xb1, 0x7c, 0xff]),
+    ("Rosa", [0xff, 0x6f, 0x9f]),
+    ("Rojo", [0xf2, 0x66, 0x7a]),
+    ("Naranja", [0xff, 0x8a, 0x5b]),
+    ("Amarillo", [0xf5, 0xb9, 0x4e]),
+];
+const SWATCH: f32 = 22.0;
+
+/// Muestra de color redonda; marcada si está elegida.
+fn swatch(ui: &mut egui::Ui, fill: Color32, selected: bool, tooltip: &str) -> egui::Response {
+    let p = ui::pal(ui);
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(SWATCH), Sense::click());
+    let center = rect.center();
+    let ring = if selected {
+        p.accent
+    } else if response.hovered() {
+        p.muted
+    } else {
+        p.border
+    };
+    ui.painter().circle_filled(center, SWATCH / 2.0 - 3.0, fill);
+    ui.painter().circle_stroke(
+        center,
+        SWATCH / 2.0 - 1.0,
+        Stroke::new(if selected { 2.0 } else { 1.0 }, ring),
+    );
+    response
+        .on_hover_text(tooltip)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Color del borde de la pestaña seleccionada: automático (blanco o gris según el fondo)
+/// o uno de la lista.
+pub fn tab_border_selector(ui: &mut egui::Ui, border: &mut Option<[u8; 3]>) {
+    let p = ui::pal(ui);
+    let mut options: Vec<(Option<[u8; 3]>, &str)> =
+        vec![(None, "Automático: blanco en fondos oscuros, gris en claros")];
+    options.extend(TAB_BORDERS.iter().map(|(name, rgb)| (Some(*rgb), *name)));
+    // En filas alineadas a la derecha egui coloca de derecha a izquierda.
+    if ui.layout().prefer_right_to_left() {
+        options.reverse();
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (option, name) in options {
+            let selected = *border == option;
+            let response = match option {
+                Some(rgb) => swatch(ui, c(rgb), selected, name),
+                None => {
+                    let response = swatch(ui, p.surface_hover, selected, name);
+                    ui.painter().text(
+                        response.rect.center(),
+                        Align2::CENTER_CENTER,
+                        icons::CIRCLE_HALF,
+                        ui::icon_font(12.0),
+                        p.muted,
+                    );
+                    response
+                }
+            };
+            if response.clicked() {
+                *border = option;
+            }
+        }
+    });
+}
+
 pub fn cursor_selector(ui: &mut egui::Ui, style: &mut CursorStyle) {
     segmented(
         ui,

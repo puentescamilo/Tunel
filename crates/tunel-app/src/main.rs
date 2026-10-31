@@ -14,6 +14,7 @@ mod prompts;
 mod quick_connect;
 mod session;
 mod sync;
+mod tabs;
 mod terminal_view;
 mod ui;
 mod updates;

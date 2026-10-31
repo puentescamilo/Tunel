@@ -207,7 +207,8 @@ impl TerminalSession {
 
     fn handle_event(&mut self, event: TermEvent) {
         match event {
-            TermEvent::Title(title) if !title.trim().is_empty() => self.title = title,
+            // La pestaña lleva el nombre del host (o el que le dé el usuario), no el título
+            // que pone el shell, que suele ser «usuario@máquina: ruta».
             TermEvent::Title(_) => {}
             TermEvent::Bell => self.bell = true,
             // Quien comparte ya responde desde su terminal; responder también desde aquí
@@ -322,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn title_and_errors_update_state() {
+    fn shell_titles_do_not_rename_the_tab_and_errors_update_state() {
         let (mut s, backend) = session();
         backend
             .output
@@ -333,7 +334,7 @@ mod tests {
             .send(SessionOutput::Error("rechazado".into()))
             .unwrap();
         s.pump();
-        assert_eq!(s.title, "srv");
+        assert_eq!(s.title, "t");
         assert_eq!(s.status, SessionStatus::Failed("rechazado".into()));
         assert!(!s.is_alive());
     }
