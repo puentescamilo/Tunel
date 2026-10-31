@@ -40,6 +40,22 @@ pub struct SyncLocal {
     /// que se vio. Si el servidor entrega otra, alguien intenta suplantarla.
     #[serde(default)]
     pub contacts: BTreeMap<String, Contact>,
+    /// La cuenta entra con un proveedor de identidad (Google, Microsoft 365…) y no con
+    /// contraseña: su clave de bóveda se envuelve con la contraseña maestra.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthAccount>,
+}
+
+/// Datos de una cuenta que entra con un proveedor de identidad.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthAccount {
+    /// `google`, `microsoft` u `oidc`.
+    pub provider: String,
+    /// Para los mensajes, como «Google».
+    pub provider_name: String,
+    /// Clave de bóveda envuelta tal como está en el servidor: hace falta para cambiarla al
+    /// cambiar la contraseña maestra.
+    pub wrapped_vault_key: super::SealedBlob,
 }
 
 /// Un Team visto desde este equipo.
@@ -233,6 +249,7 @@ mod tests {
             teams: Vec::new(),
             invitations: Vec::new(),
             contacts: BTreeMap::new(),
+            oauth: None,
         }
     }
 

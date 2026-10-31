@@ -417,6 +417,7 @@ mod tests {
             teams: Vec::new(),
             invitations: Vec::new(),
             contacts: Default::default(),
+            oauth: None,
         }
     }
 

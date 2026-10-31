@@ -8,6 +8,7 @@ pub mod account;
 pub mod api;
 mod keypair;
 pub mod live;
+pub mod oauth;
 pub mod run;
 mod session;
 pub mod teams;
@@ -80,6 +81,16 @@ pub enum SyncError {
     InvalidName,
     #[error("la conexión de la sesión compartida falló: {0}")]
     Live(String),
+    #[error("la sesión con {0} caducó; vuelve a iniciarla desde Ajustes")]
+    SignInAgain(String),
+    #[error("no se pudo iniciar sesión: {0}")]
+    Provider(String),
+    #[error(
+        "la contraseña maestra de este equipo no es la de tu cuenta: usa la misma en todos tus equipos"
+    )]
+    MasterPasswordMismatch,
+    #[error("la contraseña maestra es débil. {0}")]
+    WeakMasterPassword(String),
 }
 
 impl SyncError {
