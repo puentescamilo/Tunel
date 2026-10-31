@@ -11,6 +11,8 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 ### Hosts y bóveda
 
 - **Bóveda local cifrada** con contraseña maestra (Argon2id + XChaCha20-Poly1305). Nada sale del equipo.
+  La contraseña maestra nueva tiene al menos 12 caracteres, con mayúsculas, minúsculas, números
+  y algún carácter especial.
 - **Hosts y grupos anidados**: los hosts heredan usuario y puerto de su grupo. Etiquetas,
   búsqueda por nombre, dirección o etiqueta, y duplicar host.
 - **Llavero**: identidades (usuario + contraseña, clave o agente SSH) y claves privadas
@@ -215,6 +217,9 @@ Más abajo se explica cómo montarlo. La bóveda local sigue siendo la principal
 - **Conflictos:** si editas lo mismo en dos equipos, gana la última edición.
 - **Qué se sincroniza:** hosts, grupos, identidades, claves, snippets, túneles y claves de
   host conocidas. Los ajustes (fuente, tema general, cursor) son de cada equipo.
+- **Cómo se entra:** con correo y contraseña de la cuenta o, si el servidor lo tiene
+  configurado, con la cuenta de Google o Microsoft 365 de tu organización (ver
+  [Iniciar sesión con Google o Microsoft 365](#5-iniciar-sesión-con-google-o-microsoft-365-opcional)).
 
 ![Cuenta y sincronización](docs/screenshots/sincronizacion.png)
 
@@ -438,6 +443,16 @@ las dos formas conviven en el mismo servidor.
 
 3. Vuelve a ejecutar el comando de arranque. El registro del servidor muestra los proveedores y
    la dirección de retorno de cada uno.
+4. En Túnel, **Ajustes → Cuenta y sincronización**: escribe la dirección del servidor y pulsa
+   **Entrar con Google** (o con Microsoft 365). Termina en el navegador y vuelve a Túnel, que te
+   pide tu **contraseña maestra**: con ella se cifra la sincronización. Tiene que ser la misma
+   en todos tus equipos y cumplir las reglas de la contraseña maestra (al menos 12 caracteres,
+   con mayúsculas, minúsculas, números y algún carácter especial); si la tuya no las cumple,
+   cámbiala antes en **Ajustes → Seguridad**.
+
+Si cambias la contraseña maestra, Túnel vuelve a cifrar la clave de la cuenta en el servidor:
+en tus otros equipos tendrás que usar la nueva al volver a iniciar sesión. Cuando la sesión
+caduca (a los 30 días), Ajustes muestra **Iniciar sesión con Google** para renovarla.
 
 - **Quién puede crear cuenta:** con Google o un emisor genérico hace falta
   `TUNEL_DOMINIOS_PERMITIDOS`; si no, cualquiera con una cuenta de Google podría crear una.
@@ -591,7 +606,7 @@ Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_
 `TUNEL_DEV_TEAM=1` (despliega en Ajustes el primer Team con sus miembros),
 `TUNEL_DEV_LIVE=compartir` (comparte la primera terminal con el primer Team y da el control a
 quien lo pida) o `TUNEL_DEV_LIVE=mirar` (mira la primera sesión en vivo y pide el control),
-`TUNEL_DEV_SYNC=crear|<servidor>|<correo>|<contraseña>` (o `entrar|…`, une el equipo a una
+`TUNEL_DEV_SERVER=<url>` (deja escrita la dirección del servidor en Ajustes), `TUNEL_DEV_SYNC=crear|<servidor>|<correo>|<contraseña>` (o `entrar|…`, une el equipo a una
 cuenta), `TUNEL_DEV_VERSION=<versión>` (simula otra versión instalada para ver el aviso de
 actualización) y `TUNEL_DEV_POSITION=x,y` (posición de la ventana; en un Mac con dos pantallas
 sirve para capturar en la Retina). No existen en compilaciones `--release`.

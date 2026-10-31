@@ -68,6 +68,7 @@ pub enum AppEvent {
         result: Result<Box<crate::sync::teams::TeamDone>, SyncError>,
     },
     Live(crate::live::LiveEvent),
+    OAuth(crate::sync::oauth::OAuthEvent),
 }
 
 /// Unir el equipo a una cuenta nueva o a una que ya existe.
@@ -475,6 +476,95 @@ impl Engine {
                 email,
                 result,
             }
+        });
+    }
+
+    /// Pide los proveedores de identidad de un servidor.
+    pub fn oauth_providers(&self, server: ServerUrl) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result = tunel_sync::oauth::providers(&server).await;
+            let event = crate::sync::oauth::OAuthEvent::Providers {
+                server: server.base,
+                result,
+            };
+            let _ = events.send(AppEvent::OAuth(event));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Abre el navegador para iniciar sesión con `provider` y espera a que vuelva.
+    pub fn oauth_sign_in(
+        &self,
+        server: ServerUrl,
+        provider: tunel_core::sync::protocol::AuthProvider,
+        renewing: bool,
+    ) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result = match tunel_sync::oauth::begin(&server, provider).await {
+                Ok(start) => {
+                    ctx.open_url(egui::OpenUrl::new_tab(&start.url));
+                    start.wait().await
+                }
+                Err(e) => Err(e),
+            };
+            let event = crate::sync::oauth::OAuthEvent::SignedIn { renewing, result };
+            let _ = events.send(AppEvent::OAuth(event));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Termina de unir el equipo a la cuenta de proveedor con la contraseña maestra, que
+    /// tiene que ser la de esta bóveda.
+    pub fn oauth_complete(
+        &self,
+        round: u64,
+        sign_in: tunel_sync::oauth::OAuthSignIn,
+        master: Zeroizing<String>,
+        data: VaultData,
+        check: tunel_core::PasswordCheck,
+    ) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let password = master.clone();
+            let matches = tokio::task::spawn_blocking(move || check.matches(&password))
+                .await
+                .unwrap_or(false);
+            let result = if matches {
+                tunel_sync::oauth::complete(sign_in, master, &data)
+                    .await
+                    .map(Box::new)
+            } else {
+                Err(SyncError::Provider(
+                    "esa no es la contraseña maestra de este equipo; la sincronización se \
+                     cifra con ella"
+                        .into(),
+                ))
+            };
+            let _ = events.send(AppEvent::SyncLinked { round, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Vuelve a envolver la clave de la cuenta de proveedor con la contraseña maestra nueva.
+    pub fn oauth_rewrap(&self, round: u64, local: SyncLocal, password: Zeroizing<String>) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result = tunel_sync::oauth::rewrap(&local, password.clone())
+                .await
+                .map(Box::new);
+            let event = crate::sync::oauth::OAuthEvent::Rewrapped {
+                round,
+                password,
+                result,
+            };
+            let _ = events.send(AppEvent::OAuth(event));
+            ctx.request_repaint();
         });
     }
 

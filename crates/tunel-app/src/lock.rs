@@ -37,9 +37,16 @@ impl LockScreen {
     }
 
     fn try_open(&mut self, creating: bool) -> Option<UnlockedVault> {
-        if creating && self.password != self.confirm {
-            self.error = Some("Las contraseñas no coinciden".into());
-            return None;
+        if creating {
+            let missing = tunel_core::password::problems(&self.password);
+            if !missing.is_empty() {
+                self.error = Some(tunel_core::password::describe(&missing));
+                return None;
+            }
+            if self.password != self.confirm {
+                self.error = Some("Las contraseñas no coinciden".into());
+                return None;
+            }
         }
         let result = if creating {
             UnlockedVault::create(self.path.clone(), &self.password, KdfParams::RECOMMENDED)
@@ -102,7 +109,8 @@ impl LockScreen {
                         let confirm = password_field(ui, &mut self.confirm, "Repite la contraseña");
                         submit = confirm.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.add_space(2.0);
-                        ui.label(RichText::new(format!("Mínimo {MIN_PASSWORD_LEN} caracteres. Si la olvidas, no se puede recuperar.")).size(12.0).color(p.muted));
+                        password_rules(ui, &self.password);
+                        ui.label(RichText::new("Si la olvidas, no se puede recuperar.").size(12.0).color(p.muted));
                     }
                     if let Some(error) = &self.error {
                         ui.add_space(4.0);
@@ -132,6 +140,36 @@ impl LockScreen {
 
 const CARD_WIDTH: f32 = 340.0;
 
+/// Las reglas de la contraseña maestra, marcadas según se cumplen.
+pub fn password_rules(ui: &mut egui::Ui, password: &str) {
+    let p = ui::pal(ui);
+    let missing = tunel_core::password::problems(password);
+    let rules = [
+        "al menos 12 caracteres",
+        "una mayúscula",
+        "una minúscula",
+        "un número",
+        "un carácter especial",
+    ];
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        for rule in rules {
+            let ok = !password.is_empty() && !missing.contains(&rule);
+            let (icon, color) = if ok {
+                (icons::CHECK, p.success)
+            } else {
+                (icons::CLOSE, p.muted)
+            };
+            ui.label(
+                RichText::new(format!("{icon} {rule}"))
+                    .size(12.0)
+                    .color(color)
+                    .family(egui::FontFamily::Proportional),
+            );
+        }
+    });
+}
+
 fn password_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
     ui.add(
         egui::TextEdit::singleline(text)
@@ -157,11 +195,17 @@ pub fn password_strength(password: &str) -> u8 {
     .iter()
     .filter(|&&present| present)
     .count();
-    match (len, classes) {
+    let level = match (len, classes) {
         (0..MIN_PASSWORD_LEN, _) => 1,
         (_, 0..=1) if len < 16 => 2,
         (16.., _) | (12.., 3..) => 4,
         _ => 3,
+    };
+    // «Fuerte» solo si cumple todas las reglas de la contraseña maestra.
+    if tunel_core::password::is_strong(password) {
+        level
+    } else {
+        level.min(3)
     }
 }
 
@@ -200,6 +244,8 @@ mod tests {
         assert_eq!(password_strength("solominusculas"), 2);
         assert_eq!(password_strength("Mezcla2024x"), 3);
         assert_eq!(password_strength("Mezcla-2024-Fuerte"), 4);
-        assert_eq!(password_strength("una frase de paso muy larga"), 4);
+        // Larga, pero sin mayúsculas ni números: no cumple las reglas de la maestra.
+        assert_eq!(password_strength("una frase de paso muy larga"), 3);
+        assert_eq!(password_strength("Una frase de paso de 2026"), 4);
     }
 }

@@ -189,18 +189,32 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                 ui.add(egui::TextEdit::singleline(&mut change.confirm).password(true).hint_text("Repítela").desired_width(220.0));
             });
             ui.add_space(4.0);
+            if !change.new.is_empty() {
+                crate::lock::password_rules(ui, &change.new);
+            }
             if ui::secondary_button(ui, "Cambiar contraseña maestra").clicked() {
-                let result = if change.new != change.confirm {
+                let missing = tunel_core::password::problems(&change.new);
+                let checked = if !missing.is_empty() {
+                    Err(tunel_core::password::describe(&missing))
+                } else if change.new != change.confirm {
                     Err("Las contraseñas no coinciden".to_string())
                 } else {
-                    app.vault.as_mut().map(|v| v.change_password(&change.new).map_err(|e| e.to_string())).unwrap_or(Ok(()))
+                    Ok(zeroize::Zeroizing::new(change.new.clone()))
                 };
                 change.new.zeroize();
                 change.confirm.zeroize();
-                app.notify(match result {
-                    Ok(()) => "Contraseña maestra cambiada".to_string(),
-                    Err(e) => e,
-                });
+                match checked {
+                    Err(e) => app.notify(e),
+                    // Con una cuenta de proveedor, la clave del servidor se cambia antes.
+                    Ok(password) if crate::sync::oauth::rewrap_before_change(app, password.clone()) => {}
+                    Ok(password) => {
+                        let result = app.vault.as_mut().map(|v| v.change_password(&password).map_err(|e| e.to_string())).unwrap_or(Ok(()));
+                        app.notify(match result {
+                            Ok(()) => "Contraseña maestra cambiada".to_string(),
+                            Err(e) => e,
+                        });
+                    }
+                }
             }
             if let Some(vault) = &app.vault {
                 ui.add_space(6.0);
@@ -227,10 +241,18 @@ fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
         return account_form(app, ui, &status);
     };
     let (server, email) = (server.to_string(), email.to_string());
+    let provider = app
+        .sync
+        .local()
+        .and_then(|l| l.oauth.as_ref())
+        .map(|o| o.provider_name.clone());
     ui.horizontal(|ui| {
         let shown = ui::masked(&server, app.sync.form.show_server);
         ui.label(RichText::new(format!("{email} · {shown}")).strong());
         ui::reveal_button(ui, &mut app.sync.form.show_server);
+        if let Some(provider) = &provider {
+            ui::chip(ui, &format!("con {provider}"), p.muted);
+        }
     });
     if server.starts_with("http://") {
         ui.label(
@@ -270,6 +292,34 @@ fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
     }
     ui.add_space(8.0);
     let busy = app.sync.busy();
+    if let (true, Some(provider)) = (app.sync.sign_in_again, &provider) {
+        if let Some(waiting) = app.sync.oauth.waiting.clone() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new(format!(
+                        "Termina de iniciar sesión con {waiting} en el navegador…"
+                    ))
+                    .color(p.muted),
+                );
+                if ui::secondary_button(ui, "Cancelar").clicked() {
+                    app.sync.oauth.cancel();
+                }
+            });
+        } else if ui
+            .add_enabled_ui(!busy, |ui| {
+                ui::primary_button(
+                    ui,
+                    &ui::with_icon(icons::IDENTITY, &format!("Iniciar sesión con {provider}")),
+                )
+            })
+            .inner
+            .clicked()
+        {
+            crate::sync::oauth::renew(app);
+        }
+        ui.add_space(6.0);
+    }
     ui.horizontal(|ui| {
         if ui
             .add_enabled_ui(!busy, |ui| ui::primary_button(ui, "Sincronizar ahora"))
@@ -309,6 +359,9 @@ fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
         });
         return;
     }
+    if oauth_flow(app, ui) {
+        return;
+    }
     let form = &mut app.sync.form;
     let field = |ui: &mut egui::Ui, text: &mut String, hint: &str, password: bool| {
         ui.add(
@@ -318,16 +371,49 @@ fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
                 .desired_width(f32::INFINITY),
         );
     };
-    ui.horizontal(|ui| {
-        let eye = 28.0 + ui.spacing().item_spacing.x;
-        ui.add(
-            egui::TextEdit::singleline(&mut form.server)
-                .hint_text("Servidor, por ejemplo https://tunel.tudominio.com")
-                .password(!form.show_server)
-                .desired_width(ui.available_width() - eye),
+    let server_field = ui
+        .horizontal(|ui| {
+            let eye = 28.0 + ui.spacing().item_spacing.x;
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut form.server)
+                    .hint_text("Servidor, por ejemplo https://tunel.tudominio.com")
+                    .password(!form.show_server)
+                    .desired_width(ui.available_width() - eye),
+            );
+            ui::reveal_button(ui, &mut form.show_server);
+            edit
+        })
+        .inner;
+    // Con la dirección escrita, se pregunta al servidor con qué proveedores se puede entrar.
+    if !server_field.has_focus() {
+        crate::sync::oauth::refresh_providers(app);
+    }
+    let server = tunel_sync::check_server_url(&app.sync.form.server)
+        .map(|s| s.base)
+        .unwrap_or_default();
+    let providers = app.sync.oauth.providers_for(&server).to_vec();
+    if !providers.is_empty() {
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            for provider in providers {
+                let label =
+                    ui::with_icon(icons::IDENTITY, &format!("Entrar con {}", provider.name));
+                if ui::primary_button(ui, &label).clicked() {
+                    crate::sync::oauth::start(app, provider);
+                }
+            }
+        });
+        ui.label(
+            RichText::new(
+                "Con tu cuenta de la organización: sin contraseña de cuenta; la sincronización se \
+                 cifra con tu contraseña maestra de Túnel. O, con correo y contraseña:",
+            )
+            .size(12.0)
+            .color(p.muted),
         );
-        ui::reveal_button(ui, &mut form.show_server);
-    });
+        ui.add_space(4.0);
+    }
+    let form = &mut app.sync.form;
     field(ui, &mut form.email, "Correo de la cuenta", false);
     ui.horizontal(|ui| {
         let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
@@ -359,6 +445,69 @@ fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
             .size(12.0)
             .color(p.muted),
     );
+}
+
+/// Inicio de sesión con un proveedor en curso: esperando al navegador o pidiendo la
+/// contraseña maestra. Devuelve `true` si ocupa el sitio del formulario.
+fn oauth_flow(app: &mut TunelApp, ui: &mut egui::Ui) -> bool {
+    let p = ui::pal(ui);
+    if let Some(provider) = app.sync.oauth.waiting.clone() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(
+                RichText::new(format!(
+                    "Termina de iniciar sesión con {provider} en el navegador…"
+                ))
+                .color(p.muted),
+            );
+            if ui::secondary_button(ui, "Cancelar").clicked() {
+                app.sync.oauth.cancel();
+            }
+        });
+        return true;
+    }
+    let Some(sign_in) = &app.sync.oauth.signed_in else {
+        return false;
+    };
+    let new = sign_in.is_new();
+    ui.label(
+        RichText::new(format!(
+            "Has entrado como {} con {}.",
+            sign_in.email(),
+            sign_in.provider_name()
+        ))
+        .strong(),
+    );
+    let help = if new {
+        "No hay cuenta con ese correo: se creará. La sincronización se cifra con tu contraseña \
+         maestra de Túnel; usa la misma en todos tus equipos."
+    } else {
+        "Escribe tu contraseña maestra: la misma con la que abres Túnel en tus otros equipos."
+    };
+    ui.label(RichText::new(help).color(p.muted));
+    ui.add_space(6.0);
+    let master = &mut app.sync.oauth.master;
+    let field = ui.add(
+        egui::TextEdit::singleline(master)
+            .password(true)
+            .hint_text("Contraseña maestra de Túnel")
+            .desired_width(320.0),
+    );
+    if new {
+        crate::lock::password_rules(ui, master);
+    }
+    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        let label = if new { "Crear la cuenta" } else { "Continuar" };
+        if ui::primary_button(ui, label).clicked() || enter {
+            crate::sync::oauth::finish(app);
+        }
+        if ui::secondary_button(ui, "Cancelar").clicked() {
+            app.sync.oauth.cancel();
+        }
+    });
+    true
 }
 
 fn log_controls(app: &mut TunelApp, ui: &mut egui::Ui) {

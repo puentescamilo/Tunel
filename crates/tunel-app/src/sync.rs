@@ -5,6 +5,7 @@
 //! hasta que el servidor responde. Las rondas corren en segundo plano sobre una copia; lo
 //! que se edite mientras tanto se vuelve a aplicar encima del resultado.
 
+pub mod oauth;
 pub mod teams;
 
 use crate::app::TunelApp;
@@ -89,6 +90,10 @@ pub struct SyncController {
     /// Problemas de Teams de la última ronda; solo se avisa cuando cambian.
     team_problems: Vec<tunel_sync::TeamProblem>,
     pub teams: teams::TeamsUi,
+    /// Iniciar sesión con un proveedor de identidad.
+    pub oauth: oauth::OAuthUi,
+    /// La sesión de la cuenta de proveedor caducó: hay que volver a pasar por él.
+    pub sign_in_again: bool,
 }
 
 impl Default for SyncController {
@@ -102,6 +107,8 @@ impl Default for SyncController {
             team_problems: Vec::new(),
             teams: teams::TeamsUi::default(),
             form: AccountForm::default(),
+            oauth: oauth::OAuthUi::default(),
+            sign_in_again: false,
         }
     }
 }
@@ -290,6 +297,7 @@ pub fn on_finished(app: &mut TunelApp, round: u64, result: Result<Box<SyncOutcom
         Ok(outcome) => apply_outcome(app, &snapshot, *outcome),
         Err(e) => {
             tracing::warn!(error = %e, "la sincronización falló");
+            app.sync.sign_in_again = matches!(e, SyncError::SignInAgain(_));
             fail(app, describe(&e), e.is_transient());
         }
     }

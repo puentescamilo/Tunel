@@ -12,5 +12,5 @@ pub mod theme;
 pub mod vault;
 
 pub use model::*;
-pub use store::{StoreError, UnlockedVault};
+pub use store::{PasswordCheck, StoreError, UnlockedVault};
 pub use vault::{HostKeyStatus, ResolveError, ResolvedHost, VaultData};
