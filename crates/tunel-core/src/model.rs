@@ -396,6 +396,8 @@ pub struct Settings {
     pub ui_font: Option<String>,
     /// Familias de Google Fonts que importó el usuario, además de las sugeridas.
     pub custom_fonts: Vec<String>,
+    /// Color del borde inferior de la pestaña seleccionada; `None` lo elige según el fondo.
+    pub tab_border: Option<crate::theme::Rgb>,
 }
 
 impl Default for Settings {
@@ -412,6 +414,7 @@ impl Default for Settings {
             terminal_font: None,
             ui_font: None,
             custom_fonts: Vec::new(),
+            tab_border: None,
         }
     }
 }

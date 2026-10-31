@@ -84,6 +84,13 @@ impl Tab {
         }
     }
 
+    pub fn set_title(&mut self, title: String) {
+        match self {
+            Tab::Terminal(t) => t.title = title,
+            Tab::Sftp(s) => s.title = title,
+        }
+    }
+
     pub fn icon(&self) -> &'static str {
         match self {
             Tab::Terminal(t) if t.live.is_some() => crate::ui::icons::BROADCAST,
@@ -126,6 +133,8 @@ pub struct TunelApp {
     pub forward_errors: HashMap<ForwardId, String>,
     pub password_change: crate::views::settings::PasswordChange,
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
+    /// Pestaña a la que se está cambiando el nombre.
+    pub tab_rename: Option<crate::tabs::TabRename>,
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
@@ -307,6 +316,7 @@ impl TunelApp {
             forward_errors: HashMap::new(),
             password_change: Default::default(),
             quick_connect: None,
+            tab_rename: None,
             notices: Vec::new(),
             sync: Default::default(),
             updates: Default::default(),
@@ -447,10 +457,11 @@ impl TunelApp {
         matches!(self.tabs.get(index), Some(Tab::Terminal(s)) if !s.is_watching())
     }
 
-    /// Vuelve a conectar la pestaña `index` en su mismo sitio.
+    /// Vuelve a conectar la pestaña `index` en su mismo sitio, con el mismo nombre.
     pub fn reconnect_tab(&mut self, index: usize) {
         match self.same_session(index) {
-            Some(Ok(session)) => {
+            Some(Ok(mut session)) => {
+                session.title = self.tabs[index].title().to_string();
                 self.tabs[index] = Tab::Terminal(Box::new(session));
                 self.active = Some(index);
             }
@@ -683,7 +694,7 @@ impl eframe::App for TunelApp {
         self.handle_shortcuts(&ctx);
 
         crate::chrome::sidebar(self, ui);
-        crate::chrome::tab_bar(self, ui);
+        crate::tabs::tab_bar(self, ui);
         let in_terminal = self.active.is_some();
         let margin = if in_terminal {
             egui::Margin::ZERO
@@ -709,6 +720,7 @@ impl eframe::App for TunelApp {
         crate::editor::show(self, &ctx);
         crate::prompts::show(self, &ctx);
         crate::quick_connect::show(self, &ctx);
+        crate::tabs::rename_dialog(self, &ctx);
         crate::chrome::notices(self, &ctx);
     }
 }

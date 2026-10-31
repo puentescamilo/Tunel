@@ -114,6 +114,9 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             setting_row(ui, "Interfaz", "En automático sigue al fondo del tema de la terminal", |ui| {
                 themes::ui_mode_selector(ui, &mut settings.ui_theme);
             });
+            setting_row(ui, "Borde de la pestaña activa", "La pestaña abierta toma el fondo de su terminal", |ui| {
+                themes::tab_border_selector(ui, &mut settings.tab_border);
+            });
             setting_row(ui, "Cursor", "Los programas como vim pueden cambiarlo mientras se ejecutan", |ui| {
                 themes::cursor_selector(ui, &mut settings.cursor_style);
             });
