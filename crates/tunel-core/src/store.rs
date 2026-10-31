@@ -71,6 +71,21 @@ pub(crate) fn kdf_within_limits(kdf: KdfParams) -> bool {
         && (1..=MAX_KDF_PARALLELISM).contains(&kdf.parallelism)
 }
 
+/// Comprueba si una contraseña es la maestra de una bóveda (ver
+/// [`UnlockedVault::password_check`]). Deriva la clave con Argon2id: tarda.
+pub struct PasswordCheck {
+    salt: [u8; SALT_LEN],
+    kdf: KdfParams,
+    key: zeroize::Zeroizing<[u8; crypto::KEY_LEN]>,
+}
+
+impl PasswordCheck {
+    pub fn matches(&self, password: &str) -> bool {
+        MasterKey::derive(password.as_bytes(), &self.salt, self.kdf)
+            .is_ok_and(|key| key.as_bytes() == &*self.key)
+    }
+}
+
 fn validate_password(password: &str) -> Result<(), StoreError> {
     if password.chars().count() < MIN_PASSWORD_LEN {
         return Err(StoreError::WeakPassword);
@@ -184,6 +199,16 @@ impl UnlockedVault {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Lo necesario para comprobar más tarde, fuera de este hilo, si una contraseña es la
+    /// maestra de esta bóveda.
+    pub fn password_check(&self) -> PasswordCheck {
+        PasswordCheck {
+            salt: self.salt,
+            kdf: self.kdf,
+            key: zeroize::Zeroizing::new(*self.key.as_bytes()),
+        }
     }
 
     /// Sustituye el contenido y lo guarda; si falla la escritura, se conserva el anterior.
@@ -392,6 +417,19 @@ mod tests {
             .err()
             .unwrap();
         assert!(matches!(err, StoreError::AlreadyExists(_)));
+    }
+
+    #[test]
+    fn the_password_check_recognizes_only_the_master_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.json");
+        let mut vault =
+            UnlockedVault::create(path, "contraseña-larga", KdfParams::FAST_FOR_TESTS).unwrap();
+        let check = vault.password_check();
+        assert!(check.matches("contraseña-larga"));
+        assert!(!check.matches("otra-contraseña"));
+        vault.change_password("nueva-contraseña").unwrap();
+        assert!(vault.password_check().matches("nueva-contraseña"));
     }
 
     #[test]

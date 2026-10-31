@@ -157,6 +157,10 @@ impl TunelApp {
             Err(e) => return self.notify(format!("TUNEL_DEV_PASSWORD: {e}")),
         }
         crate::sync::on_unlock(self);
+        // `TUNEL_DEV_SERVER=<url>` deja escrita la dirección del servidor en Ajustes.
+        if let Ok(server) = std::env::var("TUNEL_DEV_SERVER") {
+            self.sync.form.server = server;
+        }
         // `TUNEL_DEV_SYNC=crear|servidor|correo|contraseña` (o `entrar|…`) une el equipo
         // a una cuenta al arrancar, para probar la sincronización sin rellenar el formulario.
         if let Ok(spec) = std::env::var("TUNEL_DEV_SYNC")
@@ -545,6 +549,7 @@ impl TunelApp {
                     crate::sync::teams::on_done(self, round, result)
                 }
                 AppEvent::Live(event) => crate::live::on_event(self, event),
+                AppEvent::OAuth(event) => crate::sync::oauth::on_event(self, event),
                 AppEvent::FontDownloaded { family, result } => {
                     crate::fonts::on_downloaded(self, family, result)
                 }
