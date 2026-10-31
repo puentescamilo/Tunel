@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod io;
 pub mod model;
+pub mod password;
 pub mod share;
 pub mod ssh_config;
 pub mod store;

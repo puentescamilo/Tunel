@@ -14,19 +14,19 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 /// Parámetros de Argon2id de las cuentas; el servidor solo admite estos.
-const ACCOUNT_KDF: KdfParams = KdfParams::RECOMMENDED;
+pub(crate) const ACCOUNT_KDF: KdfParams = KdfParams::RECOMMENDED;
 
 /// Un servidor malicioso podría pedir parámetros débiles para luego probar contraseñas a
 /// bajo coste con la clave de acceso que recibe. No se acepta nada por debajo de los de
 /// las cuentas.
-fn kdf_acceptable(salt: &[u8], kdf: KdfParams) -> bool {
+pub(crate) fn kdf_acceptable(salt: &[u8], kdf: KdfParams) -> bool {
     kdf_is_strong(salt, kdf)
         && kdf.memory_kib >= ACCOUNT_KDF.memory_kib
         && kdf.iterations >= ACCOUNT_KDF.iterations
 }
 
 /// Argon2id con 64 MiB tarda: se calcula fuera del runtime asíncrono.
-async fn derive(
+pub(crate) async fn derive(
     password: Zeroizing<String>,
     salt: Vec<u8>,
     kdf: KdfParams,
@@ -80,6 +80,7 @@ pub async fn create_account(
         teams: Vec::new(),
         invitations: Vec::new(),
         contacts: Default::default(),
+        oauth: None,
     })
 }
 
@@ -119,6 +120,7 @@ pub async fn sign_in(
         teams: Vec::new(),
         invitations: Vec::new(),
         contacts: Default::default(),
+        oauth: None,
     })
 }
 

@@ -323,6 +323,56 @@ impl Api {
             .await
     }
 
+    /// Proveedores de identidad del servidor. Uno anterior a ellos no tiene la ruta: se
+    /// toma como que no hay ninguno.
+    pub async fn auth_providers(&self) -> Result<Vec<AuthProvider>, SyncError> {
+        let request = self.client.get(format!("{}/v1/auth/providers", self.base));
+        match self.send::<AuthProviders>(request).await {
+            Ok(list) => Ok(list.providers),
+            Err(SyncError::NotFound(_)) => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Dirección que se abre en el navegador para iniciar sesión con `provider`.
+    pub fn oauth_start_url(
+        &self,
+        provider: &str,
+        port: u16,
+        challenge: &str,
+        state: &str,
+    ) -> String {
+        format!(
+            "{}/v1/auth/{}/start?port={port}&challenge={challenge}&state={state}",
+            self.base,
+            segment(provider)
+        )
+    }
+
+    pub async fn oauth_token(&self, request: &OAuthTokenRequest) -> Result<OAuthLogin, SyncError> {
+        self.send(self.post("/v1/auth/token", request)).await
+    }
+
+    pub async fn oauth_register(
+        &self,
+        request: &OAuthRegisterRequest,
+    ) -> Result<OAuthRegisterResponse, SyncError> {
+        self.send(self.post("/v1/accounts/oauth", request)).await
+    }
+
+    pub async fn update_vault_key(
+        &self,
+        token: &str,
+        update: &VaultKeyUpdate,
+    ) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .put(format!("{}/v1/accounts/current/vault-key", self.base))
+            .bearer_auth(token)
+            .json(update);
+        self.execute(request).await.map(|_| ())
+    }
+
     fn live_path(team: &str) -> String {
         format!("/v1/teams/{}/live", segment(team))
     }

@@ -10,6 +10,9 @@ pub(crate) struct Session {
     email: String,
     auth: Zeroizing<String>,
     token: Option<Zeroizing<String>>,
+    /// Proveedor de identidad de la cuenta: sin contraseña, una sesión caducada solo se
+    /// renueva volviendo a pasar por él, en el navegador.
+    provider: Option<String>,
 }
 
 impl Session {
@@ -20,6 +23,7 @@ impl Session {
             email: local.email.clone(),
             auth: local.auth.clone(),
             token: local.token.clone(),
+            provider: local.oauth.as_ref().map(|o| o.provider_name.clone()),
         })
     }
 
@@ -36,6 +40,9 @@ impl Session {
     pub async fn token(&mut self) -> Result<Zeroizing<String>, SyncError> {
         if let Some(token) = &self.token {
             return Ok(token.clone());
+        }
+        if let Some(provider) = &self.provider {
+            return Err(SyncError::SignInAgain(provider.clone()));
         }
         let session = self.api.login(&self.email, &self.auth).await?;
         let token = Zeroizing::new(session.token);
