@@ -61,6 +61,9 @@ pub struct Config {
     /// Renovaciones de clave que se procesan a la vez como mucho.
     pub concurrent_rotations: usize,
     pub live: LiveLimits,
+    /// Proveedores de identidad (Google, Microsoft 365, OpenID Connect); `None` si solo
+    /// se entra con contraseña.
+    pub oauth: Option<crate::oauth::OAuthConfig>,
 }
 
 impl Default for Config {
@@ -96,6 +99,7 @@ impl Default for Config {
             },
             concurrent_rotations: 2,
             live: LiveLimits::default(),
+            oauth: None,
         }
     }
 }
@@ -115,7 +119,7 @@ const MAX_TEAM_NAME_CIPHERTEXT: usize = 512;
 /// Tamaño máximo del manifiesto cifrado en base64.
 const MAX_MANIFEST_CIPHERTEXT: usize = 8 * 1024 * 1024;
 /// La clave de bóveda envuelta ocupa unos 64 bytes en base64; se deja margen.
-const MAX_VAULT_KEY_CIPHERTEXT: usize = 256;
+pub(crate) const MAX_VAULT_KEY_CIPHERTEXT: usize = 256;
 const MAX_EMAIL_LEN: usize = 254;
 /// Cada cuánto se borran las sesiones caducadas.
 const SESSION_SWEEP: Duration = Duration::from_secs(60 * 60);
@@ -128,6 +132,7 @@ pub struct AppState {
     unauthenticated: RateBucket,
     rotations: tokio::sync::Semaphore,
     pub(crate) live: LiveRegistry,
+    pub(crate) oauth: Option<crate::oauth::OAuth>,
     secret: [u8; 32],
 }
 
@@ -151,6 +156,11 @@ impl AppState {
             ),
             rotations: tokio::sync::Semaphore::new(config.concurrent_rotations),
             live: LiveRegistry::default(),
+            oauth: config
+                .oauth
+                .clone()
+                .map(crate::oauth::OAuth::new)
+                .transpose()?,
             db,
             config,
             secret,
@@ -194,6 +204,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(team_routes)
         .merge(rotate_routes)
         .merge(live::routes())
+        .merge(crate::oauth::routes().layer(DefaultBodyLimit::max(MAX_AUTH_BODY)))
         .route("/health", get(|| async { "ok" }))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -321,9 +332,10 @@ pub(crate) fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-fn normalize_email(email: &str) -> ApiResult<String> {
+pub(crate) fn normalize_email(email: &str) -> ApiResult<String> {
     let email = email.trim().to_lowercase();
     let valid = email.len() <= MAX_EMAIL_LEN
+        && email.matches('@').count() == 1
         && email
             .split_once('@')
             .is_some_and(|(user, domain)| !user.is_empty() && !domain.is_empty())
@@ -368,7 +380,7 @@ pub fn parse_allowed_domains(text: &str) -> Result<Vec<String>, String> {
 
 /// El correo, ya normalizado, es de un dominio permitido (o no hay restricción). Se
 /// compara el dominio entero: `ejemplo.com` no admite `dev.ejemplo.com`.
-fn domain_allowed(allowed: &[String], email: &str) -> bool {
+pub(crate) fn domain_allowed(allowed: &[String], email: &str) -> bool {
     allowed.is_empty()
         || email
             .rsplit_once('@')
@@ -420,8 +432,22 @@ async fn prelogin(
     }))
 }
 
+/// Todas las cuentas usan los mismos parámetros y una sal del mismo tamaño que las
+/// inventadas, para que el prelogin no permita distinguirlas.
+pub(crate) fn check_account_kdf(salt: &str, kdf: KdfParams) -> ApiResult<()> {
+    let salt = B64
+        .decode(salt)
+        .map_err(|_| ApiError::bad_request("sal no válida"))?;
+    if salt.len() != MIN_SALT_LEN || kdf != ACCOUNT_KDF || !kdf_is_strong(&salt, kdf) {
+        return Err(ApiError::bad_request(
+            "parámetros de cifrado de la cuenta no admitidos",
+        ));
+    }
+    Ok(())
+}
+
 /// Gasta una ficha de las rutas sin sesión, o responde 429.
-fn take_unauthenticated(state: &AppState) -> ApiResult<()> {
+pub(crate) fn take_unauthenticated(state: &AppState) -> ApiResult<()> {
     if state.unauthenticated.try_take() {
         Ok(())
     } else {
@@ -447,19 +473,7 @@ async fn register(
             format!("este servidor solo admite cuentas con correos {list}"),
         ));
     }
-    let salt = B64
-        .decode(&request.salt)
-        .map_err(|_| ApiError::bad_request("sal no válida"))?;
-    // Todas las cuentas usan los mismos parámetros y una sal del mismo tamaño que las
-    // inventadas, para que el prelogin no permita distinguirlas.
-    if salt.len() != MIN_SALT_LEN
-        || request.kdf != ACCOUNT_KDF
-        || !kdf_is_strong(&salt, request.kdf)
-    {
-        return Err(ApiError::bad_request(
-            "parámetros de cifrado de la cuenta no admitidos",
-        ));
-    }
+    check_account_kdf(&request.salt, request.kdf)?;
     let auth =
         auth::decode_auth(&request.auth).ok_or_else(|| ApiError::bad_request("clave no válida"))?;
     check_blob(&request.vault_key, MAX_VAULT_KEY_CIPHERTEXT)?;

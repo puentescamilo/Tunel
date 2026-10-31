@@ -9,7 +9,9 @@ pub mod api;
 pub mod auth;
 pub mod db;
 pub mod live;
+pub mod oauth;
 
 pub use api::{AppState, Config, parse_allowed_domains, router, spawn_session_sweeper};
 pub use db::{Db, Quota};
 pub use live::LiveLimits;
+pub use oauth::OAuthConfig;

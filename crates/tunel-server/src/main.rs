@@ -6,6 +6,9 @@
 //! - `TUNEL_REGISTRO_ABIERTO=1`: permite crear cuentas a cualquiera; si no, solo la primera.
 //! - `TUNEL_DOMINIOS_PERMITIDOS=ejemplo.com,otro.com`: solo se crean cuentas con correos
 //!   de esos dominios, y para ellos el registro queda abierto.
+//! - Proveedores de identidad (iniciar sesión con Google, Microsoft 365 u OpenID Connect):
+//!   `TUNEL_URL_PUBLICA` y `TUNEL_GOOGLE_*`, `TUNEL_MICROSOFT_*` o `TUNEL_OIDC_*`; ver
+//!   `.env.example`.
 //!
 //! Sirve HTTP sin cifrar: ponlo detrás de un proxy con HTTPS (Caddy, nginx, Traefik).
 //!
@@ -14,7 +17,9 @@
 
 use anyhow::Context as _;
 use std::path::PathBuf;
-use tunel_server::{AppState, Config, Db, parse_allowed_domains, router, spawn_session_sweeper};
+use tunel_server::{
+    AppState, Config, Db, OAuthConfig, parse_allowed_domains, router, spawn_session_sweeper,
+};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 
@@ -36,6 +41,33 @@ fn health_check() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Avisa de configuraciones de proveedores que no harán lo que se espera.
+fn warn_about_oauth(config: &Config) {
+    let Some(oauth) = &config.oauth else {
+        return;
+    };
+    let names: Vec<_> = oauth.providers.iter().map(|p| p.name.as_str()).collect();
+    tracing::info!(proveedores = %names.join(", "), url = %oauth.public_url, "inicio de sesión con proveedores de identidad");
+    for provider in &oauth.providers {
+        tracing::info!(
+            "dirección de retorno que hay que registrar en {}: {}/v1/auth/{}/callback",
+            provider.name,
+            oauth.public_url,
+            provider.id
+        );
+        let restricted = provider.trusted_tenant
+            || config.open_registration
+            || !config.allowed_domains.is_empty();
+        if !restricted {
+            tracing::warn!(
+                "con {} nadie podrá crear cuentas nuevas: define TUNEL_DOMINIOS_PERMITIDOS \
+                 (o, si de verdad quieres admitir cualquier correo, TUNEL_REGISTRO_ABIERTO=1)",
+                provider.name
+            );
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("salud") {
@@ -53,11 +85,15 @@ async fn main() -> anyhow::Result<()> {
     let allowed_domains =
         parse_allowed_domains(&std::env::var("TUNEL_DOMINIOS_PERMITIDOS").unwrap_or_default())
             .map_err(|e| anyhow::anyhow!("TUNEL_DOMINIOS_PERMITIDOS: {e}"))?;
+    let oauth = OAuthConfig::from_env(|name| std::env::var(name).ok())
+        .map_err(|e| anyhow::anyhow!("proveedores de identidad: {e}"))?;
     let config = Config {
         open_registration: std::env::var("TUNEL_REGISTRO_ABIERTO").is_ok_and(|v| v == "1"),
         allowed_domains,
+        oauth,
         ..Config::default()
     };
+    warn_about_oauth(&config);
 
     let db = Db::open(&db_path)
         .with_context(|| format!("no se pudo abrir la base de datos {}", db_path.display()))?;

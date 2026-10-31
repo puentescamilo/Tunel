@@ -11,17 +11,27 @@ services:
       dockerfile: crates/tunel-server/Dockerfile
     image: tunel-server
     restart: unless-stopped
+    # La dirección y el puerto de este equipo se eligen en .env (TUNEL_IP y TUNEL_PUERTO);
+    # dentro del contenedor siempre es el 8080.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${TUNEL_IP:-127.0.0.1}:${TUNEL_PUERTO:-8080}:8080"
     volumes:
       - tunel-datos:/datos
-    # Se fijan en crates/tunel-server/.env, por ejemplo:
-    #   TUNEL_REGISTRO_ABIERTO=1                     cualquiera puede crear una cuenta
-    #   TUNEL_DOMINIOS_PERMITIDOS=ejemplo.com,otro.com   solo correos de esos dominios
-    # Sin ellas, solo se puede crear la primera cuenta.
+    # Todo se configura en crates/tunel-server/.env, que git no sigue: copia .env.example
+    # y rellénalo. Así, al actualizar el servidor con git pull no hay conflictos.
     environment:
       TUNEL_REGISTRO_ABIERTO: ${TUNEL_REGISTRO_ABIERTO:-0}
       TUNEL_DOMINIOS_PERMITIDOS: ${TUNEL_DOMINIOS_PERMITIDOS:-}
+      TUNEL_URL_PUBLICA: ${TUNEL_URL_PUBLICA:-}
+      TUNEL_GOOGLE_ID_CLIENTE: ${TUNEL_GOOGLE_ID_CLIENTE:-}
+      TUNEL_GOOGLE_SECRETO: ${TUNEL_GOOGLE_SECRETO:-}
+      TUNEL_MICROSOFT_ID_CLIENTE: ${TUNEL_MICROSOFT_ID_CLIENTE:-}
+      TUNEL_MICROSOFT_SECRETO: ${TUNEL_MICROSOFT_SECRETO:-}
+      TUNEL_MICROSOFT_INQUILINO: ${TUNEL_MICROSOFT_INQUILINO:-}
+      TUNEL_OIDC_NOMBRE: ${TUNEL_OIDC_NOMBRE:-}
+      TUNEL_OIDC_EMISOR: ${TUNEL_OIDC_EMISOR:-}
+      TUNEL_OIDC_ID_CLIENTE: ${TUNEL_OIDC_ID_CLIENTE:-}
+      TUNEL_OIDC_SECRETO: ${TUNEL_OIDC_SECRETO:-}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
