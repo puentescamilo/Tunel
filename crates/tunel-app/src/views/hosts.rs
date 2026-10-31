@@ -4,6 +4,7 @@ use crate::app::TunelApp;
 use crate::editor::Editor;
 use crate::ui::{self, icons};
 use egui::{Align2, CornerRadius, FontId, Rect, RichText, Sense, Stroke, Vec2};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use tunel_core::{Group, GroupId, Host, HostId, Protocol, VaultData};
 
@@ -373,18 +374,102 @@ fn breadcrumb(ui: &mut egui::Ui, data: &VaultData, current: GroupId) -> Option<O
     target
 }
 
-/// Hosts visibles: todos los que coinciden al buscar; si no, los del grupo actual
-/// (en la raíz también los que apuntan a un grupo que ya no existe).
-fn visible_hosts<'a>(data: &'a VaultData, query: &str, group: Option<GroupId>) -> Vec<&'a Host> {
-    let searching = !query.trim().is_empty();
+/// Hosts visibles: al buscar o filtrar por etiquetas, todos los que coinciden, estén en
+/// el grupo que estén; si no, los del grupo actual (en la raíz también los que apuntan a
+/// un grupo que ya no existe). Con etiquetas, el host tiene que llevarlas todas.
+fn visible_hosts<'a>(
+    data: &'a VaultData,
+    query: &str,
+    tags: &BTreeSet<String>,
+    group: Option<GroupId>,
+) -> Vec<&'a Host> {
+    let filtering = !query.trim().is_empty() || !tags.is_empty();
     data.search_hosts(query)
         .into_iter()
+        .filter(|h| tags.iter().all(|tag| has_tag(h, tag)))
         .filter(|h| {
-            searching
+            filtering
                 || h.group == group
                 || (group.is_none() && h.group.is_some_and(|g| data.group(g).is_none()))
         })
         .collect()
+}
+
+fn has_tag(host: &Host, tag: &str) -> bool {
+    host.tags.iter().any(|t| t.trim().eq_ignore_ascii_case(tag))
+}
+
+/// Etiquetas de todos los hosts, sin repetir (sin distinguir mayúsculas), con cuántos
+/// hosts las llevan.
+fn all_tags(data: &VaultData) -> Vec<(String, usize)> {
+    let mut tags: BTreeMap<String, (String, usize)> = BTreeMap::new();
+    for host in &data.hosts {
+        let mut seen = BTreeSet::new();
+        for tag in host.tags.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+            let key = tag.to_lowercase();
+            if seen.insert(key.clone()) {
+                tags.entry(key).or_insert_with(|| (tag.to_string(), 0)).1 += 1;
+            }
+        }
+    }
+    tags.into_values().collect()
+}
+
+/// Fichas para filtrar por etiquetas; marca y desmarca en `selected`.
+fn tag_filter(ui: &mut egui::Ui, data: &VaultData, selected: &mut BTreeSet<String>) {
+    let tags = all_tags(data);
+    // Una etiqueta elegida que ya no lleva ningún host deja de filtrar.
+    selected.retain(|s| tags.iter().any(|(t, _)| t.eq_ignore_ascii_case(s)));
+    if tags.is_empty() {
+        return;
+    }
+    let p = ui::pal(ui);
+    ui.add_space(10.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(icons::TAG)
+                .font(ui::icon_font(14.0))
+                .color(p.muted),
+        );
+        for (tag, count) in &tags {
+            let on = selected.iter().any(|s| s.eq_ignore_ascii_case(tag));
+            let (fill, stroke, color) = if on {
+                (p.accent_soft, p.accent, p.accent)
+            } else {
+                (p.surface, p.border, p.text)
+            };
+            let text = RichText::new(format!("{tag} · {count}"))
+                .size(12.5)
+                .color(color);
+            let chip = ui
+                .add(
+                    egui::Button::new(text)
+                        .fill(fill)
+                        .stroke(Stroke::new(1.0, stroke))
+                        .corner_radius(CornerRadius::same(12))
+                        .min_size(Vec2::new(0.0, 24.0)),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if chip.clicked() {
+                if on {
+                    selected.retain(|s| !s.eq_ignore_ascii_case(tag));
+                } else {
+                    selected.insert(tag.clone());
+                }
+            }
+        }
+        if !selected.is_empty()
+            && ui
+                .add(
+                    egui::Button::new(RichText::new("Quitar filtro").size(12.5).color(p.muted))
+                        .frame(false),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+        {
+            selected.clear();
+        }
+    });
 }
 
 pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
@@ -420,6 +505,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         "Buscar por nombre, dirección o etiqueta",
         f32::INFINITY,
     );
+    tag_filter(ui, &data, &mut app.host_tags);
     ui.add_space(14.0);
 
     egui::ScrollArea::vertical()
@@ -434,7 +520,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                 );
                 return;
             }
-            let searching = !app.search.trim().is_empty();
+            let searching = !app.search.trim().is_empty() || !app.host_tags.is_empty();
             if let (Some(group), false) = (app.host_group, searching) {
                 navigate = breadcrumb(ui, &data, group);
             }
@@ -454,7 +540,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                     ui.add_space(8.0);
                 }
             }
-            let hosts = visible_hosts(&data, &app.search, app.host_group);
+            let hosts = visible_hosts(&data, &app.search, &app.host_tags, app.host_group);
             if !hosts.is_empty() {
                 ui::section_label(ui, if searching { "Resultados" } else { "Hosts" });
                 grid(ui, &hosts, CARD_HEIGHT, |ui, host| {
@@ -465,7 +551,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                     ui,
                     icons::SEARCH,
                     "Sin resultados",
-                    "Ningún host coincide con la búsqueda.",
+                    "Ningún host coincide con la búsqueda o las etiquetas elegidas.",
                 );
             }
         });
@@ -555,15 +641,61 @@ mod tests {
                 .map(|h| h.label.clone())
                 .collect::<Vec<_>>()
         };
+        let none = BTreeSet::new();
         assert_eq!(
-            names(visible_hosts(&data, "", None)),
+            names(visible_hosts(&data, "", &none, None)),
             vec!["huerfano", "raiz"]
         );
         assert_eq!(
-            names(visible_hosts(&data, "", Some(group.id))),
+            names(visible_hosts(&data, "", &none, Some(group.id))),
             vec!["dentro"]
         );
-        assert_eq!(names(visible_hosts(&data, "dentro", None)), vec!["dentro"]);
+        assert_eq!(
+            names(visible_hosts(&data, "dentro", &none, None)),
+            vec!["dentro"]
+        );
+    }
+
+    fn tagged(label: &str, tags: &[&str]) -> Host {
+        Host {
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            ..Host::new(label, "10.0.0.1")
+        }
+    }
+
+    #[test]
+    fn tag_filter_needs_every_tag_and_ignores_groups_and_case() {
+        let group = Group::new("Prod");
+        let data = VaultData::default()
+            .with_group(group.clone())
+            .with_host(Host {
+                group: Some(group.id),
+                ..tagged("web-prod", &["Web", "producción"])
+            })
+            .with_host(tagged("web-dev", &["web", "desarrollo"]))
+            .with_host(tagged("db", &["producción"]));
+        let names = |tags: &[&str], query: &str| {
+            let tags: BTreeSet<String> = tags.iter().map(|t| t.to_string()).collect();
+            visible_hosts(&data, query, &tags, None)
+                .into_iter()
+                .map(|h| h.label.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&["web"], ""), vec!["web-dev", "web-prod"]);
+        assert_eq!(names(&["WEB", "Producción"], ""), vec!["web-prod"]);
+        assert_eq!(names(&["producción"], "db"), vec!["db"]);
+        assert!(names(&["web", "desarrollo", "producción"], "").is_empty());
+    }
+
+    #[test]
+    fn tags_are_listed_once_with_their_count() {
+        let data = VaultData::default()
+            .with_host(tagged("a", &["Web", " web ", "db"]))
+            .with_host(tagged("b", &["WEB", ""]));
+        assert_eq!(
+            all_tags(&data),
+            vec![("db".to_string(), 1), ("Web".to_string(), 2)]
+        );
     }
 
     #[test]

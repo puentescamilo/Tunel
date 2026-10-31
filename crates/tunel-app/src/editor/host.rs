@@ -334,6 +334,7 @@ pub(super) fn host_form(
     form: &mut HostForm,
     data: &VaultData,
     teams: &[(String, String)],
+    secrets: &super::Secrets,
 ) {
     egui::Grid::new("form-host")
         .num_columns(2)
@@ -436,6 +437,34 @@ pub(super) fn host_form(
                 &inherited,
             );
             ui.end_row();
+            // La contraseña de la identidad que usará el host, elegida o heredada.
+            let identity = form
+                .host
+                .identity
+                .or_else(|| {
+                    form.host
+                        .group
+                        .and_then(|g| data.group(g))
+                        .and_then(|g| g.identity)
+                })
+                .and_then(|i| data.identity(i));
+            if let Some((identity, password)) =
+                identity.and_then(|i| i.password.as_deref().map(|p| (i, p)))
+            {
+                ui.label("Contraseña");
+                ui.horizontal(|ui| {
+                    let can_reveal = secrets.can_reveal(identity.team.as_deref());
+                    crate::ui::password_label(ui, "host-identidad", password, can_reveal);
+                    if !can_reveal {
+                        ui.label(
+                            egui::RichText::new("solo la ven los admins del Team")
+                                .size(12.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
+                });
+                ui.end_row();
+            }
             ui.label("Usuario nuevo");
             ui.horizontal(|ui| {
                 ui.add(
@@ -443,11 +472,13 @@ pub(super) fn host_form(
                         .hint_text("usuario")
                         .desired_width(FIELD_WIDTH / 2.0 - 4.0),
                 );
-                ui.add(
-                    egui::TextEdit::singleline(&mut form.new_password)
-                        .password(true)
-                        .hint_text("contraseña")
-                        .desired_width(FIELD_WIDTH / 2.0 - 4.0),
+                crate::ui::password_field(
+                    ui,
+                    "host-nueva",
+                    &mut form.new_password,
+                    "contraseña",
+                    FIELD_WIDTH / 2.0 - 34.0,
+                    secrets.can_reveal(form.team.as_deref()),
                 );
             });
             ui.end_row();
