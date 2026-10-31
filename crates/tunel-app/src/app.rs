@@ -118,6 +118,8 @@ pub struct TunelApp {
     pub search: String,
     /// Grupo abierto en la vista de hosts (`None` = raíz).
     pub host_group: Option<tunel_core::GroupId>,
+    /// Etiquetas por las que se filtra la vista de hosts.
+    pub host_tags: std::collections::BTreeSet<String>,
     pub editor: Option<Editor>,
     pub prompts: Prompts,
     pub forwards: HashMap<ForwardId, ActiveForward>,
@@ -128,6 +130,7 @@ pub struct TunelApp {
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
     pub live: crate::live::LiveUi,
+    pub fonts: crate::fonts::FontState,
 }
 
 impl TunelApp {
@@ -203,6 +206,10 @@ impl TunelApp {
             self.sync.teams.open = Some(team.clone());
             crate::sync::teams::start(self, crate::sync::teams::TeamOp::Members { team });
         }
+        // `TUNEL_DEV_TAGS=web,db` filtra la vista de hosts por esas etiquetas.
+        if let Ok(tags) = std::env::var("TUNEL_DEV_TAGS") {
+            self.host_tags = tags.split(',').map(|t| t.trim().to_string()).collect();
+        }
         if let Ok(name) = std::env::var("TUNEL_DEV_GROUP") {
             self.host_group = self
                 .data()
@@ -258,6 +265,18 @@ impl TunelApp {
                 ..data.settings.clone()
             }));
         }
+        // `TUNEL_DEV_FONTS=<interfaz>|<terminal>` elige las fuentes (vacío = del sistema).
+        if let Ok(spec) = std::env::var("TUNEL_DEV_FONTS")
+            && let Some((ui_font, terminal_font)) = spec.split_once('|')
+            && let Some(data) = self.data().cloned()
+        {
+            let pick = |name: &str| crate::fonts::family_name(name);
+            self.commit(data.with_settings(tunel_core::Settings {
+                ui_font: pick(ui_font),
+                terminal_font: pick(terminal_font),
+                ..data.settings.clone()
+            }));
+        }
         if let Ok(theme) = std::env::var("TUNEL_DEV_THEME")
             && let Some(data) = self.data().cloned()
         {
@@ -281,6 +300,7 @@ impl TunelApp {
             split: None,
             search: String::new(),
             host_group: None,
+            host_tags: Default::default(),
             editor: None,
             prompts: Prompts::default(),
             forwards: HashMap::new(),
@@ -291,6 +311,7 @@ impl TunelApp {
             sync: Default::default(),
             updates: Default::default(),
             live: Default::default(),
+            fonts: Default::default(),
         })
     }
 
@@ -399,6 +420,63 @@ impl TunelApp {
         }
     }
 
+    /// Una sesión nueva igual que la de la pestaña `index`: el mismo host, o una terminal
+    /// local. `None` si la pestaña no es una terminal propia (SFTP o una sesión que se mira).
+    fn same_session(&mut self, index: usize) -> Option<anyhow::Result<TerminalSession>> {
+        let Some(Tab::Terminal(session)) = self.tabs.get(index) else {
+            return None;
+        };
+        if session.is_watching() {
+            return None;
+        }
+        let host = session.host;
+        let data = self.data()?.clone();
+        let scrollback = data.settings.scrollback_lines;
+        Some(match host {
+            Some(host) => self
+                .engine
+                .open_host(&data, host, DEFAULT_COLS, DEFAULT_ROWS),
+            None => self
+                .engine
+                .open_local(DEFAULT_COLS, DEFAULT_ROWS, scrollback),
+        })
+    }
+
+    /// Se puede reconectar o duplicar la pestaña `index`.
+    pub fn can_reopen(&self, index: usize) -> bool {
+        matches!(self.tabs.get(index), Some(Tab::Terminal(s)) if !s.is_watching())
+    }
+
+    /// Vuelve a conectar la pestaña `index` en su mismo sitio.
+    pub fn reconnect_tab(&mut self, index: usize) {
+        match self.same_session(index) {
+            Some(Ok(session)) => {
+                self.tabs[index] = Tab::Terminal(Box::new(session));
+                self.active = Some(index);
+            }
+            Some(Err(e)) => self.notify(format!("No se pudo reconectar: {e:#}")),
+            None => {}
+        }
+    }
+
+    /// Abre otra pestaña con el mismo host, justo a la derecha.
+    pub fn duplicate_tab(&mut self, index: usize) {
+        match self.same_session(index) {
+            Some(Ok(session)) => {
+                self.tabs
+                    .insert(index + 1, Tab::Terminal(Box::new(session)));
+                if let Some(split) = self.split.as_mut()
+                    && *split > index
+                {
+                    *split += 1;
+                }
+                self.active = Some(index + 1);
+            }
+            Some(Err(e)) => self.notify(format!("No se pudo duplicar la pestaña: {e:#}")),
+            None => {}
+        }
+    }
+
     pub fn open_tab(&mut self, tab: Tab) {
         self.push_tab(tab);
     }
@@ -472,6 +550,9 @@ impl TunelApp {
                 }
                 AppEvent::Live(event) => crate::live::on_event(self, event),
                 AppEvent::OAuth(event) => crate::sync::oauth::on_event(self, event),
+                AppEvent::FontDownloaded { family, result } => {
+                    crate::fonts::on_downloaded(self, family, result)
+                }
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }
         }
@@ -520,7 +601,7 @@ impl TunelApp {
         let theme = self.terminal_theme(host);
         let settings = self.data().map(|d| d.settings.clone()).unwrap_or_default();
         let mut close = false;
-        let mut reconnect = None;
+        let mut reconnect = false;
         let mut live_action = None;
         let mut tab_key = 0;
         match &mut self.tabs[index] {
@@ -534,10 +615,7 @@ impl TunelApp {
                     let action =
                         crate::chrome::session_banner(ui, &message, failed, session.host.is_some());
                     match action {
-                        Some(crate::chrome::BannerAction::Reconnect) => {
-                            reconnect = session.host;
-                            close = true;
-                        }
+                        Some(crate::chrome::BannerAction::Reconnect) => reconnect = true,
                         Some(crate::chrome::BannerAction::Close) => close = true,
                         None => {}
                     }
@@ -555,8 +633,8 @@ impl TunelApp {
         if close {
             self.close_tab(index);
         }
-        if let Some(host) = reconnect {
-            self.open_host(host);
+        if reconnect {
+            self.reconnect_tab(index);
         }
     }
 
@@ -594,6 +672,7 @@ impl eframe::App for TunelApp {
             return;
         }
         self.process_background();
+        crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
         let wait = if crate::live::active(self) {
             wait.min(crate::live::POLL)

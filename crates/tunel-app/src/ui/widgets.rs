@@ -173,6 +173,65 @@ pub fn reveal_button(ui: &mut Ui, revealed: &mut bool) -> Response {
     response
 }
 
+/// Raíz de los identificadores con que se recuerda qué contraseñas se están viendo.
+pub fn revealed_id(field: &str) -> egui::Id {
+    egui::Id::unique("contraseña-visible").with(field)
+}
+
+/// Olvida qué contraseñas se estaban viendo, para que al volver a abrir un formulario
+/// aparezcan ocultas.
+pub fn forget_revealed(ctx: &egui::Context, fields: &[&str]) {
+    ctx.data_mut(|d| {
+        for field in fields {
+            d.remove::<bool>(revealed_id(field));
+        }
+    });
+}
+
+/// Se está viendo la contraseña del campo `field`.
+fn is_revealed(ui: &Ui, field: &str) -> bool {
+    ui.data(|d| d.get_temp::<bool>(revealed_id(field)).unwrap_or(false))
+}
+
+/// Ojo para ver u ocultar la contraseña del campo `field`; solo con `can_reveal`.
+fn reveal_toggle(ui: &mut Ui, field: &str, can_reveal: bool) -> bool {
+    if !can_reveal {
+        return false;
+    }
+    let mut revealed = is_revealed(ui, field);
+    reveal_button(ui, &mut revealed);
+    ui.data_mut(|d| d.insert_temp(revealed_id(field), revealed));
+    revealed
+}
+
+/// Campo de contraseña. Con `can_reveal` lleva un ojo para verla; sin él, siempre se
+/// muestra como puntos.
+pub fn password_field(
+    ui: &mut Ui,
+    field: &str,
+    text: &mut String,
+    hint: &str,
+    width: f32,
+    can_reveal: bool,
+) -> Response {
+    let revealed = can_reveal && is_revealed(ui, field);
+    let response = ui.add(
+        egui::TextEdit::singleline(text)
+            .password(!revealed)
+            .hint_text(hint)
+            .desired_width(width),
+    );
+    reveal_toggle(ui, field, can_reveal);
+    response
+}
+
+/// Una contraseña guardada que no se edita aquí: puntos y, con `can_reveal`, un ojo.
+pub fn password_label(ui: &mut Ui, field: &str, text: &str, can_reveal: bool) {
+    let revealed = can_reveal && is_revealed(ui, field);
+    ui.label(RichText::new(masked(text, revealed)).monospace());
+    reveal_toggle(ui, field, can_reveal);
+}
+
 /// Un dato que se muestra como puntos hasta que se pulsa el ojo.
 pub fn masked(text: &str, revealed: bool) -> String {
     if revealed {

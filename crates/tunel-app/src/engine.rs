@@ -69,6 +69,11 @@ pub enum AppEvent {
     },
     Live(crate::live::LiveEvent),
     OAuth(crate::sync::oauth::OAuthEvent),
+    /// Terminó la descarga de una fuente de Google Fonts.
+    FontDownloaded {
+        family: String,
+        result: Result<Vec<u8>, String>,
+    },
 }
 
 /// Unir el equipo a una cuenta nueva o a una que ya existe.
@@ -601,6 +606,18 @@ impl Engine {
             if let Err(e) = tunel_sync::sign_out(&local).await {
                 tracing::info!(error = %e, "no se pudo cerrar la sesión en el servidor");
             }
+        });
+    }
+
+    /// Descarga una fuente de Google Fonts. No se cancela al bloquear la bóveda: no usa
+    /// nada de ella.
+    pub fn download_font(&self, family: String) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn(async move {
+            let result = crate::fonts::download(family.clone()).await;
+            let _ = events.send(AppEvent::FontDownloaded { family, result });
+            ctx.request_repaint();
         });
     }
 

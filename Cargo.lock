@@ -6166,6 +6166,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "skrifa",
  "tokio",
  "tracing",
  "tracing-subscriber",

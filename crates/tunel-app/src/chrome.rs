@@ -289,6 +289,8 @@ enum TabAction {
     ToggleSplit(usize),
     Share { tab: u64, team: String },
     StopSharing(u64),
+    Reconnect(usize),
+    Duplicate(usize),
 }
 
 /// Dibuja una pestaña; devuelve (clic en la pestaña, clic en cerrar).
@@ -429,6 +431,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
         .stroke(Stroke::new(1.0, p.border));
     let mut action = None;
     let teams = shareable_teams(app);
+    let reopenable: Vec<bool> = (0..app.tabs.len()).map(|i| app.can_reopen(i)).collect();
     egui::Panel::top("pestañas")
         .exact_size(TAB_BAR_HEIGHT)
         .frame(frame)
@@ -463,6 +466,20 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                                 action = Some(TabAction::Close(i));
                             }
                             response.context_menu(|ui| {
+                                if reopenable[i] {
+                                    if ui
+                                        .button(ui::with_icon(icons::REFRESH, "Reconectar"))
+                                        .clicked()
+                                    {
+                                        action = Some(TabAction::Reconnect(i));
+                                        ui.close();
+                                    }
+                                    if ui.button(ui::with_icon(icons::COPY, "Duplicar")).clicked() {
+                                        action = Some(TabAction::Duplicate(i));
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                }
                                 share_menu(ui, t, &teams, &mut action);
                                 let label = if app.split == Some(i) {
                                     "Quitar de la vista dividida"
@@ -499,6 +516,8 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
         Some(TabAction::Close(i)) => app.close_tab(i),
         Some(TabAction::Share { tab, team }) => crate::live::start_sharing(app, tab, team),
         Some(TabAction::StopSharing(tab)) => crate::live::stop_sharing(app, tab),
+        Some(TabAction::Reconnect(i)) => app.reconnect_tab(i),
+        Some(TabAction::Duplicate(i)) => app.duplicate_tab(i),
         Some(TabAction::ToggleSplit(i)) => {
             app.split = if app.split == Some(i) || app.active == Some(i) {
                 None

@@ -72,7 +72,12 @@ fn card(ui: &mut egui::Ui, icon: &str, title: &str, add_contents: impl FnOnce(&m
     ui.add_space(12.0);
 }
 
-fn setting_row(ui: &mut egui::Ui, label: &str, help: &str, control: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn setting_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    help: &str,
+    control: impl FnOnce(&mut egui::Ui),
+) {
     let p = ui::pal(ui);
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
@@ -115,6 +120,8 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             setting_row(ui, "Tamaño de letra de la terminal", "", |ui| {
                 ui.add(egui::Slider::new(&mut settings.font_size, MIN_FONT..=MAX_FONT).suffix(" pt"));
             });
+            super::fonts::rows(ui, &mut settings, &app.fonts);
+            super::fonts::import_row(app, ui, &mut settings);
             let theme = palette::find(&settings.theme, &settings.custom_themes);
             let [br, bg, bb] = theme.background;
             let [fr, fg, fb] = theme.foreground;
@@ -131,10 +138,15 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         // Solo en depuración: `TUNEL_DEV_SCROLL=temas` baja hasta los temas al abrir, para capturas.
         #[cfg(debug_assertions)]
         if std::env::var("TUNEL_DEV_SCROLL").as_deref() == Ok("temas") {
+            // Espera unos fotogramas: si al arrancar cambian las fuentes, la vista se recoloca.
             let id = egui::Id::unique("dev-scroll-temas");
-            if !ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
-                ui.ctx().data_mut(|d| d.insert_temp(id, true));
-                ui.scroll_to_cursor(Some(egui::Align::Min));
+            let frame = ui.ctx().data(|d| d.get_temp::<u32>(id).unwrap_or(0));
+            if frame <= 30 {
+                ui.ctx().data_mut(|d| d.insert_temp(id, frame + 1));
+                ui.ctx().request_repaint();
+                if frame == 30 {
+                    ui.scroll_to_cursor(Some(egui::Align::Max));
+                }
             }
         }
         card(ui, icons::TERMINAL, "Tema de la terminal", |ui| {

@@ -7,6 +7,7 @@ mod app;
 mod chrome;
 mod editor;
 mod engine;
+mod fonts;
 mod live;
 mod lock;
 mod prompts;
@@ -83,7 +84,7 @@ fn main() -> anyhow::Result<()> {
         APP_NAME,
         options,
         Box::new(move |cc| {
-            ui::theme::install_fonts(&cc.egui_ctx);
+            ui::theme::install_fonts(&cc.egui_ctx, None, None);
             ui::theme::apply(&cc.egui_ctx, ui::theme::DARK);
             Ok(Box::new(app::TunelApp::new(cc, path)?))
         }),
