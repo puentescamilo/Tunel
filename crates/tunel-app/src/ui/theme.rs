@@ -212,34 +212,45 @@ fn first_readable(paths: &[&str]) -> Option<(String, Vec<u8>)> {
         .find_map(|p| std::fs::read(p).ok().map(|bytes| (p.to_string(), bytes)))
 }
 
-/// Fuente de interfaz y monoespaciada del sistema si existen, más los iconos.
-/// Las fuentes por defecto de egui se mantienen como respaldo para cualquier glifo.
-pub fn install_fonts(ctx: &egui::Context) {
+/// Pone `name` con los datos `bytes` la primera de `family`.
+fn prefer(fonts: &mut FontDefinitions, family: FontFamily, name: &str, bytes: Vec<u8>) {
+    fonts
+        .font_data
+        .insert(name.into(), Arc::new(FontData::from_owned(bytes)));
+    fonts
+        .families
+        .entry(family)
+        .or_default()
+        .insert(0, name.into());
+}
+
+/// Instala las fuentes: las elegidas en Ajustes (`ui` y `mono`, con su familia), o si no
+/// las del sistema, más los iconos. Las del sistema y las de egui quedan detrás como
+/// respaldo para los glifos que no tenga la elegida.
+pub fn install_fonts(
+    ctx: &egui::Context,
+    ui: Option<(String, Vec<u8>)>,
+    mono: Option<(String, Vec<u8>)>,
+) {
     let mut fonts = FontDefinitions::default();
     fonts
         .font_data
         .insert(ICON_FONT.into(), Arc::new(FontData::from_static(PHOSPHOR)));
     if let Some((path, bytes)) = first_readable(UI_FONTS) {
         tracing::info!(path, "fuente de interfaz del sistema");
-        fonts
-            .font_data
-            .insert("ui".into(), Arc::new(FontData::from_owned(bytes)));
-        fonts
-            .families
-            .entry(FontFamily::Proportional)
-            .or_default()
-            .insert(0, "ui".into());
+        prefer(&mut fonts, FontFamily::Proportional, "ui", bytes);
     }
     if let Some((path, bytes)) = first_readable(MONO_FONTS) {
         tracing::info!(path, "fuente monoespaciada del sistema");
-        fonts
-            .font_data
-            .insert("mono".into(), Arc::new(FontData::from_owned(bytes)));
-        fonts
-            .families
-            .entry(FontFamily::Monospace)
-            .or_default()
-            .insert(0, "mono".into());
+        prefer(&mut fonts, FontFamily::Monospace, "mono", bytes);
+    }
+    if let Some((family, bytes)) = ui {
+        tracing::info!(%family, "fuente de interfaz elegida");
+        prefer(&mut fonts, FontFamily::Proportional, "ui-elegida", bytes);
+    }
+    if let Some((family, bytes)) = mono {
+        tracing::info!(%family, "fuente de terminal elegida");
+        prefer(&mut fonts, FontFamily::Monospace, "mono-elegida", bytes);
     }
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts

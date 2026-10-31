@@ -128,6 +128,7 @@ pub struct TunelApp {
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
     pub live: crate::live::LiveUi,
+    pub fonts: crate::fonts::FontState,
 }
 
 impl TunelApp {
@@ -254,6 +255,18 @@ impl TunelApp {
                 ..data.settings.clone()
             }));
         }
+        // `TUNEL_DEV_FONTS=<interfaz>|<terminal>` elige las fuentes (vacío = del sistema).
+        if let Ok(spec) = std::env::var("TUNEL_DEV_FONTS")
+            && let Some((ui_font, terminal_font)) = spec.split_once('|')
+            && let Some(data) = self.data().cloned()
+        {
+            let pick = |name: &str| crate::fonts::family_name(name);
+            self.commit(data.with_settings(tunel_core::Settings {
+                ui_font: pick(ui_font),
+                terminal_font: pick(terminal_font),
+                ..data.settings.clone()
+            }));
+        }
         if let Ok(theme) = std::env::var("TUNEL_DEV_THEME")
             && let Some(data) = self.data().cloned()
         {
@@ -287,6 +300,7 @@ impl TunelApp {
             sync: Default::default(),
             updates: Default::default(),
             live: Default::default(),
+            fonts: Default::default(),
         })
     }
 
@@ -467,6 +481,9 @@ impl TunelApp {
                     crate::sync::teams::on_done(self, round, result)
                 }
                 AppEvent::Live(event) => crate::live::on_event(self, event),
+                AppEvent::FontDownloaded { family, result } => {
+                    crate::fonts::on_downloaded(self, family, result)
+                }
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }
         }
@@ -589,6 +606,7 @@ impl eframe::App for TunelApp {
             return;
         }
         self.process_background();
+        crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
         let wait = if crate::live::active(self) {
             wait.min(crate::live::POLL)

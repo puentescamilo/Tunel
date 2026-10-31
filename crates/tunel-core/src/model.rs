@@ -390,6 +390,12 @@ pub struct Settings {
     pub cursor_style: crate::theme::CursorStyle,
     /// Temas importados por el usuario.
     pub custom_themes: Vec<crate::theme::TerminalTheme>,
+    /// Familia de Google Fonts de la terminal; `None` usa la monoespaciada del sistema.
+    pub terminal_font: Option<String>,
+    /// Familia de Google Fonts de la interfaz; `None` usa la del sistema.
+    pub ui_font: Option<String>,
+    /// Familias de Google Fonts que importó el usuario, además de las sugeridas.
+    pub custom_fonts: Vec<String>,
 }
 
 impl Default for Settings {
@@ -403,6 +409,9 @@ impl Default for Settings {
             ui_theme: crate::theme::UiThemeMode::Auto,
             cursor_style: crate::theme::CursorStyle::Block,
             custom_themes: Vec::new(),
+            terminal_font: None,
+            ui_font: None,
+            custom_fonts: Vec::new(),
         }
     }
 }
