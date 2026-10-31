@@ -37,6 +37,36 @@ impl Editor {
     }
 }
 
+/// Campos de contraseña de los formularios, para olvidar al cerrar cuáles se veían.
+const PASSWORD_FIELDS: [&str; 3] = ["host-nueva", "host-identidad", "identidad"];
+
+/// Quién puede ver las contraseñas guardadas: las de la bóveda personal, siempre; las de
+/// un Team, solo sus administradores.
+pub(super) struct Secrets {
+    admin_teams: Vec<String>,
+}
+
+impl Secrets {
+    fn of(app: &TunelApp) -> Self {
+        let admin_teams = app
+            .sync
+            .local()
+            .map(|l| {
+                l.teams
+                    .iter()
+                    .filter(|t| t.role == tunel_core::sync::protocol::TeamRole::Admin)
+                    .map(|t| t.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { admin_teams }
+    }
+
+    pub(super) fn can_reveal(&self, team: Option<&str>) -> bool {
+        team.is_none_or(|team| self.admin_teams.iter().any(|t| t == team))
+    }
+}
+
 pub(super) fn combo<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     id: &str,
@@ -104,7 +134,7 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
     });
 }
 
-fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData) {
+fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData, secrets: &Secrets) {
     egui::Grid::new("form-identidad")
         .num_columns(2)
         .show(ui, |ui| {
@@ -116,10 +146,14 @@ fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData) {
             ui.end_row();
             ui.label("Contraseña");
             let mut password = identity.password.clone().unwrap_or_default();
-            if ui
-                .add(egui::TextEdit::singleline(&mut password).password(true))
-                .changed()
-            {
+            let can_reveal = secrets.can_reveal(identity.team.as_deref());
+            let changed = ui
+                .horizontal(|ui| {
+                    crate::ui::password_field(ui, "identidad", &mut password, "", 220.0, can_reveal)
+                })
+                .inner
+                .changed();
+            if changed {
                 identity.password = Some(password).filter(|p| !p.is_empty());
             }
             ui.end_row();
@@ -141,6 +175,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         return;
     };
     let teams = crate::sync::teams::names(app);
+    let secrets = Secrets::of(app);
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
@@ -185,7 +220,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
             egui::ScrollArea::vertical()
                 .max_height(ctx.content_rect().height() * 0.7)
                 .show(ui, |ui| match editor {
-                    Editor::Host(form) => host_form(ui, form, &data, &teams),
+                    Editor::Host(form) => host_form(ui, form, &data, &teams, &secrets),
                     Editor::Group(group) => {
                         ui.label("Nombre");
                         ui.text_edit_singleline(&mut group.name);
@@ -224,7 +259,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                             &data.settings.custom_themes,
                         );
                     }
-                    Editor::Identity(identity) => identity_form(ui, identity, &data),
+                    Editor::Identity(identity) => identity_form(ui, identity, &data, &secrets),
                     Editor::Key(key) => key_form(ui, key),
                     Editor::Snippet(snippet) => {
                         ui.label("Nombre");
@@ -301,6 +336,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     cancel |= modal.should_close();
 
     if cancel {
+        crate::ui::forget_revealed(ctx, &PASSWORD_FIELDS);
         app.editor = None;
         return;
     }
@@ -369,6 +405,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     };
     if let Ok(updated) = result {
         app.commit(updated);
+        crate::ui::forget_revealed(ctx, &PASSWORD_FIELDS);
         app.editor = None;
     }
 }

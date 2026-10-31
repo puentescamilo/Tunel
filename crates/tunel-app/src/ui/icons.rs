@@ -51,3 +51,4 @@ pub const CIRCLE_HALF: &str = "\u{E18C}";
 pub const CURSOR_BLOCK: &str = "\u{E45E}";
 pub const CURSOR_BAR: &str = "\u{E7D8}";
 pub const CURSOR_UNDERLINE: &str = "\u{E5C4}";
+pub const TAG: &str = "\u{E478}";
