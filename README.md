@@ -405,8 +405,7 @@ registro tiene: `docker compose -f crates/tunel-server/compose.yaml logs tunel-s
 ### 5. Iniciar sesión con Google o Microsoft 365 (opcional)
 
 Con un proveedor de identidad (Túnel 0.6.0 o posterior), cada persona entra con su correo
-corporativo y no tiene una
-contraseña de cuenta que recordar. El proveedor solo confirma quién es: la sincronización se
+corporativo y no tiene una contraseña de cuenta que recordar. El proveedor solo confirma quién es: la sincronización se
 cifra con la contraseña maestra de Túnel, así que el servidor sigue sin poder leer nada. Sin
 ningún proveedor configurado, las cuentas se crean con correo y contraseña, como siempre, y
 las dos formas conviven en el mismo servidor.
