@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 1 de noviembre de 2026, con Túnel 0.7.0 publicado.
+Actualizada el 1 de noviembre de 2026, con Túnel 0.7.1 publicado.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -14,6 +14,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 4a | Restaurar las pestañas al abrir Túnel | 0.7.0 | ✅ |
 | 4b | Snippets con variables | 0.7.0 | ✅ |
 | 4c | Escribir en varias terminales a la vez | 0.7.0 | ✅ |
+| — | Correcciones de la auditoría de seguridad (12 hallazgos) | 0.7.1 | ✅ |
 | 5a | Generar claves SSH en el llavero | 0.8.0 | siguiente |
 | 5b | Instalar una clave pública en un host | 0.8.0 | depende de 5a |
 | 5c | Avisar de claves débiles | 0.8.0 | — |
