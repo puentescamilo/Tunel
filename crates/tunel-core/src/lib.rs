@@ -8,6 +8,7 @@ pub mod share;
 pub mod ssh_config;
 pub mod store;
 pub mod sync;
+pub mod template;
 pub mod theme;
 pub mod vault;
 pub mod workspace;
