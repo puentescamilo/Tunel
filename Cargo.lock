@@ -6168,6 +6168,7 @@ dependencies = [
  "serde",
  "serde_json",
  "skrifa",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

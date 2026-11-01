@@ -145,10 +145,15 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             if key.certificate.is_some() {
                 detail.push_str(" · con certificado");
             }
-            let icon = match (security_key, key.certificate.is_some()) {
-                (true, _) => icons::USB,
-                (false, true) => icons::CERTIFICATE,
-                (false, false) => icons::KEY,
+            let weak = super::key_audit::weakness(ui.ctx(), key);
+            if let Some(weakness) = weak {
+                detail.push_str(&format!(" · {}", weakness.describe()));
+            }
+            let icon = match (security_key, key.certificate.is_some(), weak.is_some()) {
+                (_, _, true) => icons::WARNING,
+                (true, _, false) => icons::USB,
+                (false, true, false) => icons::CERTIFICATE,
+                (false, false, false) => icons::KEY,
             };
             let actions = item_row(ui, key.id, icon, &key.label, &detail, true);
             if actions.edit {
@@ -159,6 +164,20 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             }
             if actions.delete {
                 updated = Some(data.without_key(key.id));
+            }
+        }
+        ui.add_space(12.0);
+        if let Some(path) = super::key_audit::disk_section(ui, &data) {
+            match super::key_audit::import(&path) {
+                Ok(key) => {
+                    app.notify(format!(
+                        "Clave «{}» importada. Ya puedes borrar {} del disco.",
+                        key.label,
+                        path.display()
+                    ));
+                    updated = Some(data.with_key(key));
+                }
+                Err(e) => app.notify(e),
             }
         }
     });
