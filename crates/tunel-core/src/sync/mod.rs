@@ -15,6 +15,8 @@ pub mod local;
 pub mod manifest;
 pub mod protocol;
 pub mod record;
+pub mod roster;
+pub mod signature;
 pub mod space;
 pub mod state;
 pub mod team;
@@ -24,5 +26,6 @@ pub use keys::{AccountKeys, RecordEnvelope, SealedBlob, SealedRecord, SyncCrypto
 pub use local::{Contact, Invitation, KeyProblem, OAuthAccount, SyncLocal, TeamLocal};
 pub use manifest::{Manifest, ManifestError};
 pub use record::{Change, RecordKey, RecordKind};
+pub use roster::{Roster, RosterMember};
 pub use state::SyncState;
 pub use team::{AccountKeypair, PublicKey, TeamKeyContext};

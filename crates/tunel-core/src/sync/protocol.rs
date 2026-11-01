@@ -137,6 +137,26 @@ pub struct TeamSummary {
     /// Alguien salió y la clave está pendiente de renovar; lo hace un administrador.
     #[serde(default)]
     pub rekey_needed: bool,
+    /// Versión de la última lista de miembros (ver [`super::roster`]); `None` en una
+    /// invitación pendiente o si el equipo no tiene lista. Las listas se piden aparte.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster_version: Option<u64>,
+}
+
+/// Lista de miembros de un equipo, firmada y cifrada con su clave. La versión va a la
+/// vista para que el servidor ordene los cambios; la de dentro es la que cuenta.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterBlob {
+    pub version: u64,
+    pub blob: SealedBlob,
+}
+
+/// Una lista guardada, con la época de la clave que la cifra.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterEntry {
+    pub epoch: u64,
+    #[serde(flatten)]
+    pub roster: RosterBlob,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +165,17 @@ pub struct CreateTeamRequest {
     pub name: SealedBlob,
     /// Clave del equipo envuelta por y para quien lo crea, en la época 0.
     pub key: SealedBlob,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster: Option<RosterBlob>,
+}
+
+/// Añade una versión de la lista de miembros del equipo; solo un administrador.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterRequest {
+    /// Época de la clave con la que va cifrada; tiene que ser la actual.
+    pub epoch: u64,
+    /// Su versión tiene que ser mayor que la última guardada.
+    pub roster: RosterBlob,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +222,9 @@ pub struct RotateTeamRequest {
     pub keys: Vec<MemberKey>,
     pub manifest: ManifestBlob,
     pub records: Vec<SealedRecord>,
+    /// Lista de miembros cifrada con la clave nueva.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster: Option<RosterBlob>,
 }
 
 /// Cuerpo de las respuestas de error.

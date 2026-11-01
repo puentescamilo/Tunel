@@ -263,6 +263,30 @@ impl Api {
         self.send(self.get(token, &path)).await
     }
 
+    /// Añade una versión de la lista de miembros del equipo.
+    pub async fn add_roster(
+        &self,
+        token: &str,
+        team: &str,
+        request: &RosterRequest,
+    ) -> Result<(), SyncError> {
+        let path = format!("/v1/teams/{}/rosters", segment(team));
+        self.execute(self.post(&path, request).bearer_auth(token))
+            .await
+            .map(|_| ())
+    }
+
+    /// Las versiones de la lista de miembros posteriores a `since`, en orden.
+    pub async fn rosters(
+        &self,
+        token: &str,
+        team: &str,
+        since: u64,
+    ) -> Result<Vec<RosterEntry>, SyncError> {
+        let path = format!("/v1/teams/{}/rosters?since={since}", segment(team));
+        self.send(self.get(token, &path)).await
+    }
+
     pub async fn add_member(
         &self,
         token: &str,

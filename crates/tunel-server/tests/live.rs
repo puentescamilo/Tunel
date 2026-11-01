@@ -142,6 +142,7 @@ impl Server {
             epoch: 0,
         };
         let body = serde_json::to_value(CreateTeamRequest {
+            roster: None,
             id: TEAM.into(),
             name: seal_team_name(&key, TEAM, "Ops").unwrap(),
             key: wrap_team_key(&key, context, &admin.keys, &admin.keys.public()).unwrap(),
