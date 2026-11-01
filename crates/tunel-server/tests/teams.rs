@@ -18,6 +18,7 @@ use tunel_core::sync::{
     AccountKeypair, AccountKeys, Manifest, PublicKey, SyncState, TeamKeyContext, VaultKey,
 };
 use tunel_core::vault::VaultData;
+use tunel_server::admin::{AdminError, Command, run};
 use tunel_server::{AppState, Config, Db, router};
 use uuid::Uuid;
 
@@ -25,15 +26,18 @@ const SALT: &[u8; 16] = b"sal-de-la-cuenta";
 const TEAM: &str = "6c2b8f0e-6f4e-4d55-9a37-1e2f3a4b5c6d";
 
 async fn app() -> Router {
+    app_on(Db::open_in_memory().unwrap()).await
+}
+
+/// Servidor sobre `db`, para usar también los comandos de administración.
+async fn app_on(db: Db) -> Router {
     let config = Config {
         open_registration: true,
         auth_kdf: KdfParams::FAST_FOR_TESTS,
         unauthenticated_burst: 1000,
         ..Config::default()
     };
-    let state = AppState::new(Db::open_in_memory().unwrap(), config)
-        .await
-        .unwrap();
+    let state = AppState::new(db, config).await.unwrap();
     router(state)
 }
 
@@ -732,4 +736,165 @@ async fn invitations_cannot_fill_up_someone_elses_account() {
         assert_eq!(status, expected, "invitación {i}");
     }
     create_team(&app, &bob, "Propio").await;
+}
+
+const NOW: i64 = 1_793_404_800;
+
+async fn admin(db: &Db, command: Command) -> Result<String, AdminError> {
+    run(db, command, NOW).await
+}
+
+fn delete(email: &str, new_admin: Option<&str>, confirm: bool) -> Command {
+    Command::Delete {
+        email: email.into(),
+        new_admin: new_admin.map(Into::into),
+        confirm,
+    }
+}
+
+#[tokio::test]
+async fn deleting_the_only_admin_needs_a_new_one_and_the_others_keep_their_key() {
+    let db = Db::open_in_memory().unwrap();
+    let app = app_on(db.clone()).await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let carol = user(&app, "carol@ejemplo.com").await;
+    let key = create_team(&app, &ana, "Equipo").await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
+    join(&app, &ana, &carol, "carol@ejemplo.com", &key).await;
+
+    let listed = admin(&db, Command::Accounts).await.unwrap();
+    assert!(
+        listed.contains("ana@ejemplo.com") && listed.contains("3 cuentas"),
+        "{listed}"
+    );
+    let alone = admin(&db, delete("ana@ejemplo.com", None, true)).await;
+    assert!(
+        matches!(alone, Err(AdminError::NeedsNewAdmin { .. })),
+        "{alone:?}"
+    );
+    let outsider = admin(
+        &db,
+        delete("ana@ejemplo.com", Some("nadie@ejemplo.com"), true),
+    )
+    .await;
+    assert!(
+        matches!(outsider, Err(AdminError::NoAccount(_))),
+        "{outsider:?}"
+    );
+
+    // Sin --confirmar solo se cuenta lo que pasaría.
+    let preview = admin(
+        &db,
+        delete("ana@ejemplo.com", Some("carol@ejemplo.com"), false),
+    )
+    .await
+    .unwrap();
+    assert!(preview.contains("--confirmar"), "{preview}");
+    assert_eq!(teams(&app, &ana).await.len(), 1);
+
+    let done = admin(
+        &db,
+        delete("ana@ejemplo.com", Some("carol@ejemplo.com"), true),
+    )
+    .await
+    .unwrap();
+    assert!(done.contains("borrada"), "{done}");
+    assert_eq!(
+        send(&app, "GET", "/v1/teams", ana.token(), None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let listed = admin(&db, Command::Accounts).await.unwrap();
+    assert!(!listed.contains("ana@"), "{listed}");
+    assert!(!listed.contains("cuenta.invalid"), "{listed}");
+
+    // La lápida no sirve para entrar, aunque alguien adivine su correo.
+    let tombstone = json!({
+        "email": "borrada-1@cuenta.invalid",
+        "auth": account("ana@ejemplo.com").auth_token().as_str(),
+    });
+    let (status, _) = send(&app, "POST", "/v1/sessions", None, Some(tombstone)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Bob sigue abriendo la clave que envolvió Ana: su clave pública se conserva.
+    let summary = teams(&app, &bob).await.remove(0);
+    assert_eq!(
+        open_key(&bob, &summary).record_id(&probe()),
+        key.record_id(&probe())
+    );
+    // Pero no se sube nada hasta renovar la clave, que ahora puede hacer Carol.
+    let data = VaultData {
+        hosts: vec![host("web")],
+        ..VaultData::default()
+    };
+    let (status, _) = push_team(&app, &bob, &key, 0, &data, &Manifest::empty()).await;
+    assert_eq!(status, StatusCode::LOCKED);
+
+    let new_key = VaultKey::generate();
+    let wrap_for = |email: &str, public: &PublicKey| MemberKey {
+        email: email.into(),
+        key: wrap_team_key(&new_key, context(1), &carol.keys, public).unwrap(),
+    };
+    let next = Manifest::empty().with_pushed(std::iter::empty());
+    let rotation = RotateTeamRequest {
+        epoch: 1,
+        base_version: 0,
+        name: seal_team_name(&new_key, TEAM, "Equipo").unwrap(),
+        keys: vec![
+            wrap_for("bob@ejemplo.com", &bob.public()),
+            wrap_for("carol@ejemplo.com", &carol.public()),
+        ],
+        manifest: ManifestBlob {
+            version: next.version,
+            blob: next.seal(&new_key).unwrap(),
+        },
+        records: Vec::new(),
+    };
+    let uri = format!("/v1/teams/{TEAM}/rotate");
+    let body = serde_json::to_value(rotation).unwrap();
+    let (status, body) = send(&app, "POST", &uri, carol.token(), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let summary = teams(&app, &bob).await.remove(0);
+    assert_eq!(
+        open_key(&bob, &summary).record_id(&probe()),
+        new_key.record_id(&probe())
+    );
+    // Ya nadie depende de la lápida: se borró y el correo se puede volver a usar.
+    user(&app, "ana@ejemplo.com").await;
+}
+
+fn probe() -> tunel_core::sync::RecordKey {
+    tunel_core::sync::RecordKey::new(tunel_core::sync::RecordKind::Host, "x")
+}
+
+#[tokio::test]
+async fn a_team_with_nobody_else_is_deleted_and_sessions_can_be_closed() {
+    let db = Db::open_in_memory().unwrap();
+    let app = app_on(db.clone()).await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let key = create_team(&app, &ana, "Equipo").await;
+    // Una invitación pendiente no cuenta como alguien más.
+    assert_eq!(
+        invite(&app, &ana, "bob@ejemplo.com", &key, 0).await,
+        StatusCode::CREATED
+    );
+
+    let closed = admin(&db, Command::CloseSessions("bob@ejemplo.com".into()))
+        .await
+        .unwrap();
+    assert!(closed.contains("Cerradas 1 sesiones"), "{closed}");
+    assert_eq!(
+        send(&app, "GET", "/v1/teams", bob.token(), None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    let done = admin(&db, delete("ana@ejemplo.com", None, true))
+        .await
+        .unwrap();
+    assert!(done.contains("Teams borrados"), "{done}");
+    let bob = login(&app, "bob@ejemplo.com").await;
+    let (status, body) = send(&app, "GET", "/v1/teams", Some(&bob.token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!([]));
 }

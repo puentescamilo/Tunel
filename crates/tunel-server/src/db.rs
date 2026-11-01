@@ -137,12 +137,14 @@ CREATE INDEX IF NOT EXISTS team_records_by_seq ON team_records (team_id, seq);
 ///   reasignarse o cambiar.
 /// - `previous_vault_key`: la clave de bóveda envuelta antes del último cambio, por si
 ///   hubiera que recuperarla.
-const ACCOUNT_COLUMNS: [(&str, &str); 5] = [
+/// - `deleted_at`: la cuenta se borró pero queda como lápida (ver `admin`).
+const ACCOUNT_COLUMNS: [(&str, &str); 6] = [
     ("public_key", "TEXT"),
     ("private_key", "TEXT"),
     ("oauth_provider", "TEXT"),
     ("oauth_subject", "TEXT"),
     ("previous_vault_key", "TEXT"),
+    ("deleted_at", "INTEGER"),
 ];
 
 /// Datos de una cuenta necesarios para iniciar sesión.
@@ -360,6 +362,9 @@ impl Db {
     pub fn open(path: &Path) -> Result<Self, DbError> {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Los comandos de administración abren la misma base de datos con el servidor en
+        // marcha: cada uno espera al otro en vez de fallar.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         Self::init(conn)
     }
 
@@ -394,7 +399,7 @@ impl Db {
     }
 
     /// Ejecuta `f` en un hilo aparte para no bloquear el runtime de tokio.
-    async fn call<T, F>(&self, f: F) -> Result<T, DbError>
+    pub(crate) async fn call<T, F>(&self, f: F) -> Result<T, DbError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, DbError> + Send + 'static,
@@ -554,7 +559,7 @@ impl Db {
         self.call(move |conn| {
             read_account(
                 conn,
-                "WHERE oauth_provider = ?1 AND oauth_subject = ?2",
+                "WHERE oauth_provider = ?1 AND oauth_subject = ?2 AND deleted_at IS NULL",
                 params![provider, subject],
             )
         })
@@ -562,8 +567,15 @@ impl Db {
     }
 
     pub async fn account_by_email(&self, email: String) -> Result<Option<Account>, DbError> {
-        self.call(move |conn| read_account(conn, "WHERE email = ?1", params![email]))
-            .await
+        // Una lápida (cuenta borrada) no sirve para entrar.
+        self.call(move |conn| {
+            read_account(
+                conn,
+                "WHERE email = ?1 AND deleted_at IS NULL",
+                params![email],
+            )
+        })
+        .await
     }
 
     pub async fn insert_session(
@@ -1223,6 +1235,9 @@ impl Db {
                     team
                 ],
             )?;
+            // La clave nueva la envolvió otra cuenta: las lápidas que solo seguían por la
+            // anterior ya sobran.
+            crate::admin::purge_tombstones(&tx)?;
             tx.commit()?;
             Ok(seq as u64)
         })
