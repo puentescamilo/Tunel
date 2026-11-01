@@ -5,6 +5,7 @@
 //! clave de acceso de cada cuenta y ordena los cambios para que cada equipo pida los que
 //! le faltan.
 
+pub mod admin;
 pub mod api;
 pub mod auth;
 pub mod db;

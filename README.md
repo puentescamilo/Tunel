@@ -477,6 +477,33 @@ correo es el mismo, hay que borrar antes esa cuenta del servidor.
 - **Cuentas con contraseña:** un correo que ya tiene cuenta con contraseña sigue entrando con
   ella; el proveedor no la sustituye.
 
+### Administrar las cuentas
+
+Con el servidor en marcha (Túnel 0.6.3 o posterior):
+
+```bash
+# Lista las cuentas: correo, forma de entrar, alta, Teams, registros y sesiones abiertas
+docker compose -f crates/tunel-server/compose.yaml exec tunel-server tunel-server cuentas
+
+# Cierra todas las sesiones de una cuenta: sus equipos tendrán que volver a iniciar sesión
+docker compose -f crates/tunel-server/compose.yaml exec tunel-server \
+  tunel-server cerrar-sesiones ana@tuempresa.com
+
+# Borra una cuenta. Sin --confirmar solo muestra lo que pasaría
+docker compose -f crates/tunel-server/compose.yaml exec tunel-server \
+  tunel-server borrar-cuenta ana@tuempresa.com --confirmar
+```
+
+Al borrar una cuenta se borran sus registros y sesiones, y sale de sus Teams:
+
+- Los Teams donde no quedaba nadie más se borran.
+- Si era la única admin de un Team con más miembros, indica quién pasa a serlo con
+  `--nuevo-admin <correo>`; si no, el comando se niega y no cambia nada.
+- Los Teams de los que sale quedan pendientes de renovar la clave, como cuando se saca a
+  alguien desde la app: su admin lo hace solo al sincronizar.
+- Los demás miembros siguen abriendo la clave del Team que ella les envolvió, porque el
+  servidor conserva su clave pública hasta que el Team renueva la clave. Después la borra.
+
 ### Mantenimiento
 
 En estos comandos, añade `-f crates/tunel-server/compose.https.yaml` después del primer `-f`

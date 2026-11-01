@@ -73,8 +73,20 @@ fn warn_about_oauth(config: &Config) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if std::env::args().nth(1).as_deref() == Some("salud") {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("salud") {
         return health_check();
+    }
+    match tunel_server::admin::parse(&args) {
+        Ok(Some(command)) => return admin(command).await,
+        Ok(None) => {}
+        Err(problem) => {
+            if !problem.is_empty() {
+                eprintln!("{problem}\n");
+            }
+            eprint!("{}", tunel_server::admin::USAGE);
+            std::process::exit(2);
+        }
     }
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -124,6 +136,24 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    Ok(())
+}
+
+/// Ejecuta un comando de administración sobre la base de datos del servidor.
+async fn admin(command: tunel_server::admin::Command) -> anyhow::Result<()> {
+    let db_path =
+        std::env::var_os("TUNEL_DB").map_or_else(|| PathBuf::from("tunel.db"), PathBuf::from);
+    anyhow::ensure!(
+        db_path.exists(),
+        "no existe la base de datos {}: ejecuta el comando donde corre el servidor",
+        db_path.display()
+    );
+    let db = Db::open(&db_path)
+        .with_context(|| format!("no se pudo abrir la base de datos {}", db_path.display()))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    print!("{}", tunel_server::admin::run(&db, command, now).await?);
     Ok(())
 }
 
