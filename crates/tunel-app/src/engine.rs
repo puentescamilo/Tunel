@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, watch};
 use tunel_core::io::{SessionIo, SessionOutput, session_pair};
 use tunel_core::sync::SyncLocal;
 use tunel_core::{ForwardId, HostId, PortForward, Protocol, VaultData};
+use tunel_ssh::authorized_keys::{self, Installed};
 use tunel_ssh::forward::{self, ActiveForward};
 use tunel_ssh::sftp::{RemoteEntry, SftpClient};
 use tunel_ssh::shell::{self, ShellOptions};
@@ -73,6 +74,11 @@ pub enum AppEvent {
     FontDownloaded {
         family: String,
         result: Result<Vec<u8>, String>,
+    },
+    /// Terminó de instalarse una clave pública en `host`.
+    KeyInstalled {
+        host: String,
+        result: Result<Installed, String>,
     },
 }
 
@@ -398,6 +404,38 @@ impl Engine {
                     error: format!("{e:#}"),
                 }),
             };
+            ctx.request_repaint();
+        });
+        Ok(())
+    }
+
+    /// Conecta a `host` como siempre y añade `public_key` a su `~/.ssh/authorized_keys`.
+    pub fn install_key(
+        &self,
+        vault: &VaultData,
+        host: HostId,
+        public_key: String,
+    ) -> anyhow::Result<()> {
+        let label = vault
+            .host(host)
+            .context("host no encontrado")?
+            .display_name()
+            .to_string();
+        let connect = self.connect_task(vault, host)?;
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let result: anyhow::Result<Installed> = async {
+                let conn = connect.await?;
+                let installed = authorized_keys::install(&conn, &public_key).await;
+                conn.disconnect().await;
+                Ok(installed?)
+            }
+            .await;
+            let _ = events.send(AppEvent::KeyInstalled {
+                host: label,
+                result: result.map_err(|e| format!("{e:#}")),
+            });
             ctx.request_repaint();
         });
         Ok(())

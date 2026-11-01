@@ -619,6 +619,9 @@ impl TunelApp {
                 AppEvent::FontDownloaded { family, result } => {
                     crate::fonts::on_downloaded(self, family, result)
                 }
+                AppEvent::KeyInstalled { host, result } => {
+                    self.notify(crate::editor::installed_message(&host, &result))
+                }
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }
         }

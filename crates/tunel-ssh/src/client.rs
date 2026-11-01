@@ -335,8 +335,21 @@ impl SshConnection {
 
     /// Ejecuta un comando sin PTY y devuelve (salida, código de salida).
     pub async fn exec(&self, command: &str) -> Result<(Vec<u8>, Option<u32>), SshError> {
+        self.exec_with_input(command, None).await
+    }
+
+    /// Como [`SshConnection::exec`], escribiendo `input` en la entrada del comando.
+    pub async fn exec_with_input(
+        &self,
+        command: &str,
+        input: Option<&[u8]>,
+    ) -> Result<(Vec<u8>, Option<u32>), SshError> {
         let mut channel = self.handle.channel_open_session().await?;
         channel.exec(true, command).await?;
+        if let Some(input) = input {
+            channel.data(input).await?;
+            channel.eof().await?;
+        }
         let mut output = Vec::new();
         let mut status = None;
         while let Some(msg) = channel.wait().await {
