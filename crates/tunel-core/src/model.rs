@@ -398,6 +398,8 @@ pub struct Settings {
     pub custom_fonts: Vec<String>,
     /// Color del borde inferior de la pestaña seleccionada; `None` lo elige según el fondo.
     pub tab_border: Option<crate::theme::Rgb>,
+    /// Al abrir Túnel vuelven las pestañas de la última vez.
+    pub restore_tabs: bool,
 }
 
 impl Default for Settings {
@@ -415,6 +417,7 @@ impl Default for Settings {
             ui_font: None,
             custom_fonts: Vec::new(),
             tab_border: None,
+            restore_tabs: true,
         }
     }
 }

@@ -11,6 +11,7 @@ use tunel_ssh::sftp::{RemoteEntry, SftpClient, join_remote, local_target};
 
 pub struct SftpTab {
     pub id: u64,
+    pub host: tunel_core::HostId,
     pub title: String,
     connection: Option<Arc<SshConnection>>,
     client: Option<Arc<SftpClient>>,
@@ -24,12 +25,13 @@ pub struct SftpTab {
 }
 
 impl SftpTab {
-    pub fn new(id: u64, title: String) -> Self {
+    pub fn new(id: u64, host: tunel_core::HostId, title: String) -> Self {
         let local_path = directories::BaseDirs::new()
             .map(|d| d.home_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
         Self {
             id,
+            host,
             title,
             connection: None,
             client: None,

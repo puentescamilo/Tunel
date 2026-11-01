@@ -10,6 +10,7 @@ pub mod store;
 pub mod sync;
 pub mod theme;
 pub mod vault;
+pub mod workspace;
 
 pub use model::*;
 pub use store::{PasswordCheck, StoreError, UnlockedVault};

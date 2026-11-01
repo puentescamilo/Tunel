@@ -19,6 +19,7 @@ mod terminal_view;
 mod ui;
 mod updates;
 mod views;
+mod workspace;
 
 use anyhow::Context as _;
 

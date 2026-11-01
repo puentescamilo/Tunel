@@ -207,6 +207,17 @@ fn tab_background(app: &TunelApp, p: &ui::Palette, t: &Tab) -> Color32 {
             Color32::from_rgb(r, g, b)
         }
         Tab::Sftp(_) => p.bg,
+        Tab::Pending(saved) => match saved.kind {
+            tunel_core::workspace::SavedTabKind::Host { host } => {
+                let [r, g, b] = app.terminal_theme(Some(host)).background;
+                Color32::from_rgb(r, g, b)
+            }
+            tunel_core::workspace::SavedTabKind::Local => {
+                let [r, g, b] = app.terminal_theme(None).background;
+                Color32::from_rgb(r, g, b)
+            }
+            tunel_core::workspace::SavedTabKind::Sftp { .. } => p.bg,
+        },
     }
 }
 
