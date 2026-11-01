@@ -1,26 +1,26 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 31 de octubre de 2026, con Túnel 0.6.2 publicado.
+Actualizada el 1 de noviembre de 2026, con Túnel 0.7.0 publicado.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 
 ## Orden propuesto
 
-| # | Entrega | Versión prevista | Depende de |
+| # | Entrega | Versión | Estado |
 |---|---|---|---|
-| 1a | Comandos de administración del servidor | 0.6.3 (solo servidor) | — |
-| 1b | Pasar una cuenta con contraseña a Google o Microsoft | 0.7.0 | 1a |
-| 4a | Restaurar las pestañas al abrir Túnel | 0.7.0 | — |
-| 4b | Snippets con variables | 0.7.0 | — |
-| 4c | Escribir en varias terminales a la vez | 0.7.0 | — |
-| 5a | Generar claves SSH en el llavero | 0.8.0 | — |
-| 5b | Instalar una clave pública en un host | 0.8.0 | 5a |
+| 1a | Comandos de administración del servidor | 0.7.0 | ✅ |
+| 1b | Pasar una cuenta con contraseña a Google o Microsoft | 0.7.0 | ✅ |
+| 4a | Restaurar las pestañas al abrir Túnel | 0.7.0 | ✅ |
+| 4b | Snippets con variables | 0.7.0 | ✅ |
+| 4c | Escribir en varias terminales a la vez | 0.7.0 | ✅ |
+| 5a | Generar claves SSH en el llavero | 0.8.0 | siguiente |
+| 5b | Instalar una clave pública en un host | 0.8.0 | depende de 5a |
 | 5c | Avisar de claves débiles | 0.8.0 | — |
 | 2a | Actualización automática con paquetes verificados | 0.8.0 | — |
 | 3a | Registro de auditoría de los Teams | 0.9.0 | — |
-| 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | 3a |
-| 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | certificados |
+| 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | depende de 3a |
+| 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
 

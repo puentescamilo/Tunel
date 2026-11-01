@@ -132,7 +132,7 @@ Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puente
 e instálalo con:
 
 ```bash
-sudo apt install ./tunel_0.6.2_amd64.deb
+sudo apt install ./tunel_0.7.0_amd64.deb
 ```
 
 Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
@@ -485,7 +485,7 @@ más abajo.
 
 ### Administrar las cuentas
 
-Con el servidor en marcha (Túnel 0.6.3 o posterior):
+Con el servidor en marcha (Túnel 0.7.0 o posterior):
 
 ```bash
 # Lista las cuentas: correo, forma de entrar, alta, Teams, registros y sesiones abiertas
