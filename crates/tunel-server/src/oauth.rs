@@ -41,7 +41,6 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
-use tunel_core::sync::SealedBlob;
 use tunel_core::sync::protocol::{
     AuthProvider, AuthProviders, OAuthLinkRequest, OAuthLogin, OAuthRegisterRequest,
     OAuthRegisterResponse, OAuthTokenRequest, VaultKeyUpdate,
@@ -232,13 +231,9 @@ struct Flow {
 
 /// Resultado esperando a que Túnel lo canjee.
 enum Outcome {
-    Existing {
-        account: i64,
-        email: String,
-        kdf: tunel_core::crypto::KdfParams,
-        salt: String,
-        vault_key: SealedBlob,
-    },
+    /// La persona ya tiene cuenta, ligada al proveedor y a su identificador. La cuenta se
+    /// vuelve a buscar al canjear el código: puede haberse borrado mientras tanto.
+    Existing { provider: String, subject: String },
     /// La persona y el proveedor con el que creará la cuenta.
     New(Identity, String),
     /// La persona, el proveedor y la cuenta con contraseña que pasará a él.
@@ -754,14 +749,10 @@ async fn decide(
         .account_by_oauth(provider.id.clone(), identity.subject.clone())
         .await
         .map_err(internal)?;
-    if let Some(account) = linked {
-        let email = state.db.account_email(account.id).await.map_err(internal)?;
+    if linked.is_some() {
         return Ok(Outcome::Existing {
-            account: account.id,
-            email,
-            kdf: account.kdf,
-            salt: account.salt,
-            vault_key: account.vault_key,
+            provider: provider.id.clone(),
+            subject: identity.subject,
         });
     }
     let email = normalize_email(&identity.email)
@@ -841,19 +832,22 @@ async fn token(
         return Err(invalid());
     }
     Ok(Json(match pending.outcome {
-        Outcome::Existing {
-            account,
-            email,
-            kdf,
-            salt,
-            vault_key,
-        } => OAuthLogin::Existing {
-            email,
-            token: new_session(&state, account).await?,
-            kdf,
-            salt,
-            vault_key,
-        },
+        Outcome::Existing { provider, subject } => {
+            let account = state
+                .db
+                .account_by_oauth(provider, subject)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::bad_request("la cuenta ya no existe; vuelve a iniciar sesión")
+                })?;
+            OAuthLogin::Existing {
+                email: state.db.account_email(account.id).await?,
+                token: new_session(&state, account.id).await?,
+                kdf: account.kdf,
+                salt: account.salt,
+                vault_key: account.vault_key,
+            }
+        }
         Outcome::New(identity, provider) => {
             let email = identity.email.clone();
             let ticket = issue_ticket(oauth, identity, provider, None);

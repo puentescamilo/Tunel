@@ -30,7 +30,10 @@ pub enum SyncError {
          otro proveedor, desvincula este equipo y vuelve a entrar con él"
     )]
     Unauthorized,
-    #[error("ya existe una cuenta con ese correo en este servidor")]
+    #[error(
+        "ya existe una cuenta con ese correo en este servidor; inicia sesión con su \
+         contraseña"
+    )]
     AccountExists,
     /// El servidor no admite la cuenta; el mensaje dice por qué (registro cerrado o
     /// dominio de correo no permitido).

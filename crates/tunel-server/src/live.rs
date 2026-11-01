@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tunel_core::sync::live::JoinNonce;
 use tunel_core::sync::protocol::{
     ConnId, CreateLiveRequest, HostEvent, HostMessage, LiveAnnouncement, LiveSummary, ViewerEvent,
@@ -153,27 +153,39 @@ impl LiveRegistry {
     }
 }
 
-/// Lo que se manda a una conexión.
-enum Outbound {
-    Text(Utf8Bytes),
-    Close(u16, &'static str),
-}
+/// Motivo con el que se cierra una conexión.
+type CloseReason = (u16, &'static str);
 
-/// Cola hacia una conexión, con los bytes pendientes contados.
+/// Cola hacia una conexión, con los bytes pendientes contados. El cierre va aparte: con
+/// la cola llena, el aviso de cierre se perdería y la conexión quedaría abierta fuera de
+/// todo límite.
 #[derive(Clone)]
 struct Queue {
-    tx: mpsc::Sender<Outbound>,
+    tx: mpsc::Sender<Utf8Bytes>,
     pending: Arc<AtomicUsize>,
+    closed: Arc<watch::Sender<Option<CloseReason>>>,
+}
+
+/// Lo que lee la conexión: los mensajes y el aviso de cierre.
+struct Inbox {
+    messages: mpsc::Receiver<Utf8Bytes>,
+    closed: watch::Receiver<Option<CloseReason>>,
 }
 
 impl Queue {
-    fn new() -> (Self, mpsc::Receiver<Outbound>) {
-        let (tx, rx) = mpsc::channel(QUEUE);
+    fn new() -> (Self, Inbox) {
+        let (tx, messages) = mpsc::channel(QUEUE);
+        let (closed, closed_rx) = watch::channel(None);
         let queue = Self {
             tx,
             pending: Arc::new(AtomicUsize::new(0)),
+            closed: Arc::new(closed),
         };
-        (queue, rx)
+        let inbox = Inbox {
+            messages,
+            closed: closed_rx,
+        };
+        (queue, inbox)
     }
 
     /// Encola un mensaje; `false` si la conexión va tan retrasada que hay que cerrarla.
@@ -183,15 +195,22 @@ impl Queue {
             return false;
         }
         self.pending.fetch_add(len, Ordering::Relaxed);
-        self.tx.try_send(Outbound::Text(text)).is_ok()
+        self.tx.try_send(text).is_ok()
     }
 
     fn sent(&self, len: usize) {
         self.pending.fetch_sub(len, Ordering::Relaxed);
     }
 
-    fn close(&self, (code, reason): (u16, &'static str)) {
-        let _ = self.tx.try_send(Outbound::Close(code, reason));
+    /// Pide cerrar la conexión. Llega aunque la cola esté llena.
+    fn close(&self, reason: CloseReason) {
+        self.closed.send_if_modified(|current| {
+            let first = current.is_none();
+            if first {
+                *current = Some(reason);
+            }
+            first
+        });
     }
 }
 
@@ -281,7 +300,7 @@ impl LiveSession {
 
     /// Echa a quienes cumplen `filter` y se lo dice a quien comparte. Si quien comparte
     /// no da abasto, termina la sesión.
-    fn drop_viewers(&self, filter: impl Fn(ConnId, &Viewer) -> bool, reason: (u16, &'static str)) {
+    fn drop_viewers(&self, filter: impl Fn(ConnId, &Viewer) -> bool, reason: CloseReason) {
         let healthy = {
             let mut state = self.state();
             let gone: Vec<ConnId> = state
@@ -601,7 +620,7 @@ async fn send(socket: &mut WebSocket, message: Message) -> bool {
     )
 }
 
-async fn close(socket: &mut WebSocket, (code, reason): (u16, &'static str)) {
+async fn close(socket: &mut WebSocket, (code, reason): CloseReason) {
     let frame = CloseFrame {
         code,
         reason: Utf8Bytes::from_static(reason),
@@ -641,13 +660,23 @@ impl Connection<'_> {
     }
 
     /// Reenvía en los dos sentidos hasta que una de las partes cierra.
-    async fn run(&self, mut socket: WebSocket, mut outbound: mpsc::Receiver<Outbound>, role: Role) {
+    async fn run(&self, mut socket: WebSocket, mut inbox: Inbox, role: Role) {
         let heartbeat = self.state.config.live.heartbeat;
         let mut ticks = tokio::time::interval(heartbeat);
         ticks.tick().await;
         let mut last_seen = Instant::now();
         loop {
             tokio::select! {
+                // El cierre pasa delante de lo que quede en la cola.
+                biased;
+                changed = inbox.closed.changed() => {
+                    let reason = match changed {
+                        Ok(()) => (*inbox.closed.borrow()).unwrap_or(CLOSE_ENDED),
+                        Err(_) => CLOSE_ENDED,
+                    };
+                    close(&mut socket, reason).await;
+                    return;
+                }
                 message = socket.recv() => {
                     last_seen = Instant::now();
                     match message {
@@ -665,18 +694,14 @@ impl Connection<'_> {
                         Some(Ok(Message::Close(_)) | Err(_)) | None => return,
                     }
                 }
-                next = outbound.recv() => match next {
-                    Some(Outbound::Text(text)) => {
+                next = inbox.messages.recv() => match next {
+                    Some(text) => {
                         let len = text.len();
                         let sent = send(&mut socket, Message::Text(text)).await;
                         self.queue.sent(len);
                         if !sent {
                             return;
                         }
-                    }
-                    Some(Outbound::Close(code, reason)) => {
-                        close(&mut socket, (code, reason)).await;
-                        return;
                     }
                     None => {
                         close(&mut socket, CLOSE_ENDED).await;
@@ -804,5 +829,26 @@ impl Connection<'_> {
         if !delivered {
             self.live.end();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn closing_reaches_a_connection_whose_queue_is_full() {
+        let (queue, mut inbox) = Queue::new();
+        let text = Utf8Bytes::from_static("x");
+        while queue.push(text.clone(), usize::MAX) {}
+        queue.close(CLOSE_TOO_SLOW);
+        queue.close(CLOSE_ENDED);
+        inbox.closed.changed().await.unwrap();
+        assert_eq!(
+            *inbox.closed.borrow(),
+            Some(CLOSE_TOO_SLOW),
+            "vale el primer motivo"
+        );
+        assert_eq!(inbox.messages.len(), QUEUE);
     }
 }

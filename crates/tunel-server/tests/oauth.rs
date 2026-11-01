@@ -399,6 +399,25 @@ async fn the_code_needs_the_pkce_verifier_and_works_once() {
 }
 
 #[tokio::test]
+async fn a_code_issued_before_the_account_was_deleted_no_longer_works() {
+    let db = Db::open_in_memory().unwrap();
+    let s = setup_on(db.clone(), &["empresa.com"], false, false).await;
+    s.sign_up(person("bob-1", "bob@empresa.com"), "clave").await;
+    let client = Client::new();
+    let back = s.browser(&client, person("bob-1", "bob@empresa.com")).await;
+    db.delete_account("bob@empresa.com".into(), None, 0, true)
+        .await
+        .unwrap()
+        .unwrap();
+    // Otra cuenta ocupa el identificador que tenía la borrada.
+    s.sign_up(person("carol-1", "carol@empresa.com"), "clave")
+        .await;
+    let (status, body) = s.redeem(&back["code"], &client.verifier).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("ya no existe"));
+}
+
+#[tokio::test]
 async fn unverified_or_foreign_emails_are_sent_back_with_an_error() {
     let s = setup(&["empresa.com"], false).await;
     let unverified = s

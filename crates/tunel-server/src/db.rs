@@ -54,6 +54,18 @@ pub enum DbError {
     RekeyNeeded,
 }
 
+/// Límites al invitar a alguien a un equipo.
+#[derive(Debug, Clone, Copy)]
+pub struct InviteLimits {
+    /// Miembros del equipo, invitaciones incluidas.
+    pub members: u64,
+    /// Invitaciones sin responder de quien recibe la invitación.
+    pub pending: u64,
+    /// De esas, las que vienen de quien invita: así una sola cuenta no puede llenar las
+    /// de otra y dejarla sin sitio para las invitaciones legítimas.
+    pub pending_from_inviter: u64,
+}
+
 /// Límites de almacenamiento de cada cuenta.
 #[derive(Debug, Clone, Copy)]
 pub struct Quota {
@@ -689,15 +701,23 @@ impl Db {
         .await
     }
 
-    /// Registros cambiados después de `since`, en orden. El manifiesto actual solo va en
-    /// la última página, que es cuando el cliente puede comprobarlo.
-    pub async fn pull(&self, space: Space, since: u64, limit: usize) -> Result<Page, DbError> {
+    /// Registros cambiados después de `since`, en orden: como mucho `limit` registros y,
+    /// pasado el primero, no más de `max_bytes` de texto cifrado. El manifiesto actual
+    /// solo va en la última página, que es cuando el cliente puede comprobarlo.
+    pub async fn pull(
+        &self,
+        space: Space,
+        since: u64,
+        limit: usize,
+        max_bytes: usize,
+    ) -> Result<Page, DbError> {
         let since = since.min(i64::MAX as u64);
         self.call(move |conn| {
             let tx = conn.transaction()?;
             let (header, table, owner_col) = space.tables();
             let mut records = Vec::new();
             let mut cursor = since;
+            let mut bytes = 0usize;
             {
                 let mut stmt = tx.prepare(&format!(
                     "SELECT id, seq, nonce, ciphertext FROM {table}
@@ -714,6 +734,10 @@ impl Db {
                     })?;
                 for row in rows {
                     let (id, seq, nonce, ciphertext) = row?;
+                    bytes += nonce.len() + ciphertext.len();
+                    if !records.is_empty() && bytes > max_bytes {
+                        break;
+                    }
                     cursor = seq as u64;
                     records.push(SealedRecord {
                         id,
@@ -1081,8 +1105,7 @@ impl Db {
         epoch: u64,
         key: SealedBlob,
         wrapped_by: i64,
-        max_members: u64,
-        max_pending: u64,
+        limits: InviteLimits,
     ) -> Result<(), DbError> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
@@ -1111,15 +1134,21 @@ impl Db {
                 params![team],
                 |row| row.get(0),
             )?;
-            if members as u64 >= max_members {
+            if members as u64 >= limits.members {
                 return Err(DbError::Limit("miembros por equipo"));
             }
-            let pending: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM team_members WHERE account_id = ?1 AND accepted = 0",
-                params![account],
-                |row| row.get(0),
+            let (pending, from_inviter): (i64, i64) = tx.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(wrapped_by = ?2), 0) FROM team_members
+                 WHERE account_id = ?1 AND accepted = 0",
+                params![account, wrapped_by],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            if pending as u64 >= max_pending {
+            if from_inviter as u64 >= limits.pending_from_inviter {
+                return Err(DbError::Limit(
+                    "invitaciones pendientes que puedes enviarle a esa persona",
+                ));
+            }
+            if pending as u64 >= limits.pending {
                 return Err(DbError::Limit("invitaciones pendientes"));
             }
             let inserted = tx.execute(
