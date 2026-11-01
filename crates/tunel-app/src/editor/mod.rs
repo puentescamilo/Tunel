@@ -1,10 +1,13 @@
 //! Ventanas de edición para cada tipo de elemento de la bóveda.
 
 mod host;
+mod install_key;
 mod keygen;
 
 use crate::app::TunelApp;
 use host::{HostForm, host_form, inherited_theme, parse_port, team_picker};
+pub use install_key::installed_message;
+use install_key::{InstallKeyForm, install_key_form};
 use keygen::{KeyGenForm, keygen_form};
 use tunel_core::*;
 
@@ -16,6 +19,7 @@ pub enum Editor {
     Identity(Identity),
     Key(SshKey),
     GenerateKey(Box<KeyGenForm>),
+    InstallKey(Box<InstallKeyForm>),
     Snippet(Snippet),
     Forward {
         rule: PortForward,
@@ -32,6 +36,10 @@ impl Editor {
 
     pub fn generate_key() -> Self {
         Editor::GenerateKey(Box::new(KeyGenForm::new()))
+    }
+
+    pub fn install_key(key: SshKey) -> Self {
+        Editor::InstallKey(Box::new(InstallKeyForm::new(key)))
     }
 
     pub fn forward(rule: PortForward) -> Self {
@@ -231,6 +239,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         Editor::Identity(i) => (icons::IDENTITY, "identidad", data.identity(i.id).is_some()),
         Editor::Key(k) => (icons::KEY, "clave SSH", data.key(k.id).is_some()),
         Editor::GenerateKey(_) => (icons::KEY, "clave SSH", false),
+        Editor::InstallKey(_) => (icons::UPLOAD, "clave SSH", false),
         Editor::Snippet(s) => (icons::CODE, "snippet", data.snippet(s.id).is_some()),
         Editor::Forward { rule, .. } => (
             icons::TUNNEL,
@@ -239,12 +248,11 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         ),
     };
     let generating = matches!(&*editor, Editor::GenerateKey(f) if f.generating());
-    let title = if matches!(&*editor, Editor::GenerateKey(_)) {
-        "Generar clave SSH".to_string()
-    } else if exists {
-        format!("Editar {noun}")
-    } else {
-        format!("Nuevo {noun}")
+    let (title, action) = match &*editor {
+        Editor::GenerateKey(_) => ("Generar clave SSH".to_string(), "  Generar  "),
+        Editor::InstallKey(_) => ("Instalar la clave en un host".to_string(), "  Instalar  "),
+        _ if exists => (format!("Editar {noun}"), "  Guardar  "),
+        _ => (format!("Nuevo {noun}"), "  Guardar  "),
     };
     let p = crate::ui::theme::palette(ctx);
     let frame = egui::Frame::popup(&ctx.global_style())
@@ -309,6 +317,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                     Editor::Identity(identity) => identity_form(ui, identity, &data, &secrets),
                     Editor::Key(key) => key_form(ui, key),
                     Editor::GenerateKey(form) => keygen_form(ui, form),
+                    Editor::InstallKey(form) => install_key_form(ui, form, &data),
                     Editor::Snippet(snippet) => {
                         ui.label("Nombre");
                         ui.text_edit_singleline(&mut snippet.label);
@@ -387,13 +396,8 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                 });
             ui.add_space(16.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let label = if matches!(&*editor, Editor::GenerateKey(_)) {
-                    "  Generar  "
-                } else {
-                    "  Guardar  "
-                };
                 save = ui
-                    .add_enabled_ui(!generating, |ui| crate::ui::primary_button(ui, label))
+                    .add_enabled_ui(!generating, |ui| crate::ui::primary_button(ui, action))
                     .inner
                     .clicked();
                 cancel |= crate::ui::secondary_button(ui, "Cancelar").clicked();
@@ -435,6 +439,21 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         Some(Editor::GenerateKey(form)) => {
             if let Err(e) = form.start(ctx) {
                 form.error = Some(e);
+            }
+            return;
+        }
+        Some(Editor::InstallKey(form)) => {
+            let started = form.request(&data).and_then(|(host, public)| {
+                app.engine
+                    .install_key(&data, host, public)
+                    .map_err(|e| format!("{e:#}"))
+            });
+            match started {
+                Ok(()) => {
+                    app.notify("Instalando la clave…");
+                    app.editor = None;
+                }
+                Err(e) => form.error = Some(e),
             }
             return;
         }

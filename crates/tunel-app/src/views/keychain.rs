@@ -40,14 +40,24 @@ fn identity_details(data: &VaultData, identity: &Identity) -> String {
     parts.join(" · ")
 }
 
-/// Fila con avatar, título, detalle y botones de editar/eliminar. Devuelve (editar, eliminar).
+/// Botones pulsados en una fila del llavero.
+#[derive(Default)]
+struct RowActions {
+    edit: bool,
+    delete: bool,
+    install: bool,
+}
+
+/// Fila con avatar, título, detalle y botones de editar y eliminar; con `installable`,
+/// también el de instalar la clave en un host.
 fn item_row(
     ui: &mut egui::Ui,
     key: impl std::hash::Hash + std::fmt::Debug,
     icon: &str,
     title: &str,
     detail: &str,
-) -> (bool, bool) {
+    installable: bool,
+) -> RowActions {
     let p = ui::pal(ui);
     let (_, actions) = ui::list_row(ui, key, |ui| {
         ui.horizontal(|ui| {
@@ -66,7 +76,13 @@ fn item_row(
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let delete = ui::icon_button(ui, icons::TRASH, "Eliminar").clicked();
                 let edit = ui::icon_button(ui, icons::PENCIL, "Editar").clicked();
-                (edit, delete)
+                let install = installable
+                    && ui::icon_button(ui, icons::UPLOAD, "Instalar en un host").clicked();
+                RowActions {
+                    edit,
+                    delete,
+                    install,
+                }
             })
             .inner
         })
@@ -103,7 +119,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             ui::empty_state(ui, icons::IDENTITY, "Sin identidades", "Una identidad agrupa usuario y credenciales para reutilizarlos en varios hosts.");
         }
         for identity in &data.identities {
-            let (edit, delete) = item_row(ui, identity.id, icons::USER, &identity.label, &identity_details(&data, identity));
+            let RowActions { edit, delete, .. } = item_row(ui, identity.id, icons::USER, &identity.label, &identity_details(&data, identity), false);
             if edit {
                 app.editor = Some(Editor::Identity(identity.clone()));
             }
@@ -134,11 +150,14 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                 (false, true) => icons::CERTIFICATE,
                 (false, false) => icons::KEY,
             };
-            let (edit, delete) = item_row(ui, key.id, icon, &key.label, &detail);
-            if edit {
+            let actions = item_row(ui, key.id, icon, &key.label, &detail, true);
+            if actions.edit {
                 app.editor = Some(Editor::Key(key.clone()));
             }
-            if delete {
+            if actions.install {
+                app.editor = Some(Editor::install_key(key.clone()));
+            }
+            if actions.delete {
                 updated = Some(data.without_key(key.id));
             }
         }

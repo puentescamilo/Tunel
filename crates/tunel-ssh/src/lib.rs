@@ -1,5 +1,6 @@
 //! Cliente SSH de Túnel construido sobre `russh`.
 
+pub mod authorized_keys;
 pub mod client;
 pub mod fido;
 pub mod forward;
