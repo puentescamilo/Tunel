@@ -152,6 +152,10 @@ impl AccountKeypair {
 
     /// Clave que comparten esta cuenta y `peer`, distinta para cada uso (`domain`) y cada
     /// sentido: `sender → recipient`.
+    pub(super) fn secret(&self) -> &[u8; KEY_LEN] {
+        &self.secret
+    }
+
     pub(super) fn wrapping_key(
         &self,
         domain: &[u8],

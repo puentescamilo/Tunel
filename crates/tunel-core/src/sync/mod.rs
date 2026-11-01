@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod protocol;
 pub mod record;
 pub mod roster;
+pub mod signature;
 pub mod space;
 pub mod state;
 pub mod team;

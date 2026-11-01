@@ -766,35 +766,58 @@ async fn one_account_cannot_use_up_someone_elses_invitations() {
 }
 
 #[tokio::test]
-async fn only_admins_replace_the_roster_and_only_for_the_current_key() {
+async fn only_admins_add_roster_versions_and_they_only_grow() {
     let app = app().await;
     let ana = user(&app, "ana@ejemplo.com").await;
     let bob = user(&app, "bob@ejemplo.com").await;
     let key = create_team(&app, &ana, "Equipo").await;
     join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
-    assert_eq!(teams(&app, &bob).await[0].roster, None);
+    assert_eq!(teams(&app, &bob).await[0].roster_version, None);
 
-    let roster = |epoch: u64| {
+    let roster = |epoch: u64, version: u64| {
         serde_json::to_value(RosterRequest {
             epoch,
-            roster: seal_team_name(&key, TEAM, "lista").unwrap(),
+            roster: RosterBlob {
+                version,
+                blob: seal_team_name(&key, TEAM, &format!("lista {version}")).unwrap(),
+            },
         })
         .unwrap()
     };
-    let uri = format!("/v1/teams/{TEAM}/roster");
-    let put = |user: &User, body: Value| {
+    let uri = format!("/v1/teams/{TEAM}/rosters");
+    let post = |user: &User, body: Value| {
         let (app, uri, token) = (app.clone(), uri.clone(), user.token().map(str::to_string));
         async move {
-            send(&app, "PUT", &uri, token.as_deref(), Some(body))
+            send(&app, "POST", &uri, token.as_deref(), Some(body))
                 .await
                 .0
         }
     };
-    assert_eq!(put(&bob, roster(0)).await, StatusCode::FORBIDDEN);
-    assert_eq!(put(&ana, roster(1)).await, StatusCode::CONFLICT);
-    assert_eq!(put(&ana, roster(0)).await, StatusCode::NO_CONTENT);
-    let stored = teams(&app, &bob).await.remove(0).roster.unwrap();
-    assert_eq!(open_team_name(&key, TEAM, &stored).unwrap(), "lista");
+    assert_eq!(post(&bob, roster(0, 1)).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        post(&ana, roster(1, 1)).await,
+        StatusCode::CONFLICT,
+        "otra época"
+    );
+    assert_eq!(post(&ana, roster(0, 1)).await, StatusCode::NO_CONTENT);
+    assert_eq!(
+        post(&ana, roster(0, 1)).await,
+        StatusCode::CONFLICT,
+        "no crece"
+    );
+    assert_eq!(post(&ana, roster(0, 3)).await, StatusCode::NO_CONTENT);
+    assert_eq!(teams(&app, &bob).await[0].roster_version, Some(3));
+
+    // Cualquier miembro lee las versiones posteriores a la suya, en orden.
+    let (status, body) = send(&app, "GET", &format!("{uri}?since=1"), bob.token(), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let entries: Vec<RosterEntry> = serde_json::from_value(body).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].roster.version, 3);
+    assert_eq!(
+        open_team_name(&key, TEAM, &entries[0].roster.blob).unwrap(),
+        "lista 3"
+    );
 }
 
 const NOW: i64 = 1_793_404_800;

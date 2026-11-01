@@ -5,7 +5,7 @@
 use tunel_core::crypto::KdfParams;
 use tunel_core::model::Host;
 use tunel_core::sync::protocol::TeamRole;
-use tunel_core::sync::{AccountKeypair, Contact, KeyProblem, SyncLocal};
+use tunel_core::sync::{AccountKeypair, Contact, KeyProblem, RosterMember, SyncLocal};
 use tunel_core::vault::VaultData;
 use tunel_server::{AppState, Config, Db, router};
 use tunel_sync::teams::{self, KeyStatus};
@@ -411,6 +411,76 @@ async fn a_pinned_contact_who_is_not_an_admin_cannot_slip_in_a_team_key() {
         "{:?}",
         outcome.team_problems
     );
+}
+
+#[tokio::test]
+async fn a_member_with_the_team_key_cannot_rewrite_the_roster() {
+    let (server, db) = start_server_with_db().await;
+    let (mut ana, bob, team) = shared_team(&server).await;
+    let bob_team = bob.local.team(&team).unwrap();
+    let bob_pair = bob.local.keypair.as_ref().unwrap();
+    let current = ana.local.team(&team).unwrap().roster.clone().unwrap();
+    let mut forged = current.with(
+        "bob@ejemplo.com",
+        RosterMember {
+            key: bob_pair.public(),
+            role: TeamRole::Admin,
+        },
+    );
+    forged.version += 10;
+    // Bob la firma él, o dice que es de ana; el servidor colabora y la guarda.
+    for author in ["bob@ejemplo.com", "ana@ejemplo.com"] {
+        forged.version += 1;
+        let blob = forged
+            .seal(&bob_team.key, &team, bob_team.epoch, author, bob_pair)
+            .unwrap();
+        db.add_roster(team.clone(), bob_team.epoch, blob)
+            .await
+            .unwrap();
+        let outcome = ana.sync().await;
+        assert!(
+            outcome.team_problems[0]
+                .message
+                .contains("no la firmó un admin"),
+            "{:?}",
+            outcome.team_problems
+        );
+        assert_eq!(
+            ana.local.team(&team).unwrap().roster.as_ref(),
+            Some(&current)
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_device_that_missed_a_promotion_still_accepts_the_new_admins_key() {
+    let server = start_server().await;
+    let (ana, mut bob, team) = shared_team(&server).await;
+    let mut carol = Person::new(&server, "carol@ejemplo.com", VaultData::default()).await;
+    carol.sync().await;
+    let mut ana = ana;
+    ana.invite(&team, "carol@ejemplo.com").await;
+    carol.accept(&team).await;
+    // Mientras carol no sincroniza, ana hace admin a bob y bob saca a ana.
+    ana.local = teams::set_role(&ana.local, &team, "bob@ejemplo.com", TeamRole::Admin)
+        .await
+        .unwrap();
+    bob.sync().await;
+    let (local, data) = teams::remove_member(&bob.local, &bob.data, &team, "ana@ejemplo.com")
+        .await
+        .unwrap();
+    bob.local = local;
+    bob.data = data;
+
+    // Carol comprueba primero el ascenso, firmado por ana, y luego la clave de bob.
+    let outcome = carol.sync().await;
+    assert!(
+        outcome.team_problems.is_empty(),
+        "{:?}",
+        outcome.team_problems
+    );
+    assert_eq!(carol.local.team(&team).unwrap().epoch, 1);
+    assert!(carol.host("web").is_some());
 }
 
 #[tokio::test]

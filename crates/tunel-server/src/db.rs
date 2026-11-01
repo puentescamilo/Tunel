@@ -10,7 +10,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tunel_core::crypto::KdfParams;
 use tunel_core::sync::protocol::{
-    AccountKeysBlob, ManifestBlob, MemberKey, TeamMember, TeamRole, TeamSummary,
+    AccountKeysBlob, ManifestBlob, MemberKey, RosterBlob, RosterEntry, TeamMember, TeamRole,
+    TeamSummary,
 };
 use tunel_core::sync::{PublicKey, SealedBlob, SealedRecord};
 
@@ -140,6 +141,15 @@ CREATE TABLE IF NOT EXISTS team_records (
     PRIMARY KEY (team_id, id)
 );
 CREATE INDEX IF NOT EXISTS team_records_by_seq ON team_records (team_id, seq);
+-- Versiones de la lista de miembros firmada y cifrada (ver `tunel_core::sync::roster`), de
+-- la época actual y la anterior: quien se perdió alguna las comprueba una a una.
+CREATE TABLE IF NOT EXISTS team_rosters (
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    epoch INTEGER NOT NULL,
+    blob TEXT NOT NULL,
+    PRIMARY KEY (team_id, version)
+);
 ";
 
 /// Columnas añadidas a `accounts` después de la primera versión, con su tipo.
@@ -158,10 +168,6 @@ const ACCOUNT_COLUMNS: [(&str, &str); 6] = [
     ("previous_vault_key", "TEXT"),
     ("deleted_at", "INTEGER"),
 ];
-
-/// Columnas añadidas a `teams` después de la primera versión: `roster` es la lista de
-/// miembros cifrada con la clave de la época actual (ver `tunel_core::sync::roster`).
-const TEAM_COLUMNS: [(&str, &str); 1] = [("roster", "TEXT")];
 
 /// Datos de una cuenta necesarios para iniciar sesión.
 pub struct Account {
@@ -282,7 +288,7 @@ pub struct Rotation {
     pub keys: Vec<MemberKey>,
     pub manifest: ManifestBlob,
     pub records: Vec<SealedRecord>,
-    pub roster: Option<SealedBlob>,
+    pub roster: Option<RosterBlob>,
 }
 
 /// Un equipo recién creado, tal como lo manda quien lo crea.
@@ -291,13 +297,37 @@ pub struct NewTeam {
     pub name: SealedBlob,
     /// Clave del equipo envuelta por y para quien lo crea.
     pub key: SealedBlob,
-    pub roster: Option<SealedBlob>,
+    pub roster: Option<RosterBlob>,
     pub created_at: i64,
 }
 
-/// La lista de miembros cifrada, como se guarda: JSON o `NULL`.
-fn roster_text(roster: &Option<SealedBlob>) -> Result<Option<String>, DbError> {
-    Ok(roster.as_ref().map(serde_json::to_string).transpose()?)
+/// Guarda una versión nueva de la lista de miembros del equipo, cifrada en la época
+/// `epoch`. Tiene que ser mayor que la última: si otro admin la cambió entretanto, es un
+/// conflicto y el cliente vuelve a empezar con la suya.
+fn insert_roster(
+    tx: &rusqlite::Transaction<'_>,
+    team: &str,
+    epoch: u64,
+    roster: &RosterBlob,
+) -> Result<(), DbError> {
+    let latest: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM team_rosters WHERE team_id = ?1",
+        params![team],
+        |row| row.get(0),
+    )?;
+    if roster.version > i64::MAX as u64 || roster.version <= latest as u64 {
+        return Err(DbError::Conflict);
+    }
+    tx.execute(
+        "INSERT INTO team_rosters (team_id, version, epoch, blob) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            team,
+            roster.version as i64,
+            epoch as i64,
+            serde_json::to_string(&roster.blob)?
+        ],
+    )?;
+    Ok(())
 }
 
 fn role_name(role: TeamRole) -> &'static str {
@@ -423,15 +453,7 @@ impl Db {
                 conn.execute_batch(&format!("ALTER TABLE accounts ADD COLUMN {name} {kind}"))?;
             }
         }
-        let existing: Vec<String> = conn
-            .prepare("SELECT name FROM pragma_table_info('teams')")?
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
-        for (name, kind) in TEAM_COLUMNS {
-            if !existing.iter().any(|c| c == name) {
-                conn.execute_batch(&format!("ALTER TABLE teams ADD COLUMN {name} {kind}"))?;
-            }
-        }
+
         conn.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS accounts_by_oauth
                  ON accounts (oauth_provider, oauth_subject) WHERE oauth_subject IS NOT NULL",
@@ -978,17 +1000,15 @@ impl Db {
                 return Err(DbError::Limit("equipos por cuenta"));
             }
             let inserted = tx.execute(
-                "INSERT INTO teams (id, name, roster, created_at) VALUES (?1, ?2, ?3, ?4)
+                "INSERT INTO teams (id, name, created_at) VALUES (?1, ?2, ?3)
                  ON CONFLICT (id) DO NOTHING",
-                params![
-                    id,
-                    serde_json::to_string(&name)?,
-                    roster_text(&roster)?,
-                    created_at
-                ],
+                params![id, serde_json::to_string(&name)?, created_at],
             )?;
             if inserted == 0 {
                 return Err(DbError::TeamExists);
+            }
+            if let Some(roster) = &roster {
+                insert_roster(&tx, &id, 0, roster)?;
             }
             tx.execute(
                 "INSERT INTO team_members (team_id, account_id, role, key, wrapped_by, accepted)
@@ -1006,7 +1026,8 @@ impl Db {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT t.id, t.name, m.role, t.epoch, m.key, a.email, a.public_key, m.accepted,
-                        t.rekey_needed, t.roster
+                        t.rekey_needed,
+                        (SELECT MAX(version) FROM team_rosters r WHERE r.team_id = t.id)
                  FROM team_members m
                  JOIN teams t ON t.id = m.team_id
                  JOIN accounts a ON a.id = m.wrapped_by
@@ -1024,7 +1045,7 @@ impl Db {
                     row.get::<_, String>(6)?,
                     row.get::<_, bool>(7)?,
                     row.get::<_, bool>(8)?,
-                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<i64>>(9)?,
                 ))
             })?;
             rows.map(|row| {
@@ -1044,7 +1065,7 @@ impl Db {
                     (
                         Some(serde_json::from_str(&name)?),
                         Some(serde_json::from_str(&key)?),
-                        roster.as_deref().map(serde_json::from_str).transpose()?,
+                        roster.map(|v| v as u64),
                     )
                 } else {
                     (None, None, None)
@@ -1059,7 +1080,7 @@ impl Db {
                     wrapped_by_key: parse_public_key(&wrapped_by_key)?,
                     pending: !accepted,
                     rekey_needed: accepted && rekey,
-                    roster,
+                    roster_version: roster,
                 })
             })
             .collect()
@@ -1223,26 +1244,55 @@ impl Db {
         .await
     }
 
-    /// Sustituye la lista de miembros cifrada, si la clave sigue en la época `epoch`.
-    pub async fn set_roster(
+    /// Añade una versión de la lista de miembros, si la clave sigue en la época `epoch`.
+    pub async fn add_roster(
         &self,
         team: String,
         epoch: u64,
-        roster: SealedBlob,
+        roster: RosterBlob,
     ) -> Result<(), DbError> {
         self.call(move |conn| {
-            let updated = conn.execute(
-                "UPDATE teams SET roster = ?1 WHERE id = ?2 AND epoch = ?3",
-                params![
-                    serde_json::to_string(&roster)?,
-                    team,
-                    epoch.min(i64::MAX as u64) as i64
-                ],
+            let tx = conn.transaction()?;
+            let current: i64 = tx.query_row(
+                "SELECT epoch FROM teams WHERE id = ?1",
+                params![team],
+                |row| row.get(0),
             )?;
-            if updated == 0 {
+            if current as u64 != epoch {
                 return Err(DbError::Conflict);
             }
+            insert_roster(&tx, &team, epoch, &roster)?;
+            tx.commit()?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Las versiones de la lista de miembros posteriores a `since`, en orden.
+    pub async fn rosters(&self, team: String, since: u64) -> Result<Vec<RosterEntry>, DbError> {
+        self.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT epoch, version, blob FROM team_rosters
+                 WHERE team_id = ?1 AND version > ?2 ORDER BY version",
+            )?;
+            let rows = stmt.query_map(params![team, since.min(i64::MAX as u64) as i64], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            rows.map(|row| {
+                let (epoch, version, blob) = row?;
+                Ok(RosterEntry {
+                    epoch: epoch as u64,
+                    roster: RosterBlob {
+                        version: version as u64,
+                        blob: serde_json::from_str(&blob)?,
+                    },
+                })
+            })
+            .collect()
         })
         .await
     }
@@ -1381,17 +1431,25 @@ impl Db {
             check_quota(&tx, &space, quota)?;
             tx.execute(
                 "UPDATE teams SET name = ?1, epoch = ?2, seq = ?3, manifest_version = ?4,
-                     manifest = ?5, rekey_needed = 0, roster = ?6
-                 WHERE id = ?7",
+                     manifest = ?5, rekey_needed = 0
+                 WHERE id = ?6",
                 params![
                     serde_json::to_string(&rotation.name)?,
                     rotation.epoch as i64,
                     seq,
                     rotation.manifest.version as i64,
                     serde_json::to_string(&rotation.manifest.blob)?,
-                    roster_text(&rotation.roster)?,
                     team
                 ],
+            )?;
+            if let Some(roster) = &rotation.roster {
+                insert_roster(&tx, &team, rotation.epoch, roster)?;
+            }
+            // Basta con las listas de esta época y la anterior: con una clave más antigua
+            // ya no se puede seguir.
+            tx.execute(
+                "DELETE FROM team_rosters WHERE team_id = ?1 AND epoch + 1 < ?2",
+                params![team, rotation.epoch as i64],
             )?;
             // La clave nueva la envolvió otra cuenta: las lápidas que solo seguían por la
             // anterior ya sobran.

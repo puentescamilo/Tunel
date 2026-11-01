@@ -39,6 +39,8 @@ hkdf = "0.13"
 hmac = "0.13"
 sha2 = "0.11"
 curve25519-dalek = "5.0"
+# Solo para firmar con la clave X25519 de la cuenta (XEdDSA) y verificar como Ed25519.
+ed25519-dalek = { version = "3.0", default-features = false, features = ["fast", "hazmat", "zeroize"] }
 directories = "6"
 russh = "0.65"
 russh-sftp = "3.0"

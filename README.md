@@ -272,7 +272,8 @@ que cada cual ponga las suyas. Los hosts compartidos muestran el nombre del Team
   huella. Si el servidor entrega otra, el Team se detiene y lo avisa: compara la huella de
   nuevo antes de aceptarla.
 - **Lista de miembros:** los admins guardan junto al Team la lista de miembros, cifrada con
-  su clave. Una clave nueva del Team solo se acepta si la envolvió un admin de esa lista, y
+  su clave y firmada por el admin que la escribe: ni el servidor ni un miembro la pueden
+  cambiar. Una clave nueva del Team solo se acepta si la envolvió un admin de esa lista, y
   al renovarla solo llega a quien está en ella: el servidor no puede volver a meter a alguien
   que se sacó. Si avisa de que alguien no está en la lista y debe estar, sácalo y vuelve a
   invitarlo. Los Teams anteriores a Túnel 0.7.1 la estrenan al invitar o al renovar la clave.

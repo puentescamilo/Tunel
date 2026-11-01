@@ -84,9 +84,16 @@ pub enum SyncError {
     KeyRollback,
     #[error(
         "la clave nueva del Team la envolvió {0}, que no es admin en la lista de miembros del \
-         Team: puede ser un intento de colar una clave; no se acepta"
+         Team: puede ser un intento de colar una clave; no se acepta. Si sigue pasando, sal \
+         del Team y pide que te vuelvan a invitar"
     )]
     UntrustedTeamKey(String),
+    #[error(
+        "la lista de miembros del Team dice venir de {0}, pero no la firmó un admin del Team: \
+         puede ser un intento de cambiarla; no se acepta. Si sigue pasando, sal del Team y \
+         pide que te vuelvan a invitar"
+    )]
+    UntrustedRoster(String),
     #[error(
         "el servidor dice que {0} es miembro del Team, pero no está en la lista de miembros \
          que guardan los admins; si debe estar, sácalo y vuelve a invitarlo"

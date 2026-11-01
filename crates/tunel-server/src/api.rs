@@ -8,7 +8,7 @@ use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -217,7 +217,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .layer(DefaultBodyLimit::max(MAX_AUTH_BODY));
     let roster_routes = Router::new()
-        .route("/v1/teams/{team}/roster", put(set_roster))
+        .route("/v1/teams/{team}/rosters", get(rosters).post(add_roster))
         .layer(DefaultBodyLimit::max(MAX_ROSTER_CIPHERTEXT + MAX_AUTH_BODY));
     let rotate_routes = Router::new()
         .route("/v1/teams/{team}/rotate", post(rotate_team))
@@ -828,7 +828,7 @@ async fn create_team(
     check_blob(&request.name, MAX_TEAM_NAME_CIPHERTEXT)?;
     check_blob(&request.key, MAX_VAULT_KEY_CIPHERTEXT)?;
     if let Some(roster) = &request.roster {
-        check_blob(roster, MAX_ROSTER_CIPHERTEXT)?;
+        check_blob(&roster.blob, MAX_ROSTER_CIPHERTEXT)?;
     }
     state
         .db
@@ -908,20 +908,37 @@ async fn add_member(
     Ok(StatusCode::CREATED)
 }
 
-/// Sustituye la lista de miembros cifrada del equipo.
-async fn set_roster(
+/// Añade una versión de la lista de miembros del equipo.
+async fn add_roster(
     State(state): State<Arc<AppState>>,
     session: Session,
     Path(team): Path<String>,
     Json(request): Json<RosterRequest>,
 ) -> ApiResult<StatusCode> {
     require_admin(&state, &session, &team).await?;
-    check_blob(&request.roster, MAX_ROSTER_CIPHERTEXT)?;
+    check_blob(&request.roster.blob, MAX_ROSTER_CIPHERTEXT)?;
     state
         .db
-        .set_roster(team, request.epoch, request.roster)
+        .add_roster(team, request.epoch, request.roster)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RostersQuery {
+    #[serde(default)]
+    since: u64,
+}
+
+/// Las versiones de la lista de miembros posteriores a `since`.
+async fn rosters(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+    Query(query): Query<RostersQuery>,
+) -> ApiResult<Json<Vec<RosterEntry>>> {
+    team_role(&state, &session, &team).await?;
+    Ok(Json(state.db.rosters(team, query.since).await?))
 }
 
 async fn update_member(
@@ -1005,7 +1022,7 @@ async fn rotate_team(
     check_blob(&request.manifest.blob, MAX_MANIFEST_CIPHERTEXT)?;
     check_records(&request.records)?;
     if let Some(roster) = &request.roster {
-        check_blob(roster, MAX_ROSTER_CIPHERTEXT)?;
+        check_blob(&roster.blob, MAX_ROSTER_CIPHERTEXT)?;
     }
     let mut keys = Vec::with_capacity(request.keys.len());
     for member in request.keys {
