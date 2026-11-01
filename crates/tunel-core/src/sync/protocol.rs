@@ -358,6 +358,24 @@ pub enum OAuthLogin {
     /// No hay cuenta con ese correo y se puede crear con `ticket` (ver
     /// [`OAuthRegisterRequest`]).
     New { email: String, ticket: String },
+    /// El correo tiene una cuenta con contraseña y Túnel pidió pasarla al proveedor: se
+    /// hace con `ticket` y la clave de acceso de esa contraseña (ver [`OAuthLinkRequest`]).
+    Link { email: String, ticket: String },
+}
+
+/// Pasa una cuenta con contraseña a un proveedor de identidad. El proveedor ya confirmó
+/// el correo (`ticket`) y `auth` demuestra que se conoce la contraseña de la cuenta. Desde
+/// entonces se entra solo con el proveedor y la clave de bóveda, la misma, va envuelta
+/// con la que sale de la contraseña maestra.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthLinkRequest {
+    pub ticket: String,
+    /// Clave de acceso de la cuenta, en base64, como en [`LoginRequest`].
+    pub auth: String,
+    pub kdf: KdfParams,
+    /// Sal en base64.
+    pub salt: String,
+    pub vault_key: SealedBlob,
 }
 
 /// Crea la cuenta de quien inició sesión con un proveedor de identidad. No lleva clave

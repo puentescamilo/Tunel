@@ -9,6 +9,10 @@
 //! 2. [`OAuthStart::wait`] espera a que el navegador vuelva con el código, comprueba el
 //!    `state` y lo canjea demostrando el PKCE.
 //! 3. [`complete`] abre la clave de bóveda con la contraseña maestra, o crea la cuenta.
+//!
+//! Una cuenta con contraseña ya unida pasa a un proveedor con [`begin_link`] y [`link`]:
+//! conserva sus Teams, sus datos y su clave de bóveda, que pasa a envolverse con la que
+//! sale de la contraseña maestra.
 
 use crate::account::{ACCOUNT_KDF, derive, kdf_acceptable};
 use crate::api::{Api, ServerUrl};
@@ -21,8 +25,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tunel_core::sync::keys::MIN_SALT_LEN;
 use tunel_core::sync::protocol::{
-    AuthProvider, AuthProviders, OAuthLogin, OAuthRegisterRequest, OAuthTokenRequest,
-    VaultKeyUpdate,
+    AuthProvider, AuthProviders, OAuthLinkRequest, OAuthLogin, OAuthRegisterRequest,
+    OAuthTokenRequest, VaultKeyUpdate,
 };
 use tunel_core::sync::{OAuthAccount, SyncLocal, SyncState, VaultKey};
 use tunel_core::vault::VaultData;
@@ -54,6 +58,22 @@ pub struct OAuthStart {
 /// Empieza a iniciar sesión con `provider`: escucha en un puerto libre de este equipo y
 /// devuelve la dirección para el navegador.
 pub async fn begin(server: &ServerUrl, provider: AuthProvider) -> Result<OAuthStart, SyncError> {
+    start(server, provider, false).await
+}
+
+/// Como [`begin`], para pasar a `provider` la cuenta con contraseña de este equipo.
+pub async fn begin_link(
+    server: &ServerUrl,
+    provider: AuthProvider,
+) -> Result<OAuthStart, SyncError> {
+    start(server, provider, true).await
+}
+
+async fn start(
+    server: &ServerUrl,
+    provider: AuthProvider,
+    link: bool,
+) -> Result<OAuthStart, SyncError> {
     let api = Api::new(server)?;
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -66,7 +86,7 @@ pub async fn begin(server: &ServerUrl, provider: AuthProvider) -> Result<OAuthSt
     let challenge = B64_URL.encode(Sha256::digest(verifier.as_bytes()));
     let state = B64_URL.encode(rand::random::<[u8; 16]>());
     Ok(OAuthStart {
-        url: api.oauth_start_url(&provider.id, port, &challenge, &state),
+        url: api.oauth_start_url(&provider.id, port, &challenge, &state, link),
         server: server.clone(),
         provider,
         listener,
@@ -85,8 +105,15 @@ pub struct OAuthSignIn {
 impl OAuthSignIn {
     pub fn email(&self) -> &str {
         match &self.login {
-            OAuthLogin::Existing { email, .. } | OAuthLogin::New { email, .. } => email,
+            OAuthLogin::Existing { email, .. }
+            | OAuthLogin::New { email, .. }
+            | OAuthLogin::Link { email, .. } => email,
         }
+    }
+
+    /// El servidor deja pasar la cuenta con contraseña a este proveedor con [`link`].
+    pub fn is_link(&self) -> bool {
+        matches!(self.login, OAuthLogin::Link { .. })
     }
 
     /// No había cuenta con ese correo: [`complete`] la creará.
@@ -279,6 +306,13 @@ pub async fn complete(
                 .await?;
             (email, created.token, vault_key, wrapped)
         }
+        OAuthLogin::Link { email, .. } => {
+            return Err(SyncError::Provider(format!(
+                "{email} tiene una cuenta con contraseña: inicia sesión con ella y pásala a {} \
+                 desde Ajustes",
+                provider.name
+            )));
+        }
     };
     let keypair = keypair::try_fetch_or_create(&api, &token, &vault_key).await;
     Ok(SyncLocal {
@@ -329,6 +363,64 @@ pub fn renew(local: &SyncLocal, sign_in: OAuthSignIn) -> Result<SyncLocal, SyncE
     Ok(SyncLocal {
         token: Some(Zeroizing::new(token)),
         oauth,
+        ..local.clone()
+    })
+}
+
+/// Pasa a un proveedor la cuenta con contraseña a la que está unido este equipo. Conserva
+/// la clave de bóveda, que pasa a envolverse con la que sale de `master_password`, y por
+/// tanto los datos, los Teams y el par de claves. La contraseña de la cuenta deja de
+/// servir y se cierran sus sesiones: los demás equipos tendrán que volver a entrar con el
+/// proveedor.
+pub async fn link(
+    local: &SyncLocal,
+    sign_in: OAuthSignIn,
+    master_password: Zeroizing<String>,
+) -> Result<SyncLocal, SyncError> {
+    if local.oauth.is_some() {
+        return Err(SyncError::Internal(
+            "la cuenta ya entra con un proveedor de identidad".into(),
+        ));
+    }
+    let OAuthLogin::Link { email, ticket } = sign_in.login else {
+        return Err(SyncError::Provider(format!(
+            "{} no devolvió permiso para pasar la cuenta; vuelve a intentarlo",
+            sign_in.provider.name
+        )));
+    };
+    if !email.eq_ignore_ascii_case(&local.email) {
+        return Err(SyncError::Provider(format!(
+            "iniciaste sesión como {email}, pero este equipo está unido a {}",
+            local.email
+        )));
+    }
+    let missing = tunel_core::password::problems(&master_password);
+    if !missing.is_empty() {
+        return Err(SyncError::WeakMasterPassword(
+            tunel_core::password::describe(&missing),
+        ));
+    }
+    let salt: [u8; MIN_SALT_LEN] = rand::random();
+    let keys = derive(master_password, salt.to_vec(), ACCOUNT_KDF).await?;
+    let wrapped = local.vault_key.wrap(&keys)?;
+    let linked = Api::new(&sign_in.server)?
+        .oauth_link(&OAuthLinkRequest {
+            ticket,
+            auth: local.auth.to_string(),
+            kdf: ACCOUNT_KDF,
+            salt: B64.encode(salt),
+            vault_key: wrapped.clone(),
+        })
+        .await?;
+    Ok(SyncLocal {
+        // Sin contraseña de cuenta: la sesión solo se renueva pasando por el proveedor.
+        auth: Zeroizing::new(String::new()),
+        token: Some(Zeroizing::new(linked.token)),
+        oauth: Some(OAuthAccount {
+            provider: sign_in.provider.id,
+            provider_name: sign_in.provider.name,
+            wrapped_vault_key: wrapped,
+        }),
         ..local.clone()
     })
 }

@@ -334,16 +334,19 @@ impl Api {
         }
     }
 
-    /// Dirección que se abre en el navegador para iniciar sesión con `provider`.
+    /// Dirección que se abre en el navegador para iniciar sesión con `provider`; con
+    /// `link`, para pasarle la cuenta con contraseña de ese correo.
     pub fn oauth_start_url(
         &self,
         provider: &str,
         port: u16,
         challenge: &str,
         state: &str,
+        link: bool,
     ) -> String {
+        let link = if link { "&link=true" } else { "" };
         format!(
-            "{}/v1/auth/{}/start?port={port}&challenge={challenge}&state={state}",
+            "{}/v1/auth/{}/start?port={port}&challenge={challenge}&state={state}{link}",
             self.base,
             segment(provider)
         )
@@ -358,6 +361,14 @@ impl Api {
         request: &OAuthRegisterRequest,
     ) -> Result<OAuthRegisterResponse, SyncError> {
         self.send(self.post("/v1/accounts/oauth", request)).await
+    }
+
+    pub async fn oauth_link(
+        &self,
+        request: &OAuthLinkRequest,
+    ) -> Result<OAuthRegisterResponse, SyncError> {
+        self.send(self.post("/v1/accounts/oauth/link", request))
+            .await
     }
 
     pub async fn update_vault_key(

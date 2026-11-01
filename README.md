@@ -463,8 +463,8 @@ caduca (a los 30 días), Ajustes muestra **Iniciar sesión con Google** para ren
 Para que **todas** las personas entren con el proveedor, añade `TUNEL_SOLO_PROVEEDORES=1` al
 `.env`. Túnel oculta entonces el correo y la contraseña en Ajustes (desde la 0.6.2), y el
 servidor rechaza crear o abrir cuentas con contraseña. Las cuentas con contraseña que ya
-existían dejan de funcionar: sus personas tienen que volver a entrar con el proveedor, y si el
-correo es el mismo, hay que borrar antes esa cuenta del servidor.
+existían ya no pueden sincronizar, pero sí pasarse al proveedor sin perder nada, como se explica
+más abajo.
 
 - **Quién puede crear cuenta:** con Google o un emisor genérico hace falta
   `TUNEL_DOMINIOS_PERMITIDOS`; si no, cualquiera con una cuenta de Google podría crear una.
@@ -475,7 +475,13 @@ correo es el mismo, hay que borrar antes esa cuenta del servidor.
   en su proveedor. Si su correo cambia sigue siendo suya, y si el correo pasa a otra persona
   (o lo afirma otro proveedor) esa persona no entra en ella.
 - **Cuentas con contraseña:** un correo que ya tiene cuenta con contraseña sigue entrando con
-  ella; el proveedor no la sustituye.
+  ella; el proveedor no la sustituye solo. Para pasarla a un proveedor (Túnel 0.7.0 o
+  posterior), en un equipo unido a ella abre **Ajustes → Cuenta y sincronización** y pulsa
+  **Pasar mi cuenta a Google** (o al proveedor que sea). Hay que iniciar sesión con el
+  proveedor y escribir la contraseña maestra. Se conservan los datos, los Teams y el par de
+  claves; la contraseña de la cuenta deja de servir y se cierran sus sesiones, así que en
+  los demás equipos hay que desvincular y volver a entrar con el proveedor. Funciona también
+  con `TUNEL_SOLO_PROVEEDORES=1`.
 
 ### Administrar las cuentas
 

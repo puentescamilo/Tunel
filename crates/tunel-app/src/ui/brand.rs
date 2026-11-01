@@ -62,6 +62,15 @@ pub fn sign_in_label(id: &str, name: &str) -> String {
     }
 }
 
+/// Texto del botón para pasar una cuenta con contraseña al proveedor `id`.
+pub fn link_label(id: &str, name: &str) -> String {
+    match brand(id) {
+        Brand::Google => "Pasar mi cuenta a Google".into(),
+        Brand::Microsoft => "Pasar mi cuenta a Microsoft".into(),
+        Brand::Other => format!("Pasar mi cuenta a {name}"),
+    }
+}
+
 /// Puntos de un arco de la circunferencia de centro `center` y radio `radius`, entre dos
 /// ángulos en grados medidos en el sentido de las agujas del reloj desde la derecha.
 fn arc(center: Pos2, radius: f32, from: f32, to: f32) -> Vec<Pos2> {
@@ -122,6 +131,11 @@ fn microsoft_logo(painter: &egui::Painter, rect: Rect) {
 /// Botón para iniciar sesión con el proveedor `id`, como los que muestran Google y
 /// Microsoft en sus guías de marca.
 pub fn sign_in_button(ui: &mut Ui, id: &str, name: &str) -> Response {
+    button(ui, id, &sign_in_label(id, name))
+}
+
+/// Botón con el logotipo y los colores del proveedor `id` y el texto `label`.
+pub fn button(ui: &mut Ui, id: &str, label: &str) -> Response {
     let brand = brand(id);
     let look = match brand {
         Brand::Google => GOOGLE,
@@ -130,7 +144,7 @@ pub fn sign_in_button(ui: &mut Ui, id: &str, name: &str) -> Response {
     };
     // El ancho se ajusta al texto, para que quepan varios botones en una línea.
     let galley = ui.painter().layout_no_wrap(
-        sign_in_label(id, name),
+        label.to_string(),
         FontId::proportional(FONT_SIZE),
         look.text,
     );

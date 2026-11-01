@@ -351,6 +351,58 @@ fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
             crate::sync::unlink(app);
         }
     });
+    move_to_provider(app, ui);
+}
+
+/// Una cuenta con contraseña puede pasar a uno de los proveedores del servidor, sin perder
+/// sus datos, sus Teams ni sus equipos.
+fn move_to_provider(app: &mut TunelApp, ui: &mut egui::Ui) {
+    let Some(server) = app
+        .sync
+        .local()
+        .filter(|l| l.oauth.is_none())
+        .map(|l| l.server.clone())
+    else {
+        return;
+    };
+    crate::sync::oauth::refresh_providers_for(app, &server);
+    let providers = app.sync.oauth.providers_for(&server).to_vec();
+    if providers.is_empty() {
+        return;
+    }
+    let p = ui::pal(ui);
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(6.0);
+    if app.sync.oauth.purpose == crate::sync::oauth::Purpose::Link && oauth_flow(app, ui) {
+        return;
+    }
+    ui.label(RichText::new("Entrar con la cuenta de tu organización").strong());
+    ui.label(
+        RichText::new(
+            "Conservas tus datos, tus Teams y este equipo. Desde entonces entrarás con el \
+             proveedor y la sincronización se cifrará con tu contraseña maestra de Túnel. La \
+             contraseña de la cuenta deja de servir: en tus otros equipos tendrás que volver a \
+             iniciar sesión con el proveedor.",
+        )
+        .size(12.0)
+        .color(p.muted),
+    );
+    ui.add_space(6.0);
+    let busy = app.sync.busy();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        for provider in providers {
+            let label = ui::brand::link_label(&provider.id, &provider.name);
+            if ui
+                .add_enabled_ui(!busy, |ui| ui::brand::button(ui, &provider.id, &label))
+                .inner
+                .clicked()
+            {
+                crate::sync::oauth::start_link(app, provider);
+            }
+        }
+    });
 }
 
 fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
@@ -487,6 +539,8 @@ fn oauth_flow(app: &mut TunelApp, ui: &mut egui::Ui) -> bool {
         return false;
     };
     let new = sign_in.is_new();
+    let link = sign_in.is_link();
+    let provider = sign_in.provider_name().to_string();
     ui.label(
         RichText::new(format!(
             "Has entrado como {} con {}.",
@@ -495,11 +549,18 @@ fn oauth_flow(app: &mut TunelApp, ui: &mut egui::Ui) -> bool {
         ))
         .strong(),
     );
-    let help = if new {
+    let help = if link {
+        format!(
+            "Escribe tu contraseña maestra de Túnel: desde ahora cifra la sincronización. Tu \
+             cuenta pasará a entrar con {provider}."
+        )
+    } else if new {
         "No hay cuenta con ese correo: se creará. La sincronización se cifra con tu contraseña \
          maestra de Túnel; usa la misma en todos tus equipos."
+            .into()
     } else {
         "Escribe tu contraseña maestra: la misma con la que abres Túnel en tus otros equipos."
+            .into()
     };
     ui.label(RichText::new(help).color(p.muted));
     ui.add_space(6.0);
@@ -510,13 +571,19 @@ fn oauth_flow(app: &mut TunelApp, ui: &mut egui::Ui) -> bool {
             .hint_text("Contraseña maestra de Túnel")
             .desired_width(320.0),
     );
-    if new {
+    if new || link {
         crate::lock::password_rules(ui, master);
     }
     let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let label = if new { "Crear la cuenta" } else { "Continuar" };
+        let label = if link {
+            "Pasar la cuenta"
+        } else if new {
+            "Crear la cuenta"
+        } else {
+            "Continuar"
+        };
         if ui::primary_button(ui, label).clicked() || enter {
             crate::sync::oauth::finish(app);
         }

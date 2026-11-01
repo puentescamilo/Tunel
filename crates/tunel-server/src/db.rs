@@ -508,6 +508,59 @@ impl Db {
         .await
     }
 
+    /// Pasa la cuenta con contraseña `account`, de correo `email`, al proveedor: desde ahora
+    /// solo se entra con él, la clave de bóveda va envuelta con la de la contraseña maestra
+    /// y se cierran todas sus sesiones. `NotFound` si ya no es una cuenta con contraseña
+    /// con ese correo; `AccountExists` si esa persona del proveedor ya tiene otra cuenta.
+    pub async fn link_oauth_account(
+        &self,
+        account: i64,
+        email: String,
+        link: NewOAuthAccount,
+    ) -> Result<(), DbError> {
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE accounts
+                 SET previous_vault_key = vault_key, kdf = ?3, salt = ?4, vault_key = ?5,
+                     auth_salt = ?6, auth_hash = ?7, auth_kdf = ?8,
+                     oauth_provider = ?9, oauth_subject = ?10
+                 WHERE id = ?1 AND email = ?2 AND oauth_provider IS NULL
+                   AND deleted_at IS NULL",
+                params![
+                    account,
+                    email,
+                    serde_json::to_string(&link.kdf)?,
+                    link.salt,
+                    serde_json::to_string(&link.vault_key)?,
+                    link.unusable_auth.salt,
+                    link.unusable_auth.hash,
+                    serde_json::to_string(&link.unusable_auth.kdf)?,
+                    link.provider,
+                    link.subject,
+                ],
+            );
+            match updated {
+                Ok(0) => return Err(DbError::NotFound),
+                Ok(_) => {}
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    return Err(DbError::AccountExists);
+                }
+                Err(e) => return Err(e.into()),
+            }
+            // Las sesiones abiertas con la contraseña no siguen valiendo.
+            tx.execute(
+                "DELETE FROM sessions WHERE account_id = ?1",
+                params![account],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Cambia la clave de bóveda envuelta de una cuenta de proveedor de identidad, solo si
     /// la actual es `previous`, y guarda la anterior. Las cuentas de contraseña no: su
     /// clave de acceso sale de la misma contraseña y dejaría de servir.

@@ -176,8 +176,18 @@ impl Setup {
     /// Recorre el navegador: Túnel → servidor → proveedor → servidor. Devuelve los
     /// parámetros con los que el servidor manda volver a Túnel.
     async fn browser(&self, client: &Client, claims: Value) -> HashMap<String, String> {
+        self.browser_with(client, claims, false).await
+    }
+
+    /// Como `browser`; con `link`, para pasar al proveedor una cuenta con contraseña.
+    async fn browser_with(
+        &self,
+        client: &Client,
+        claims: Value,
+        link: bool,
+    ) -> HashMap<String, String> {
         let uri = format!(
-            "/v1/auth/google/start?port=41234&challenge={}&state={}",
+            "/v1/auth/google/start?port=41234&challenge={}&state={}&link={link}",
             client.challenge, client.state
         );
         let (status, location, _) = call(&self.app, "GET", &uri, None, None).await;
@@ -240,8 +250,12 @@ impl Setup {
 
     /// Inicia sesión por completo como `claims` y devuelve el resultado.
     async fn login(&self, claims: Value) -> OAuthLogin {
+        self.login_with(claims, false).await
+    }
+
+    async fn login_with(&self, claims: Value, link: bool) -> OAuthLogin {
         let client = Client::new();
-        let back = self.browser(&client, claims).await;
+        let back = self.browser_with(&client, claims, link).await;
         let code = back.get("code").unwrap_or_else(|| panic!("{back:?}"));
         let (status, body) = self.redeem(code, &client.verifier).await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -569,4 +583,79 @@ async fn with_providers_only_passwords_are_refused_and_old_sessions_stop_working
         .await;
     let (status, _, _) = call(&s.app, "GET", "/v1/records", Some(&token), None).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_password_account_moves_to_the_provider_with_its_password() {
+    let s = setup(&["empresa.com"], false).await;
+    let old_token = password_account(&s, "luis@empresa.com").await;
+    let keys = AccountKeys::derive_for_tests(b"clave", SALT);
+    let (_, wrapped) = wrapped_key("Contraseña-Maestra-1");
+    let link_body = |ticket: &str, auth: &str| {
+        serde_json::to_value(OAuthLinkRequest {
+            ticket: ticket.into(),
+            auth: auth.into(),
+            kdf: KdfParams::RECOMMENDED,
+            salt: B64.encode(SALT),
+            vault_key: wrapped.clone(),
+        })
+        .unwrap()
+    };
+    let link_ticket = || async {
+        let OAuthLogin::Link { email, ticket } = s
+            .login_with(person("luis-1", "luis@empresa.com"), true)
+            .await
+        else {
+            panic!("se esperaba el permiso para pasar la cuenta");
+        };
+        assert_eq!(email, "luis@empresa.com");
+        ticket
+    };
+
+    // El permiso para pasar la cuenta no sirve para crear otra.
+    let ticket = link_ticket().await;
+    assert_eq!(
+        register(&s, &ticket, &wrapped).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    // Ni un permiso de crear cuenta sirve para pasar una.
+    let OAuthLogin::New {
+        ticket: new_ticket, ..
+    } = s.login(person("eva-1", "eva@empresa.com")).await
+    else {
+        panic!("se esperaba una cuenta nueva");
+    };
+    let body = link_body(&new_ticket, keys.auth_token().as_str());
+    let (status, _, _) = call(&s.app, "POST", "/v1/accounts/oauth/link", None, Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Con una contraseña equivocada no se pasa, y el permiso se gasta.
+    let ticket = link_ticket().await;
+    let wrong = AccountKeys::derive_for_tests(b"otra", SALT);
+    let body = link_body(&ticket, wrong.auth_token().as_str());
+    let (status, _, _) = call(&s.app, "POST", "/v1/accounts/oauth/link", None, Some(body)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let body = link_body(&ticket, keys.auth_token().as_str());
+    let (status, _, _) = call(&s.app, "POST", "/v1/accounts/oauth/link", None, Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let ticket = link_ticket().await;
+    let body = link_body(&ticket, keys.auth_token().as_str());
+    let (status, _, body) = call(&s.app, "POST", "/v1/accounts/oauth/link", None, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let token = body["token"].as_str().unwrap().to_string();
+    let (status, _, _) = call(&s.app, "GET", "/v1/records", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    // Las sesiones de la contraseña se cerraron y la contraseña ya no abre la cuenta.
+    let (status, _, _) = call(&s.app, "GET", "/v1/records", Some(&old_token), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let login = json!({"email": "luis@empresa.com", "auth": keys.auth_token().as_str()});
+    let (status, _, _) = call(&s.app, "POST", "/v1/sessions", None, Some(login)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // Ahora es una cuenta del proveedor.
+    let OAuthLogin::Existing { email, .. } = s.login(person("luis-1", "luis@empresa.com")).await
+    else {
+        panic!("se esperaba la cuenta existente");
+    };
+    assert_eq!(email, "luis@empresa.com");
 }
