@@ -99,6 +99,7 @@ enum TabAction {
     Reconnect(usize),
     Duplicate(usize),
     Rename(usize),
+    Broadcast(usize),
 }
 
 /// Contenido de una pestaña.
@@ -107,6 +108,8 @@ struct TabSpec<'a> {
     title: &'a str,
     /// `Some` si está seleccionada.
     selected: Option<SelectedLook>,
+    /// Marcada para escribir en varias terminales: el icono se resalta.
+    marked: bool,
     dot: Option<Color32>,
     closable: bool,
 }
@@ -155,7 +158,7 @@ fn tab(ui: &mut egui::Ui, spec: TabSpec) -> (egui::Response, bool) {
         Align2::LEFT_CENTER,
         spec.icon,
         ui::icon_font(15.0),
-        fg,
+        if spec.marked { p.warning } else { fg },
     );
     x += 22.0;
     if let Some(color) = spec.dot {
@@ -288,6 +291,16 @@ fn context_menu(
         item(ui, icons::REFRESH, "Reconectar", TabAction::Reconnect(i));
         item(ui, icons::COPY, "Duplicar", TabAction::Duplicate(i));
     }
+    if let Tab::Terminal(session) = &app.tabs[i]
+        && session.can_broadcast()
+    {
+        let label = if session.broadcast {
+            "Dejar de escribir aquí a la vez"
+        } else {
+            "Escribir en varias a la vez"
+        };
+        item(ui, icons::KEYBOARD, label, TabAction::Broadcast(i));
+    }
     ui.separator();
     share_menu(ui, &app.tabs[i], teams, action);
     let label = if app.split == Some(i) {
@@ -335,6 +348,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                             icon: icons::SERVERS,
                             title: "Bóveda",
                             selected: app.active.is_none().then(|| selected_look(p.bg, border)),
+                            marked: false,
                             dot: None,
                             closable: false,
                         };
@@ -348,6 +362,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                                 title: t.title(),
                                 selected: selected
                                     .then(|| selected_look(tab_background(app, &p, t), border)),
+                                marked: matches!(t, Tab::Terminal(s) if s.broadcast),
                                 dot: Some(state_color(&p, t.state())),
                                 closable: true,
                             };
@@ -380,6 +395,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
         Some(TabAction::StopSharing(tab)) => crate::live::stop_sharing(app, tab),
         Some(TabAction::Reconnect(i)) => app.reconnect_tab(i),
         Some(TabAction::Duplicate(i)) => app.duplicate_tab(i),
+        Some(TabAction::Broadcast(i)) => crate::broadcast::toggle(app, i),
         Some(TabAction::Rename(i)) => {
             app.tab_rename = Some(TabRename {
                 index: i,

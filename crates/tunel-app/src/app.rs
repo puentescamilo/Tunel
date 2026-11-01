@@ -116,6 +116,7 @@ impl Tab {
 
     pub fn icon(&self) -> &'static str {
         match self {
+            Tab::Terminal(t) if t.broadcast => crate::ui::icons::KEYBOARD,
             Tab::Terminal(t) if t.live.is_some() => crate::ui::icons::BROADCAST,
             Tab::Terminal(_) => crate::ui::icons::TERMINAL,
             Tab::Sftp(_) => crate::ui::icons::FOLDER_OPEN,
@@ -234,6 +235,14 @@ impl TunelApp {
         if let Ok(script) = std::env::var("TUNEL_DEV_SNIPPET") {
             let snippet = tunel_core::Snippet::new("Reiniciar un servicio", &script);
             views::snippets::run(self, &snippet, false);
+        }
+        // `TUNEL_DEV_BROADCAST=1` abre dos terminales locales marcadas para escribir a la vez.
+        if std::env::var("TUNEL_DEV_BROADCAST").as_deref() == Ok("1") {
+            self.open_local();
+            self.open_local();
+            for i in 0..self.tabs.len() {
+                crate::broadcast::toggle(self, i);
+            }
         }
         if std::env::var("TUNEL_DEV_LOCAL").as_deref() == Ok("1") {
             self.open_local();
@@ -661,9 +670,18 @@ impl TunelApp {
         let mut reconnect = false;
         let mut live_action = None;
         let mut tab_key = 0;
+        let marked: Vec<String> = crate::broadcast::members(self)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        let mut stop_broadcast = false;
+        let mut typed = Vec::new();
         match &mut self.tabs[index] {
             Tab::Terminal(session) => {
                 tab_key = session.key;
+                if session.broadcast && session.can_broadcast() {
+                    stop_broadcast = crate::broadcast::banner(ui, &marked);
+                }
                 if session.live.is_some() {
                     live_action = views::live::bar(ui, session);
                 }
@@ -678,12 +696,19 @@ impl TunelApp {
                     }
                 }
                 crate::terminal_view::show(ui, session, &theme, &settings);
+                typed = session.take_typed();
             }
             Tab::Sftp(_) => views::sftp::show(self, ui, index),
             // Se conecta antes de dibujarse (ver `workspace::tick`).
             Tab::Pending(_) => {
                 ui.centered_and_justified(|ui| ui.spinner());
             }
+        }
+        if !typed.is_empty() {
+            crate::broadcast::forward(&self.tabs, tab_key, &typed);
+        }
+        if stop_broadcast {
+            crate::broadcast::stop(self);
         }
         match live_action {
             Some(views::live::BarAction::Grant(conn)) => crate::live::grant(self, tab_key, conn),

@@ -39,6 +39,10 @@ pub struct TerminalSession {
     pub live: Option<Live>,
     /// Avisos para la interfaz (llegadas, control, fin de la sesión compartida).
     notices: Vec<String>,
+    /// Marcada para escribir en varias terminales a la vez.
+    pub broadcast: bool,
+    /// Lo que el usuario tecleó en este fotograma, para repetirlo en las demás marcadas.
+    typed: Vec<u8>,
 }
 
 impl TerminalSession {
@@ -63,6 +67,8 @@ impl TerminalSession {
             pending_clipboard: None,
             live: None,
             notices: Vec::new(),
+            broadcast: false,
+            typed: Vec::new(),
         }
     }
 
@@ -227,6 +233,25 @@ impl TerminalSession {
     /// Responde a la petición pendiente; devuelve el texto solo si el usuario lo permite.
     pub fn answer_clipboard(&mut self, allow: bool) -> Option<String> {
         self.pending_clipboard.take().filter(|_| allow)
+    }
+
+    /// Envía lo que tecleó el usuario; si la pestaña está marcada, también lo guarda
+    /// para repetirlo en las demás marcadas (ver [`Self::take_typed`]).
+    pub fn send_typed(&mut self, bytes: Vec<u8>) {
+        if self.broadcast {
+            self.typed.extend_from_slice(&bytes);
+        }
+        self.send(bytes);
+    }
+
+    /// Lo tecleado desde la última vez, para repetirlo en las demás terminales marcadas.
+    pub fn take_typed(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.typed)
+    }
+
+    /// Puede escribirse a la vez que otras: una terminal propia y viva.
+    pub fn can_broadcast(&self) -> bool {
+        self.is_alive() && !self.is_watching()
     }
 
     pub fn send(&self, bytes: Vec<u8>) {
