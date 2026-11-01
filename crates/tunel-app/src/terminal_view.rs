@@ -127,7 +127,7 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) {
     if !output.is_empty() {
         session.emulator.scroll_to_bottom();
         session.emulator.clear_selection();
-        session.send(output);
+        session.send_typed(output);
     }
 }
 
