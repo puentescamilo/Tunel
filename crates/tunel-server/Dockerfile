@@ -8,6 +8,10 @@ COPY . .
 RUN cargo build --release --locked -p tunel-server
 
 FROM debian:bookworm-slim
+# Certificados raíz: sin ellos el servidor no puede hablar por HTTPS con Google o Microsoft.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --home-dir /datos --shell /usr/sbin/nologin tunel \
     && mkdir /datos && chown tunel /datos
 COPY --from=build /src/target/release/tunel-server /usr/local/bin/tunel-server
