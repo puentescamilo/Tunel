@@ -19,6 +19,8 @@ use tunel_core::sync::{
 };
 use tunel_core::vault::VaultData;
 use tunel_server::admin::{AdminError, Command, run};
+use tunel_server::auth::StoredHash;
+use tunel_server::db::NewAccount;
 use tunel_server::{AppState, Config, Db, router};
 use uuid::Uuid;
 
@@ -684,6 +686,39 @@ async fn after_removing_a_member_nothing_is_written_until_the_key_is_renewed() {
     );
 }
 
+/// `inviter` crea un equipo nuevo e invita a `invitee`; devuelve la respuesta a la
+/// invitación.
+async fn invite_to_new_team(
+    app: &Router,
+    inviter: &User,
+    invitee: &User,
+    email: &str,
+) -> StatusCode {
+    let team = Uuid::new_v4().to_string();
+    let key = VaultKey::generate();
+    let context = TeamKeyContext {
+        team: &team,
+        epoch: 0,
+    };
+    let body = serde_json::to_value(CreateTeamRequest {
+        id: team.clone(),
+        name: seal_team_name(&key, &team, "x").unwrap(),
+        key: wrap_team_key(&key, context, &inviter.keys, &inviter.public()).unwrap(),
+    })
+    .unwrap();
+    let (status, _) = send(app, "POST", "/v1/teams", inviter.token(), Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let body = serde_json::to_value(AddMemberRequest {
+        email: email.into(),
+        role: TeamRole::Member,
+        epoch: 0,
+        key: wrap_team_key(&key, context, &inviter.keys, &invitee.public()).unwrap(),
+    })
+    .unwrap();
+    let uri = format!("/v1/teams/{team}/members");
+    send(app, "POST", &uri, inviter.token(), Some(body)).await.0
+}
+
 #[tokio::test]
 async fn invitations_cannot_fill_up_someone_elses_account() {
     let app = app().await;
@@ -692,42 +727,7 @@ async fn invitations_cannot_fill_up_someone_elses_account() {
     // Aunque le lleguen invitaciones de sobra, bob puede seguir creando equipos.
     for i in 0..config.max_pending_invitations + 1 {
         let spammer = user(&app, &format!("spam{i}@ejemplo.com")).await;
-        let team = Uuid::new_v4().to_string();
-        let key = VaultKey::generate();
-        let body = serde_json::to_value(CreateTeamRequest {
-            id: team.clone(),
-            name: seal_team_name(&key, &team, "x").unwrap(),
-            key: wrap_team_key(
-                &key,
-                TeamKeyContext {
-                    team: &team,
-                    epoch: 0,
-                },
-                &spammer.keys,
-                &spammer.public(),
-            )
-            .unwrap(),
-        })
-        .unwrap();
-        send(&app, "POST", "/v1/teams", spammer.token(), Some(body)).await;
-        let body = serde_json::to_value(AddMemberRequest {
-            email: "bob@ejemplo.com".into(),
-            role: TeamRole::Member,
-            epoch: 0,
-            key: wrap_team_key(
-                &key,
-                TeamKeyContext {
-                    team: &team,
-                    epoch: 0,
-                },
-                &spammer.keys,
-                &bob.public(),
-            )
-            .unwrap(),
-        })
-        .unwrap();
-        let uri = format!("/v1/teams/{team}/members");
-        let (status, _) = send(&app, "POST", &uri, spammer.token(), Some(body)).await;
+        let status = invite_to_new_team(&app, &spammer, &bob, "bob@ejemplo.com").await;
         let expected = if i < config.max_pending_invitations {
             StatusCode::CREATED
         } else {
@@ -736,6 +736,28 @@ async fn invitations_cannot_fill_up_someone_elses_account() {
         assert_eq!(status, expected, "invitación {i}");
     }
     create_team(&app, &bob, "Propio").await;
+}
+
+#[tokio::test]
+async fn one_account_cannot_use_up_someone_elses_invitations() {
+    let app = app().await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let mallory = user(&app, "mallory@ejemplo.com").await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let limit = Config::default().max_pending_from_inviter;
+    for i in 0..limit {
+        let status = invite_to_new_team(&app, &mallory, &bob, "bob@ejemplo.com").await;
+        assert_eq!(status, StatusCode::CREATED, "invitación {i}");
+    }
+    assert_eq!(
+        invite_to_new_team(&app, &mallory, &bob, "bob@ejemplo.com").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        invite_to_new_team(&app, &ana, &bob, "bob@ejemplo.com").await,
+        StatusCode::CREATED,
+        "las invitaciones de otras cuentas siguen llegando"
+    );
 }
 
 const NOW: i64 = 1_793_404_800;
@@ -763,9 +785,29 @@ async fn deleting_the_only_admin_needs_a_new_one_and_the_others_keep_their_key()
     join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
     join(&app, &ana, &carol, "carol@ejemplo.com", &key).await;
 
+    // Una cuenta con el correo que tendría la lápida de Ana, registrada antes de que el
+    // servidor rechazara los correos `.invalid`, no impide borrarla.
+    db.insert_account(
+        NewAccount {
+            email: "borrada-1@cuenta.invalid".into(),
+            kdf: KdfParams::RECOMMENDED,
+            salt: B64.encode(SALT),
+            auth: StoredHash {
+                salt: vec![0; 16],
+                hash: vec![0; 32],
+                kdf: KdfParams::FAST_FOR_TESTS,
+            },
+            vault_key: VaultKey::generate().wrap(&account("x")).unwrap(),
+            created_at: NOW,
+        },
+        false,
+    )
+    .await
+    .unwrap();
+
     let listed = admin(&db, Command::Accounts).await.unwrap();
     assert!(
-        listed.contains("ana@ejemplo.com") && listed.contains("3 cuentas"),
+        listed.contains("ana@ejemplo.com") && listed.contains("4 cuentas"),
         "{listed}"
     );
     let alone = admin(&db, delete("ana@ejemplo.com", None, true)).await;
@@ -806,7 +848,10 @@ async fn deleting_the_only_admin_needs_a_new_one_and_the_others_keep_their_key()
     );
     let listed = admin(&db, Command::Accounts).await.unwrap();
     assert!(!listed.contains("ana@"), "{listed}");
-    assert!(!listed.contains("cuenta.invalid"), "{listed}");
+    assert!(
+        !listed.contains("borrada-1-"),
+        "la lápida no se lista: {listed}"
+    );
 
     // La lápida no sirve para entrar, aunque alguien adivine su correo.
     let tombstone = json!({
@@ -814,7 +859,7 @@ async fn deleting_the_only_admin_needs_a_new_one_and_the_others_keep_their_key()
         "auth": account("ana@ejemplo.com").auth_token().as_str(),
     });
     let (status, _) = send(&app, "POST", "/v1/sessions", None, Some(tombstone)).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!status.is_success(), "{status}");
 
     // Bob sigue abriendo la clave que envolvió Ana: su clave pública se conserva.
     let summary = teams(&app, &bob).await.remove(0);

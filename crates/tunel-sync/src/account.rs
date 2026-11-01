@@ -66,7 +66,12 @@ pub async fn create_account(
     })
     .await?;
     let auth = keys.auth_token();
-    let session = api.login(&email, &auth).await?;
+    // El servidor responde igual si el correo ya tenía cuenta, para no revelarlo; en ese
+    // caso la cuenta no es la nueva y su contraseña es otra.
+    let session = match api.login(&email, &auth).await {
+        Err(SyncError::Unauthorized) => return Err(SyncError::AccountExists),
+        other => other?,
+    };
     let keypair = keypair::try_fetch_or_create(&api, &session.token, &vault_key).await;
     let device = Uuid::new_v4();
     Ok(SyncLocal {

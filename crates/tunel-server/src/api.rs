@@ -1,8 +1,9 @@
 //! Rutas HTTP del servidor de sincronización.
 
 use crate::auth::{self, AuthHasher, HashError, LoginLimiter, RateBucket};
-use crate::db::{Db, DbError, NewAccount, Quota, Rotation, Space};
+use crate::db::{Db, DbError, InviteLimits, NewAccount, Quota, Rotation, Space};
 use crate::live::{self, LiveLimits, LiveRegistry};
+use crate::pulls::PullLimiter;
 use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
@@ -50,11 +51,17 @@ pub struct Config {
     pub max_tracked_logins: usize,
     pub request_timeout: Duration,
     pub max_concurrent_requests: usize,
+    /// Descargas de registros a la vez, entre todas las cuentas y por cada una. Cada una
+    /// ocupa como mucho [`PULL_PAGE_BYTES`] más un registro hasta que el cliente la lee.
+    pub concurrent_pulls: usize,
+    pub pulls_per_account: usize,
     /// Equipos de los que puede ser miembro una cuenta.
     pub max_teams_per_account: u64,
     pub max_team_members: u64,
     /// Invitaciones sin responder que puede acumular una cuenta.
     pub max_pending_invitations: u64,
+    /// De esas, las que puede tener de una misma cuenta que invita.
+    pub max_pending_from_inviter: u64,
     /// Límites de cada equipo. Más pequeños que los de una cuenta: al renovar la clave
     /// todo el equipo se sube en una sola petición de como mucho `MAX_ROTATE_BODY`.
     pub team_quota: Quota,
@@ -93,9 +100,12 @@ impl Default for Config {
             max_tracked_logins: 10_000,
             request_timeout: Duration::from_secs(30),
             max_concurrent_requests: 256,
+            concurrent_pulls: 32,
+            pulls_per_account: 4,
             max_teams_per_account: 20,
             max_team_members: 200,
-            max_pending_invitations: 20,
+            max_pending_invitations: 100,
+            max_pending_from_inviter: 3,
             team_quota: Quota {
                 records: 5_000,
                 bytes: 32 * 1024 * 1024,
@@ -125,6 +135,9 @@ const MAX_MANIFEST_CIPHERTEXT: usize = 8 * 1024 * 1024;
 /// La clave de bóveda envuelta ocupa unos 64 bytes en base64; se deja margen.
 pub(crate) const MAX_VAULT_KEY_CIPHERTEXT: usize = 256;
 const MAX_EMAIL_LEN: usize = 254;
+/// Bytes de texto cifrado que caben en una página de registros; la página lleva siempre
+/// al menos uno.
+pub const PULL_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Cada cuánto se borran las sesiones caducadas.
 const SESSION_SWEEP: Duration = Duration::from_secs(60 * 60);
 
@@ -135,6 +148,7 @@ pub struct AppState {
     pub(crate) limiter: LoginLimiter,
     unauthenticated: RateBucket,
     rotations: tokio::sync::Semaphore,
+    pulls: PullLimiter,
     pub(crate) live: LiveRegistry,
     pub(crate) oauth: Option<crate::oauth::OAuth>,
     secret: [u8; 32],
@@ -159,6 +173,7 @@ impl AppState {
                 config.unauthenticated_burst,
             ),
             rotations: tokio::sync::Semaphore::new(config.concurrent_rotations),
+            pulls: PullLimiter::new(config.concurrent_pulls, config.pulls_per_account),
             live: LiveRegistry::default(),
             oauth: config
                 .oauth
@@ -356,13 +371,17 @@ pub(crate) fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// Correo en minúsculas y sin espacios alrededor. Los del dominio reservado `.invalid`
+/// (RFC 2606) no valen: son los de las cuentas borradas (ver `admin`).
 pub(crate) fn normalize_email(email: &str) -> ApiResult<String> {
     let email = email.trim().to_lowercase();
     let valid = email.len() <= MAX_EMAIL_LEN
         && email.matches('@').count() == 1
-        && email
-            .split_once('@')
-            .is_some_and(|(user, domain)| !user.is_empty() && !domain.is_empty())
+        && email.split_once('@').is_some_and(|(user, domain)| {
+            !user.is_empty()
+                && !domain.is_empty()
+                && domain.trim_end_matches('.').rsplit('.').next() != Some("invalid")
+        })
         && !email.chars().any(char::is_whitespace);
     if valid {
         Ok(email)
@@ -513,7 +532,7 @@ async fn register(
         auth::decode_auth(&request.auth).ok_or_else(|| ApiError::bad_request("clave no válida"))?;
     check_blob(&request.vault_key, MAX_VAULT_KEY_CIPHERTEXT)?;
     let auth = state.hasher.hash_new(&auth).await?;
-    state
+    let inserted = state
         .db
         .insert_account(
             NewAccount {
@@ -526,8 +545,14 @@ async fn register(
             },
             !state.config.open_registration && allowed.is_empty(),
         )
-        .await?;
-    Ok(StatusCode::CREATED)
+        .await;
+    match inserted {
+        // Igual que si se hubiera creado: el prelogin no revela qué correos tienen
+        // cuenta, y el registro tampoco. La cuenta que ya existía no cambia, y quien la
+        // registró de nuevo no puede entrar con su contraseña.
+        Ok(_) | Err(DbError::AccountExists) => Ok(StatusCode::CREATED),
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn login(
@@ -605,23 +630,42 @@ struct PullQuery {
     since: u64,
 }
 
-async fn pull_space(state: &AppState, space: Space, since: u64) -> ApiResult<Json<PullResponse>> {
-    let page = state.db.pull(space, since, PULL_PAGE_SIZE).await?;
-    Ok(Json(PullResponse {
+/// Una página de registros de `space` para la cuenta de `session`. Si esa cuenta, o el
+/// servidor, ya tienen todas las descargas que admiten, responde que está ocupado y el
+/// cliente reintenta.
+async fn pull_space(
+    state: &AppState,
+    session: &Session,
+    space: Space,
+    since: u64,
+) -> ApiResult<Response> {
+    let permit = state.pulls.try_begin(session.account).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "servidor ocupado; inténtalo en un momento",
+        )
+    })?;
+    let page = state
+        .db
+        .pull(space, since, PULL_PAGE_SIZE, PULL_PAGE_BYTES)
+        .await?;
+    let response = PullResponse {
         records: page.records,
         cursor: page.cursor,
         more: page.more,
         manifest: page.manifest,
         epoch: page.epoch,
-    }))
+    };
+    crate::pulls::json_holding(&response, permit).map_err(|e| anyhow::Error::from(e).into())
 }
 
 async fn pull(
     State(state): State<Arc<AppState>>,
     session: Session,
     Query(query): Query<PullQuery>,
-) -> ApiResult<Json<PullResponse>> {
-    pull_space(&state, Space::Account(session.account), query.since).await
+) -> ApiResult<Response> {
+    let space = Space::Account(session.account);
+    pull_space(&state, &session, space, query.since).await
 }
 
 /// Comprueba los registros de una subida: identificadores válidos y sin repetir.
@@ -841,8 +885,11 @@ async fn add_member(
             request.epoch,
             request.key,
             session.account,
-            state.config.max_team_members,
-            state.config.max_pending_invitations,
+            InviteLimits {
+                members: state.config.max_team_members,
+                pending: state.config.max_pending_invitations,
+                pending_from_inviter: state.config.max_pending_from_inviter,
+            },
         )
         .await?;
     Ok(StatusCode::CREATED)
@@ -887,9 +934,9 @@ async fn team_pull(
     session: Session,
     Path(team): Path<String>,
     Query(query): Query<PullQuery>,
-) -> ApiResult<Json<PullResponse>> {
+) -> ApiResult<Response> {
     team_role(&state, &session, &team).await?;
-    pull_space(&state, Space::Team(team), query.since).await
+    pull_space(&state, &session, Space::Team(team), query.since).await
 }
 
 async fn team_push(
@@ -954,6 +1001,23 @@ async fn rotate_team(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserved_invalid_emails_cannot_be_used() {
+        assert_eq!(
+            normalize_email(" Ana@Ejemplo.com ").unwrap(),
+            "ana@ejemplo.com"
+        );
+        for email in [
+            "borrada-1@cuenta.invalid",
+            "BORRADA-1@Cuenta.INVALID",
+            "x@cuenta.invalid.",
+            "x@invalid",
+        ] {
+            assert!(normalize_email(email).is_err(), "{email}");
+        }
+        assert!(normalize_email("x@invalid.com").is_ok());
+    }
 
     #[test]
     fn allowed_domains_are_normalized_and_deduplicated() {

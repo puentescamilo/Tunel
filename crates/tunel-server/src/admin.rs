@@ -61,9 +61,12 @@ pub enum AdminError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-/// Correo con el que queda una lápida: único y que nadie puede registrar.
+/// Correo con el que queda una lápida: nadie puede registrar uno de `.invalid`, y la
+/// parte aleatoria evita chocar con una cuenta que se registró así antes de impedirlo.
 fn tombstone_email(id: i64) -> String {
-    format!("borrada-{id}@cuenta.invalid")
+    let tag: [u8; 8] = rand::random();
+    let tag: String = tag.iter().map(|b| format!("{b:02x}")).collect();
+    format!("borrada-{id}-{tag}@cuenta.invalid")
 }
 
 /// Borra las lápidas que ya no envolvieron la clave de ningún miembro.

@@ -275,6 +275,70 @@ async fn pull_is_paged_and_returns_only_newer_changes() {
     assert_eq!(none.cursor, second.cursor);
 }
 
+/// Sube `count` hosts en una sola petición y devuelve la sesión.
+async fn account_with_hosts(app: &Router, count: usize) -> String {
+    register(app, EMAIL, "contraseña-larga").await;
+    let (token, vault) = device(app, "contraseña-larga").await;
+    let data = (0..count).fold(VaultData::default(), |d, i| {
+        d.with_host(Host::new(format!("h{i}"), "1.1.1.1"))
+    });
+    let state = SyncState::adopt(Uuid::from_u128(1), &data, 1000).unwrap();
+    let (body, _) = push_body(&state, &data, &vault, &Manifest::empty());
+    let (status, _) = send(app, "POST", "/v1/records", Some(&token), Some(body)).await;
+    assert_eq!(status, StatusCode::OK);
+    token
+}
+
+#[tokio::test]
+async fn pages_are_also_limited_by_size() {
+    let (app, db) = app_with(config()).await;
+    account_with_hosts(&app, 5).await;
+    let space = || tunel_server::db::Space::Account(1);
+    let one = db.pull(space(), 0, PULL_PAGE_SIZE, 1).await.unwrap();
+    assert_eq!(one.records.len(), 1, "siempre va al menos un registro");
+    assert!(one.more && one.manifest.is_none());
+    let record = one.records[0].blob.nonce.len() + one.records[0].blob.ciphertext.len();
+    let two = db
+        .pull(space(), 0, PULL_PAGE_SIZE, record * 2 + record / 2)
+        .await
+        .unwrap();
+    assert_eq!(two.records.len(), 2);
+    let rest = db
+        .pull(space(), two.cursor, PULL_PAGE_SIZE, usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(rest.records.len(), 3);
+    assert!(!rest.more && rest.manifest.is_some());
+}
+
+#[tokio::test]
+async fn unread_pages_count_against_the_download_limit() {
+    let (app, _) = app_with(Config {
+        pulls_per_account: 2,
+        ..config()
+    })
+    .await;
+    let token = account_with_hosts(&app, 3).await;
+    let request = || {
+        Request::builder()
+            .uri("/v1/records?since=0")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    // Las respuestas se guardan sin leer su cuerpo, como un cliente que no lee.
+    let first = app.clone().oneshot(request()).await.unwrap();
+    let second = app.clone().oneshot(request()).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(second.status(), StatusCode::OK);
+    let refused = app.clone().oneshot(request()).await.unwrap();
+    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+    first.into_body().collect().await.unwrap();
+    let again = app.clone().oneshot(request()).await.unwrap();
+    assert_eq!(again.status(), StatusCode::OK, "leída una, hay sitio");
+    drop(second);
+}
+
 #[tokio::test]
 async fn only_the_first_account_can_register_unless_registration_is_open() {
     let app = app().await;
@@ -298,11 +362,21 @@ async fn only_the_first_account_can_register_unless_registration_is_open() {
         register(&open, EMAIL, "contraseña-larga").await.0,
         StatusCode::CREATED
     );
+    // Registrar un correo que ya tiene cuenta responde lo mismo, sin tocarla: así no se
+    // puede averiguar qué correos tienen cuenta.
     assert_eq!(
         register(&open, "Ana@Ejemplo.com ", "otra-contraseña")
             .await
             .0,
-        StatusCode::CONFLICT
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        login(&open, EMAIL, "otra-contraseña").await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        login(&open, EMAIL, "contraseña-larga").await.0,
+        StatusCode::OK
     );
     assert_eq!(
         register(&open, "otro@ejemplo.com", "contraseña-larga")
