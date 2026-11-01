@@ -18,6 +18,10 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 - **Llavero**: identidades (usuario + contraseña, clave o agente SSH) y claves privadas
   OpenSSH/PEM, cifradas o no, con certificados OpenSSH opcionales. Las contraseñas se ven
   con un ojo: las tuyas siempre; las de un Team, solo sus admins.
+- **Claves SSH**: genera claves Ed25519, ECDSA o RSA de 4096 bits, con frase de paso
+  opcional, e instálalas en un host como `ssh-copy-id`, sin duplicarlas. El llavero avisa
+  de las claves RSA de menos de 3072 bits, de las DSA y de las claves de `~/.ssh` sin frase
+  de paso.
 - **Importar `~/.ssh/config`**: hosts, usuarios, puertos, `ProxyJump` y claves.
 - **Conexión rápida** (`⌘K` / `Ctrl+K`): busca un host guardado o escribe
   `usuario@servidor:puerto` (también `ssh usuario@servidor -p 2222`) para conectar sin guardarlo.
@@ -132,7 +136,7 @@ Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puente
 e instálalo con:
 
 ```bash
-sudo apt install ./tunel_0.7.1_amd64.deb
+sudo apt install ./tunel_0.8.0_amd64.deb
 ```
 
 Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
