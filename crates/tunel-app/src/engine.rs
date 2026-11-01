@@ -215,10 +215,7 @@ impl Engine {
                     env: host.env.clone(),
                     agent_forwarding: host.agent_forwarding,
                     x11_display: host.x11_forwarding.then(tunel_ssh::x11::default_display),
-                    startup_script: host
-                        .startup_snippet
-                        .and_then(|s| vault.snippet(s))
-                        .map(|s| s.script.clone()),
+                    startup_script: vault.startup_snippet(&host).map(|s| s.script.clone()),
                 };
                 let output = backend.output.clone();
                 self.spawn(async move {
@@ -383,6 +380,7 @@ impl Engine {
     }
 
     pub fn start_forward(&self, vault: &VaultData, rule: PortForward) -> anyhow::Result<()> {
+        vault.forward_host(&rule)?;
         let connect = self.connect_task(vault, rule.host)?;
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();

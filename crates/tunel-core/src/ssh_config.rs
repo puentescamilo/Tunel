@@ -117,6 +117,16 @@ fn yes(value: &str) -> bool {
     value.eq_ignore_ascii_case("yes")
 }
 
+/// Directivas que dan al servidor acceso a este equipo: el agente SSH o la pantalla.
+const FORWARDING: [&str; 3] = ["forwardagent", "forwardx11", "forwardx11trusted"];
+
+/// Una directiva que quita acceso al servidor. Los bloques `Match` no se evalúan, así que
+/// de ellos solo se toman estas, como si coincidieran: si OpenSSH las aplicara, Túnel
+/// no debe dar más acceso que OpenSSH.
+fn restricts(key: &str, value: &str) -> bool {
+    FORWARDING.contains(&key) && !yes(value)
+}
+
 /// Valores de un host mientras se recorren sus bloques; los opcionales guardan el primero.
 #[derive(Default)]
 struct Collected {
@@ -170,9 +180,15 @@ impl Collected {
 /// Analiza el archivo y devuelve los hosts concretos (los alias sin comodines).
 ///
 /// A cada alias se le aplican, en orden, todos los bloques `Host` que coinciden con él,
-/// incluidos los de comodines como `Host *`. Los bloques `Match` no se evalúan.
+/// incluidos los de comodines como `Host *`. Los bloques `Match` no se evalúan: de ellos
+/// solo cuenta lo que desactiva el reenvío del agente o de X11. Los archivos de `Include`
+/// no se leen; como podrían desactivarlo, con un `Include` no se activa en ningún host.
 pub fn parse(text: &str) -> Vec<SshConfigHost> {
     let blocks = blocks(text);
+    let includes = blocks
+        .iter()
+        .flat_map(|b| &b.directives)
+        .any(|(key, _)| key == "include");
     let mut aliases: Vec<&str> = Vec::new();
     for alias in blocks
         .iter()
@@ -194,11 +210,24 @@ pub fn parse(text: &str) -> Vec<SshConfigHost> {
                 },
                 ..Collected::default()
             };
-            blocks
-                .iter()
-                .filter(|b| b.patterns.as_ref().is_some_and(|p| host_matches(p, alias)))
-                .flat_map(|b| &b.directives)
-                .for_each(|(key, value)| collected.apply(key, value));
+            for block in &blocks {
+                match &block.patterns {
+                    Some(patterns) if host_matches(patterns, alias) => block
+                        .directives
+                        .iter()
+                        .for_each(|(key, value)| collected.apply(key, value)),
+                    Some(_) => {}
+                    None => block
+                        .directives
+                        .iter()
+                        .filter(|(key, value)| restricts(key, value))
+                        .for_each(|(key, value)| collected.apply(key, value)),
+                }
+            }
+            if includes {
+                collected.forward_agent = Some(false);
+                collected.forward_x11 = Some(false);
+            }
             collected.finish()
         })
         .collect()
@@ -404,6 +433,34 @@ Match host x
         let a = &parse("Host a\n Port 2200\n\nHost *\n User todos\n Port 22\n")[0];
         assert_eq!(a.user.as_deref(), Some("todos"));
         assert_eq!(a.port, Some(2200));
+    }
+
+    #[test]
+    fn a_match_block_can_only_turn_forwarding_off() {
+        let off = "Match all\n ForwardX11 no\n ForwardAgent no\n\n\
+                   Host a\n ForwardX11 yes\n ForwardX11Trusted yes\n ForwardAgent yes\n";
+        let a = &parse(off)[0];
+        assert!(!a.forward_x11 && !a.forward_agent);
+        let untrusted = "Match host prod\n ForwardX11Trusted no\n\n\
+                         Host prod\n ForwardX11 yes\n ForwardX11Trusted yes\n";
+        assert!(
+            !parse(untrusted)[0].forward_x11,
+            "X11 sin confianza no se activa"
+        );
+        // Lo que un Match activaría no cuenta, y uno que va detrás no gana.
+        let on = "Host a\n ForwardX11 yes\n ForwardX11Trusted yes\n\n\
+                  Match all\n ForwardX11 no\n ForwardAgent yes\n";
+        let a = &parse(on)[0];
+        assert!(a.forward_x11 && !a.forward_agent);
+    }
+
+    #[test]
+    fn with_an_include_forwarding_stays_off() {
+        let config = "Include ~/.ssh/config.d/*\n\n\
+                      Host a\n User ana\n ForwardX11 yes\n ForwardX11Trusted yes\n ForwardAgent yes\n";
+        let a = &parse(config)[0];
+        assert_eq!(a.user.as_deref(), Some("ana"));
+        assert!(!a.forward_x11 && !a.forward_agent);
     }
 
     #[test]

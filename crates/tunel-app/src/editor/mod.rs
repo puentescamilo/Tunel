@@ -297,9 +297,11 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                         ui.label("Nombre");
                         ui.text_edit_singleline(&mut rule.label);
                         ui.label("Host SSH");
+                        // Una regla de un Team solo va por hosts de ese Team.
                         let hosts: Vec<(HostId, String)> = data
                             .hosts
                             .iter()
+                            .filter(|h| tunel_core::vault::can_use(&rule.team, &h.team))
                             .map(|h| (h.id, h.display_name().to_string()))
                             .collect();
                         let mut host = Some(rule.host);
@@ -392,7 +394,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                     Ok((b, d.ok_or("Falta el puerto de destino")?))
                 });
             match parsed {
-                Ok((bind, dest)) if data.host(rule.host).is_some() => {
+                Ok((bind, dest)) if data.forward_host(rule).is_ok() => {
                     Ok(data.with_forward(PortForward {
                         bind_port: bind,
                         destination_port: dest,

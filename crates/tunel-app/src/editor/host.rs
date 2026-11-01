@@ -4,6 +4,7 @@ use super::combo;
 use crate::views::themes::{InheritedTheme, theme_picker};
 use std::collections::BTreeMap;
 use tunel_core::share;
+use tunel_core::vault::can_use;
 use tunel_core::*;
 
 /// Parsea un puerto; vacío significa "por defecto".
@@ -411,8 +412,13 @@ pub(super) fn host_form(
                 ui.end_row();
             }
             ui.label("Grupo");
-            let groups: Vec<(GroupId, String)> =
-                data.groups.iter().map(|g| (g.id, g.name.clone())).collect();
+            // Un host de un Team solo usa grupos, jump hosts y snippets de ese Team.
+            let groups: Vec<(GroupId, String)> = data
+                .groups
+                .iter()
+                .filter(|g| can_use(&form.team, &g.team))
+                .map(|g| (g.id, g.name.clone()))
+                .collect();
             combo(ui, "grupo", &mut form.host.group, &groups, "(sin grupo)");
             ui.end_row();
             ui.label("Identidad");
@@ -517,7 +523,11 @@ pub(super) fn host_form(
         .response
         .on_hover_text(X11_HINT);
         ui.label("Saltar a través de (jump hosts, en orden):");
-        for other in data.hosts.iter().filter(|h| h.id != form.host.id) {
+        let jumps = data
+            .hosts
+            .iter()
+            .filter(|h| h.id != form.host.id && can_use(&form.team, &h.team));
+        for other in jumps {
             let mut on = form.host.jump_hosts.contains(&other.id);
             if ui.checkbox(&mut on, other.display_name()).changed() {
                 form.host.jump_hosts = if on {
@@ -576,6 +586,7 @@ pub(super) fn host_form(
         let snippets: Vec<(SnippetId, String)> = data
             .snippets
             .iter()
+            .filter(|s| can_use(&form.team, &s.team))
             .map(|s| (s.id, s.label.clone()))
             .collect();
         combo(
