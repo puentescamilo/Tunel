@@ -89,6 +89,9 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             if ui::primary_button(ui, &ui::with_icon(icons::PLUS, "Clave")).clicked() {
                 app.editor = Some(Editor::Key(SshKey::new("Nueva clave", "")));
             }
+            if ui::secondary_button(ui, &ui::with_icon(icons::KEY, "Generar clave")).clicked() {
+                app.editor = Some(Editor::generate_key());
+            }
             if ui::secondary_button(ui, &ui::with_icon(icons::IDENTITY, "Identidad")).clicked() {
                 app.editor = Some(Editor::Identity(Identity::new("Nueva identidad", "")));
             }
@@ -111,7 +114,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         ui::section_label(ui, "Claves SSH");
         if data.keys.is_empty() {
-            ui::empty_state(ui, icons::KEY, "Sin claves", "Importa una clave privada con «Clave». Se guarda cifrada en la bóveda.");
+            ui::empty_state(ui, icons::KEY, "Sin claves", "Genera una con «Generar clave» o importa la tuya con «Clave». Se guardan cifradas en la bóveda.");
         }
         for key in &data.keys {
             let security_key = tunel_ssh::fido::is_security_key(&key.private_key);

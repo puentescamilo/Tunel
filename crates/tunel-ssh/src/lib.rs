@@ -3,6 +3,7 @@
 pub mod client;
 pub mod fido;
 pub mod forward;
+pub mod keygen;
 pub mod mosh;
 pub mod proxy;
 pub mod sftp;

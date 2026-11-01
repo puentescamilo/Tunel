@@ -10,6 +10,7 @@ name = "tunel"
 path = "src/main.rs"
 
 [dependencies]
+gethostname = "1.1"
 tunel-core.workspace = true
 tunel-ssh.workspace = true
 tunel-term.workspace = true

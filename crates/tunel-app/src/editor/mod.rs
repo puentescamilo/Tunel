@@ -1,9 +1,11 @@
 //! Ventanas de edición para cada tipo de elemento de la bóveda.
 
 mod host;
+mod keygen;
 
 use crate::app::TunelApp;
 use host::{HostForm, host_form, inherited_theme, parse_port, team_picker};
+use keygen::{KeyGenForm, keygen_form};
 use tunel_core::*;
 
 const MODAL_WIDTH: f32 = 520.0;
@@ -13,6 +15,7 @@ pub enum Editor {
     Group(Group),
     Identity(Identity),
     Key(SshKey),
+    GenerateKey(Box<KeyGenForm>),
     Snippet(Snippet),
     Forward {
         rule: PortForward,
@@ -25,6 +28,10 @@ pub enum Editor {
 impl Editor {
     pub fn host(host: Host) -> Self {
         Editor::Host(Box::new(HostForm::new(host)))
+    }
+
+    pub fn generate_key() -> Self {
+        Editor::GenerateKey(Box::new(KeyGenForm::new()))
     }
 
     pub fn forward(rule: PortForward) -> Self {
@@ -105,14 +112,20 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
             && let Some(Ok(text)) = pick_text_file("Clave privada")
         {
             key.private_key = text;
+            key.public_key = None;
         }
     });
-    ui.add(
-        egui::TextEdit::multiline(&mut key.private_key)
-            .desired_rows(6)
-            .code_editor()
-            .hint_text("-----BEGIN OPENSSH PRIVATE KEY-----"),
-    );
+    let edited = ui
+        .add(
+            egui::TextEdit::multiline(&mut key.private_key)
+                .desired_rows(6)
+                .code_editor()
+                .hint_text("-----BEGIN OPENSSH PRIVATE KEY-----"),
+        )
+        .changed();
+    if edited {
+        key.public_key = None;
+    }
     let mut passphrase = key.passphrase.clone().unwrap_or_default();
     ui.label("Frase de paso (si la clave está cifrada)");
     if ui
@@ -120,6 +133,7 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
         .changed()
     {
         key.passphrase = Some(passphrase).filter(|p| !p.is_empty());
+        key.public_key = None;
     }
     ui.horizontal(|ui| {
         ui.label("Certificado OpenSSH (opcional)");
@@ -132,6 +146,28 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
             key.certificate = None;
         }
     });
+    public_key_field(ui, key);
+}
+
+/// La clave pública, para copiarla a `authorized_keys`. Se recalcula si cambia la privada.
+fn public_key_field(ui: &mut egui::Ui, key: &mut SshKey) {
+    if key.public_key.is_none() {
+        key.public_key = tunel_ssh::keygen::public_key(&key.private_key, key.passphrase.as_deref());
+    }
+    let Some(public) = key.public_key.clone() else {
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.label("Clave pública");
+        if ui.button("Copiar").clicked() {
+            ui.ctx().copy_text(public.clone());
+        }
+    });
+    ui.add(
+        egui::TextEdit::multiline(&mut public.as_str())
+            .desired_rows(2)
+            .code_editor(),
+    );
 }
 
 fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData, secrets: &Secrets) {
@@ -176,6 +212,13 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     };
     let teams = crate::sync::teams::names(app);
     let secrets = Secrets::of(app);
+    if let Some(Editor::GenerateKey(form)) = app.editor.as_mut()
+        && let Some(key) = form.poll()
+    {
+        app.commit(data.with_key(key.clone()));
+        app.editor = Some(Editor::Key(key));
+        return;
+    }
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
@@ -187,6 +230,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         Editor::Group(g) => (icons::FOLDER, "grupo", data.group(g.id).is_some()),
         Editor::Identity(i) => (icons::IDENTITY, "identidad", data.identity(i.id).is_some()),
         Editor::Key(k) => (icons::KEY, "clave SSH", data.key(k.id).is_some()),
+        Editor::GenerateKey(_) => (icons::KEY, "clave SSH", false),
         Editor::Snippet(s) => (icons::CODE, "snippet", data.snippet(s.id).is_some()),
         Editor::Forward { rule, .. } => (
             icons::TUNNEL,
@@ -194,7 +238,10 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
             data.forwards.iter().any(|f| f.id == rule.id),
         ),
     };
-    let title = if exists {
+    let generating = matches!(&*editor, Editor::GenerateKey(f) if f.generating());
+    let title = if matches!(&*editor, Editor::GenerateKey(_)) {
+        "Generar clave SSH".to_string()
+    } else if exists {
         format!("Editar {noun}")
     } else {
         format!("Nuevo {noun}")
@@ -261,6 +308,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                     }
                     Editor::Identity(identity) => identity_form(ui, identity, &data, &secrets),
                     Editor::Key(key) => key_form(ui, key),
+                    Editor::GenerateKey(form) => keygen_form(ui, form),
                     Editor::Snippet(snippet) => {
                         ui.label("Nombre");
                         ui.text_edit_singleline(&mut snippet.label);
@@ -339,7 +387,15 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                 });
             ui.add_space(16.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                save = crate::ui::primary_button(ui, "  Guardar  ").clicked();
+                let label = if matches!(&*editor, Editor::GenerateKey(_)) {
+                    "  Generar  "
+                } else {
+                    "  Guardar  "
+                };
+                save = ui
+                    .add_enabled_ui(!generating, |ui| crate::ui::primary_button(ui, label))
+                    .inner
+                    .clicked();
                 cancel |= crate::ui::secondary_button(ui, "Cancelar").clicked();
             });
         });
@@ -376,6 +432,12 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         }
         Some(Editor::Identity(identity)) => Ok(data.with_identity(identity.clone())),
         Some(Editor::Key(key)) => Ok(data.with_key(key.clone())),
+        Some(Editor::GenerateKey(form)) => {
+            if let Err(e) = form.start(ctx) {
+                form.error = Some(e);
+            }
+            return;
+        }
         Some(Editor::Snippet(snippet)) => Ok(data.with_snippet(snippet.clone())),
         Some(Editor::Forward {
             rule,
