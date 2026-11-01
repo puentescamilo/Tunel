@@ -7,10 +7,12 @@ use egui::{
 };
 use std::f32::consts::PI;
 
-const WIDTH: f32 = 280.0;
-const HEIGHT: f32 = 40.0;
-const LOGO: f32 = 18.0;
+const HEIGHT: f32 = 34.0;
+const LOGO: f32 = 16.0;
 const PADDING: f32 = 12.0;
+/// Separación entre el logotipo y el texto.
+const LOGO_GAP: f32 = 10.0;
+const FONT_SIZE: f32 = 13.0;
 const RADIUS: u8 = 4;
 
 const fn hex(rgb: u32) -> Color32 {
@@ -126,7 +128,14 @@ pub fn sign_in_button(ui: &mut Ui, id: &str, name: &str) -> Response {
         Brand::Microsoft => MICROSOFT,
         Brand::Other => GENERIC,
     };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(WIDTH, HEIGHT), Sense::click());
+    // El ancho se ajusta al texto, para que quepan varios botones en una línea.
+    let galley = ui.painter().layout_no_wrap(
+        sign_in_label(id, name),
+        FontId::proportional(FONT_SIZE),
+        look.text,
+    );
+    let width = PADDING + LOGO + LOGO_GAP + galley.size().x + PADDING;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, HEIGHT), Sense::click());
     let painter = ui.painter();
     let fill = if response.hovered() {
         hex(0xf2f2f2)
@@ -157,15 +166,11 @@ pub fn sign_in_button(ui: &mut Ui, id: &str, name: &str) -> Response {
             );
         }
     }
-    // El texto se centra en el espacio que queda a la derecha del logotipo.
-    let text_center = Pos2::new((logo.right() + rect.right()) / 2.0, rect.center().y);
-    painter.text(
-        text_center,
-        Align2::CENTER_CENTER,
-        sign_in_label(id, name),
-        FontId::proportional(14.0),
-        look.text,
+    let text_pos = Pos2::new(
+        logo.right() + LOGO_GAP,
+        rect.center().y - galley.size().y / 2.0,
     );
+    painter.galley(text_pos, galley, look.text);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

@@ -407,12 +407,16 @@ fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
     let password_login = app.sync.oauth.password_login_for(&server);
     if !providers.is_empty() {
         ui.add_space(8.0);
-        for provider in providers {
-            if ui::brand::sign_in_button(ui, &provider.id, &provider.name).clicked() {
-                crate::sync::oauth::start(app, provider);
+        // En una línea; si no caben, pasan a la siguiente.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            for provider in providers {
+                if ui::brand::sign_in_button(ui, &provider.id, &provider.name).clicked() {
+                    crate::sync::oauth::start(app, provider);
+                }
             }
-            ui.add_space(4.0);
-        }
+        });
+        ui.add_space(4.0);
         let how = if password_login {
             "Con tu cuenta de la organización: sin contraseña de cuenta; la sincronización se \
              cifra con tu contraseña maestra de Túnel. O, con correo y contraseña:"
