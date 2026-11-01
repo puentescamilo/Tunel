@@ -133,6 +133,7 @@ fn context(epoch: u64) -> TeamKeyContext<'static> {
 async fn create_team(app: &Router, admin: &User, name: &str) -> VaultKey {
     let key = VaultKey::generate();
     let body = serde_json::to_value(CreateTeamRequest {
+        roster: None,
         id: TEAM.into(),
         name: seal_team_name(&key, TEAM, name).unwrap(),
         key: wrap_team_key(&key, context(0), &admin.keys, &admin.public()).unwrap(),
@@ -388,6 +389,7 @@ async fn only_accounts_with_keys_can_be_invited() {
     // Ni crear equipos sin claves.
     let token = register_without_keys(&app, "sin@ejemplo.com").await;
     let body = serde_json::to_value(CreateTeamRequest {
+        roster: None,
         id: Uuid::new_v4().to_string(),
         name: seal_team_name(&key, TEAM, "x").unwrap(),
         key: wrap_team_key(&key, context(0), &ana.keys, &ana.public()).unwrap(),
@@ -484,6 +486,7 @@ async fn removing_a_member_and_rotating_the_key_locks_them_out() {
     }
     .with_pushed(outgoing.iter().map(|e| (new_key.record_id(&e.key), e.hlc)));
     let rotation = |keys: Vec<MemberKey>| RotateTeamRequest {
+        roster: None,
         epoch: 1,
         base_version: manifest.version,
         name: seal_team_name(&new_key, TEAM, "Equipo").unwrap(),
@@ -569,6 +572,7 @@ async fn team_ids_must_be_canonical_uuids() {
     let key = VaultKey::generate();
     for id in ["no-es-un-uuid", "6C2B8F0E-6F4E-4D55-9A37-1E2F3A4B5C6D"] {
         let body = serde_json::to_value(CreateTeamRequest {
+            roster: None,
             id: id.into(),
             name: seal_team_name(&key, id, "x").unwrap(),
             key: wrap_team_key(&key, context(0), &ana.keys, &ana.public()).unwrap(),
@@ -701,6 +705,7 @@ async fn invite_to_new_team(
         epoch: 0,
     };
     let body = serde_json::to_value(CreateTeamRequest {
+        roster: None,
         id: team.clone(),
         name: seal_team_name(&key, &team, "x").unwrap(),
         key: wrap_team_key(&key, context, &inviter.keys, &inviter.public()).unwrap(),
@@ -758,6 +763,38 @@ async fn one_account_cannot_use_up_someone_elses_invitations() {
         StatusCode::CREATED,
         "las invitaciones de otras cuentas siguen llegando"
     );
+}
+
+#[tokio::test]
+async fn only_admins_replace_the_roster_and_only_for_the_current_key() {
+    let app = app().await;
+    let ana = user(&app, "ana@ejemplo.com").await;
+    let bob = user(&app, "bob@ejemplo.com").await;
+    let key = create_team(&app, &ana, "Equipo").await;
+    join(&app, &ana, &bob, "bob@ejemplo.com", &key).await;
+    assert_eq!(teams(&app, &bob).await[0].roster, None);
+
+    let roster = |epoch: u64| {
+        serde_json::to_value(RosterRequest {
+            epoch,
+            roster: seal_team_name(&key, TEAM, "lista").unwrap(),
+        })
+        .unwrap()
+    };
+    let uri = format!("/v1/teams/{TEAM}/roster");
+    let put = |user: &User, body: Value| {
+        let (app, uri, token) = (app.clone(), uri.clone(), user.token().map(str::to_string));
+        async move {
+            send(&app, "PUT", &uri, token.as_deref(), Some(body))
+                .await
+                .0
+        }
+    };
+    assert_eq!(put(&bob, roster(0)).await, StatusCode::FORBIDDEN);
+    assert_eq!(put(&ana, roster(1)).await, StatusCode::CONFLICT);
+    assert_eq!(put(&ana, roster(0)).await, StatusCode::NO_CONTENT);
+    let stored = teams(&app, &bob).await.remove(0).roster.unwrap();
+    assert_eq!(open_team_name(&key, TEAM, &stored).unwrap(), "lista");
 }
 
 const NOW: i64 = 1_793_404_800;
@@ -882,6 +919,7 @@ async fn deleting_the_only_admin_needs_a_new_one_and_the_others_keep_their_key()
     };
     let next = Manifest::empty().with_pushed(std::iter::empty());
     let rotation = RotateTeamRequest {
+        roster: None,
         epoch: 1,
         base_version: 0,
         name: seal_team_name(&new_key, TEAM, "Equipo").unwrap(),

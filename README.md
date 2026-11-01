@@ -271,6 +271,13 @@ que cada cual ponga las suyas. Los hosts compartidos muestran el nombre del Team
 - **Suplantación:** Túnel recuerda la clave de cada persona la primera vez que confirmas su
   huella. Si el servidor entrega otra, el Team se detiene y lo avisa: compara la huella de
   nuevo antes de aceptarla.
+- **Lista de miembros:** los admins guardan junto al Team la lista de miembros, cifrada con
+  su clave. Una clave nueva del Team solo se acepta si la envolvió un admin de esa lista, y
+  al renovarla solo llega a quien está en ella: el servidor no puede volver a meter a alguien
+  que se sacó. Si avisa de que alguien no está en la lista y debe estar, sácalo y vuelve a
+  invitarlo. Los Teams anteriores a Túnel 0.7.1 la estrenan al invitar o al renovar la clave.
+- Lo de un Team solo usa lo de ese mismo Team: un host compartido no puede apuntar a tu
+  identidad, grupo, jump host o snippet personal, ni un túnel compartido ir por un host tuyo.
 - Las claves de host conocidas no se comparten: cada persona decide de qué servidores se fía.
 
 ### Sesiones compartidas
@@ -297,7 +304,8 @@ control** pueden pedir permiso para escribir.
 - **Suplantación:** la sesión muestra si la clave de quien comparte es la que ya conocías. Si
   no la has confirmado, avisa antes de que escribas nada; si cambió, no deja mirarla.
 - La sesión termina al cerrar la pestaña o pulsar **Dejar de compartir**. Quien sale del Team
-  deja de verla al momento.
+  deja de verla al momento, y si cambia la clave del Team la terminal deja de compartirse:
+  vuelve a compartirla si quieres.
 - Con nginx delante del servidor, hace falta la configuración de WebSocket de
   [Arrancarlo](#2-arrancarlo).
 

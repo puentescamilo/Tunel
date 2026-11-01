@@ -1,14 +1,14 @@
 //! Rutas HTTP del servidor de sincronización.
 
 use crate::auth::{self, AuthHasher, HashError, LoginLimiter, RateBucket};
-use crate::db::{Db, DbError, InviteLimits, NewAccount, Quota, Rotation, Space};
+use crate::db::{Db, DbError, InviteLimits, NewAccount, NewTeam, Quota, Rotation, Space};
 use crate::live::{self, LiveLimits, LiveRegistry};
 use crate::pulls::PullLimiter;
 use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -130,6 +130,9 @@ const MAX_PUSH_BODY: usize = 16 * 1024 * 1024;
 const MAX_ROTATE_BODY: usize = 48 * 1024 * 1024;
 /// El nombre de un equipo cifrado, con relleno de sobra.
 const MAX_TEAM_NAME_CIPHERTEXT: usize = 512;
+/// La lista de miembros cifrada: unos 120 bytes por miembro en base64, con margen para
+/// el máximo de miembros.
+const MAX_ROSTER_CIPHERTEXT: usize = 128 * 1024;
 /// Tamaño máximo del manifiesto cifrado en base64.
 const MAX_MANIFEST_CIPHERTEXT: usize = 8 * 1024 * 1024;
 /// La clave de bóveda envuelta ocupa unos 64 bytes en base64; se deja margen.
@@ -213,6 +216,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             patch(update_member).delete(remove_member),
         )
         .layer(DefaultBodyLimit::max(MAX_AUTH_BODY));
+    let roster_routes = Router::new()
+        .route("/v1/teams/{team}/roster", put(set_roster))
+        .layer(DefaultBodyLimit::max(MAX_ROSTER_CIPHERTEXT + MAX_AUTH_BODY));
     let rotate_routes = Router::new()
         .route("/v1/teams/{team}/rotate", post(rotate_team))
         .layer(DefaultBodyLimit::max(MAX_ROTATE_BODY));
@@ -221,6 +227,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(auth_routes)
         .merge(record_routes)
         .merge(team_routes)
+        .merge(roster_routes)
         .merge(rotate_routes)
         .merge(live::routes())
         .merge(crate::oauth::routes().layer(DefaultBodyLimit::max(MAX_AUTH_BODY)))
@@ -820,14 +827,20 @@ async fn create_team(
     check_team_id(&request.id)?;
     check_blob(&request.name, MAX_TEAM_NAME_CIPHERTEXT)?;
     check_blob(&request.key, MAX_VAULT_KEY_CIPHERTEXT)?;
+    if let Some(roster) = &request.roster {
+        check_blob(roster, MAX_ROSTER_CIPHERTEXT)?;
+    }
     state
         .db
         .create_team(
             session.account,
-            request.id,
-            request.name,
-            request.key,
-            now(),
+            NewTeam {
+                id: request.id,
+                name: request.name,
+                key: request.key,
+                roster: request.roster,
+                created_at: now(),
+            },
             state.config.max_teams_per_account,
         )
         .await?;
@@ -893,6 +906,22 @@ async fn add_member(
         )
         .await?;
     Ok(StatusCode::CREATED)
+}
+
+/// Sustituye la lista de miembros cifrada del equipo.
+async fn set_roster(
+    State(state): State<Arc<AppState>>,
+    session: Session,
+    Path(team): Path<String>,
+    Json(request): Json<RosterRequest>,
+) -> ApiResult<StatusCode> {
+    require_admin(&state, &session, &team).await?;
+    check_blob(&request.roster, MAX_ROSTER_CIPHERTEXT)?;
+    state
+        .db
+        .set_roster(team, request.epoch, request.roster)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn update_member(
@@ -975,6 +1004,9 @@ async fn rotate_team(
     check_blob(&request.name, MAX_TEAM_NAME_CIPHERTEXT)?;
     check_blob(&request.manifest.blob, MAX_MANIFEST_CIPHERTEXT)?;
     check_records(&request.records)?;
+    if let Some(roster) = &request.roster {
+        check_blob(roster, MAX_ROSTER_CIPHERTEXT)?;
+    }
     let mut keys = Vec::with_capacity(request.keys.len());
     for member in request.keys {
         check_blob(&member.key, MAX_VAULT_KEY_CIPHERTEXT)?;
@@ -990,6 +1022,7 @@ async fn rotate_team(
         keys,
         manifest: request.manifest,
         records: request.records,
+        roster: request.roster,
     };
     let cursor = state
         .db

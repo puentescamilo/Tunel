@@ -71,6 +71,10 @@ pub struct TeamLocal {
     /// Alguien salió y la clave está pendiente de renovar.
     #[serde(default)]
     pub rekey_needed: bool,
+    /// Última lista de miembros comprobada (ver [`super::roster`]); `None` si el Team
+    /// todavía no la tiene. Se conserva aunque una época nueva llegue sin ella.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster: Option<super::Roster>,
 }
 
 /// Lleva la clave del Team: no se muestra.
@@ -292,6 +296,7 @@ mod tests {
                 key: VaultKey::generate(),
                 state: SyncState::new(Uuid::from_u128(1)),
                 rekey_needed: false,
+                roster: None,
             }],
             ..local
         }

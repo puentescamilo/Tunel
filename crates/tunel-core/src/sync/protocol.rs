@@ -137,6 +137,10 @@ pub struct TeamSummary {
     /// Alguien salió y la clave está pendiente de renovar; lo hace un administrador.
     #[serde(default)]
     pub rekey_needed: bool,
+    /// Lista de miembros cifrada con la clave de la época actual (ver
+    /// [`super::roster`]); `None` en una invitación pendiente o si el equipo no la tiene.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster: Option<SealedBlob>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +149,16 @@ pub struct CreateTeamRequest {
     pub name: SealedBlob,
     /// Clave del equipo envuelta por y para quien lo crea, en la época 0.
     pub key: SealedBlob,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster: Option<SealedBlob>,
+}
+
+/// Sustituye la lista de miembros cifrada del equipo; solo un administrador.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterRequest {
+    /// Época de la clave con la que va cifrada; tiene que ser la actual.
+    pub epoch: u64,
+    pub roster: SealedBlob,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +205,9 @@ pub struct RotateTeamRequest {
     pub keys: Vec<MemberKey>,
     pub manifest: ManifestBlob,
     pub records: Vec<SealedRecord>,
+    /// Lista de miembros cifrada con la clave nueva.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roster: Option<SealedBlob>,
 }
 
 /// Cuerpo de las respuestas de error.

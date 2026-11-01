@@ -159,6 +159,10 @@ const ACCOUNT_COLUMNS: [(&str, &str); 6] = [
     ("deleted_at", "INTEGER"),
 ];
 
+/// Columnas añadidas a `teams` después de la primera versión: `roster` es la lista de
+/// miembros cifrada con la clave de la época actual (ver `tunel_core::sync::roster`).
+const TEAM_COLUMNS: [(&str, &str); 1] = [("roster", "TEXT")];
+
 /// Datos de una cuenta necesarios para iniciar sesión.
 pub struct Account {
     pub id: i64,
@@ -278,6 +282,22 @@ pub struct Rotation {
     pub keys: Vec<MemberKey>,
     pub manifest: ManifestBlob,
     pub records: Vec<SealedRecord>,
+    pub roster: Option<SealedBlob>,
+}
+
+/// Un equipo recién creado, tal como lo manda quien lo crea.
+pub struct NewTeam {
+    pub id: String,
+    pub name: SealedBlob,
+    /// Clave del equipo envuelta por y para quien lo crea.
+    pub key: SealedBlob,
+    pub roster: Option<SealedBlob>,
+    pub created_at: i64,
+}
+
+/// La lista de miembros cifrada, como se guarda: JSON o `NULL`.
+fn roster_text(roster: &Option<SealedBlob>) -> Result<Option<String>, DbError> {
+    Ok(roster.as_ref().map(serde_json::to_string).transpose()?)
 }
 
 fn role_name(role: TeamRole) -> &'static str {
@@ -401,6 +421,15 @@ impl Db {
         for (name, kind) in ACCOUNT_COLUMNS {
             if !existing.iter().any(|c| c == name) {
                 conn.execute_batch(&format!("ALTER TABLE accounts ADD COLUMN {name} {kind}"))?;
+            }
+        }
+        let existing: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('teams')")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        for (name, kind) in TEAM_COLUMNS {
+            if !existing.iter().any(|c| c == name) {
+                conn.execute_batch(&format!("ALTER TABLE teams ADD COLUMN {name} {kind}"))?;
             }
         }
         conn.execute_batch(
@@ -925,12 +954,16 @@ impl Db {
     pub async fn create_team(
         &self,
         account: i64,
-        id: String,
-        name: SealedBlob,
-        key: SealedBlob,
-        created_at: i64,
+        team: NewTeam,
         max_teams: u64,
     ) -> Result<(), DbError> {
+        let NewTeam {
+            id,
+            name,
+            key,
+            roster,
+            created_at,
+        } = team;
         self.call(move |conn| {
             let tx = conn.transaction()?;
             let has_keys: bool = tx.query_row(
@@ -945,9 +978,14 @@ impl Db {
                 return Err(DbError::Limit("equipos por cuenta"));
             }
             let inserted = tx.execute(
-                "INSERT INTO teams (id, name, created_at) VALUES (?1, ?2, ?3)
+                "INSERT INTO teams (id, name, roster, created_at) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT (id) DO NOTHING",
-                params![id, serde_json::to_string(&name)?, created_at],
+                params![
+                    id,
+                    serde_json::to_string(&name)?,
+                    roster_text(&roster)?,
+                    created_at
+                ],
             )?;
             if inserted == 0 {
                 return Err(DbError::TeamExists);
@@ -968,7 +1006,7 @@ impl Db {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT t.id, t.name, m.role, t.epoch, m.key, a.email, a.public_key, m.accepted,
-                        t.rekey_needed
+                        t.rekey_needed, t.roster
                  FROM team_members m
                  JOIN teams t ON t.id = m.team_id
                  JOIN accounts a ON a.id = m.wrapped_by
@@ -986,18 +1024,30 @@ impl Db {
                     row.get::<_, String>(6)?,
                     row.get::<_, bool>(7)?,
                     row.get::<_, bool>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             })?;
             rows.map(|row| {
-                let (id, name, role, epoch, key, wrapped_by, wrapped_by_key, accepted, rekey) =
-                    row?;
-                let (name, key) = if accepted {
+                let (
+                    id,
+                    name,
+                    role,
+                    epoch,
+                    key,
+                    wrapped_by,
+                    wrapped_by_key,
+                    accepted,
+                    rekey,
+                    roster,
+                ) = row?;
+                let (name, key, roster) = if accepted {
                     (
                         Some(serde_json::from_str(&name)?),
                         Some(serde_json::from_str(&key)?),
+                        roster.as_deref().map(serde_json::from_str).transpose()?,
                     )
                 } else {
-                    (None, None)
+                    (None, None, None)
                 };
                 Ok(TeamSummary {
                     id,
@@ -1009,6 +1059,7 @@ impl Db {
                     wrapped_by_key: parse_public_key(&wrapped_by_key)?,
                     pending: !accepted,
                     rekey_needed: accepted && rekey,
+                    roster,
                 })
             })
             .collect()
@@ -1172,6 +1223,30 @@ impl Db {
         .await
     }
 
+    /// Sustituye la lista de miembros cifrada, si la clave sigue en la época `epoch`.
+    pub async fn set_roster(
+        &self,
+        team: String,
+        epoch: u64,
+        roster: SealedBlob,
+    ) -> Result<(), DbError> {
+        self.call(move |conn| {
+            let updated = conn.execute(
+                "UPDATE teams SET roster = ?1 WHERE id = ?2 AND epoch = ?3",
+                params![
+                    serde_json::to_string(&roster)?,
+                    team,
+                    epoch.min(i64::MAX as u64) as i64
+                ],
+            )?;
+            if updated == 0 {
+                return Err(DbError::Conflict);
+            }
+            Ok(())
+        })
+        .await
+    }
+
     /// Cambia el rol de un miembro; el equipo no puede quedarse sin administradores.
     pub async fn set_member_role(
         &self,
@@ -1306,14 +1381,15 @@ impl Db {
             check_quota(&tx, &space, quota)?;
             tx.execute(
                 "UPDATE teams SET name = ?1, epoch = ?2, seq = ?3, manifest_version = ?4,
-                     manifest = ?5, rekey_needed = 0
-                 WHERE id = ?6",
+                     manifest = ?5, rekey_needed = 0, roster = ?6
+                 WHERE id = ?7",
                 params![
                     serde_json::to_string(&rotation.name)?,
                     rotation.epoch as i64,
                     seq,
                     rotation.manifest.version as i64,
                     serde_json::to_string(&rotation.manifest.blob)?,
+                    roster_text(&rotation.roster)?,
                     team
                 ],
             )?;

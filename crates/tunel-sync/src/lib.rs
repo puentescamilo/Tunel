@@ -9,6 +9,7 @@ pub mod api;
 mod keypair;
 pub mod live;
 pub mod oauth;
+mod roster;
 pub mod run;
 mod session;
 pub mod teams;
@@ -81,6 +82,16 @@ pub enum SyncError {
     StaleKey,
     #[error("el servidor devolvió una clave del Team anterior a la que ya se tenía")]
     KeyRollback,
+    #[error(
+        "la clave nueva del Team la envolvió {0}, que no es admin en la lista de miembros del \
+         Team: puede ser un intento de colar una clave; no se acepta"
+    )]
+    UntrustedTeamKey(String),
+    #[error(
+        "el servidor dice que {0} es miembro del Team, pero no está en la lista de miembros \
+         que guardan los admins; si debe estar, sácalo y vuelve a invitarlo"
+    )]
+    NotInRoster(String),
     #[error("alguien salió del Team y un administrador tiene que renovar la clave")]
     RekeyNeeded,
     #[error("el nombre del Team no puede estar vacío ni pasar de 60 caracteres")]

@@ -10,6 +10,7 @@
 //! del Team para un impostor o aceptar una suya.
 
 use crate::SyncError;
+use crate::roster;
 use crate::run::{Counters, MAX_ROUNDS, SpaceSync, TeamProblem, pull};
 use crate::session::{Session, call};
 use tunel_core::sync::local::normalize_email;
@@ -21,8 +22,8 @@ use tunel_core::sync::record::records;
 use tunel_core::sync::space::{Space, absorb, partition};
 use tunel_core::sync::team::{open_team_name, seal_team_name, unwrap_team_key, wrap_team_key};
 use tunel_core::sync::{
-    AccountKeypair, Invitation, KeyProblem, Manifest, PublicKey, RecordEnvelope, SyncLocal,
-    SyncState, TeamKeyContext, TeamLocal, VaultKey,
+    AccountKeypair, Invitation, KeyProblem, Manifest, PublicKey, RecordEnvelope, Roster,
+    RosterMember, SyncLocal, SyncState, TeamKeyContext, TeamLocal, VaultKey,
 };
 use tunel_core::vault::VaultData;
 use uuid::Uuid;
@@ -123,15 +124,30 @@ fn adopt(local: &SyncLocal, summary: &TeamSummary) -> Result<TeamLocal, SyncErro
             return Err(SyncError::KeyRollback);
         }
         if summary.epoch == team.epoch {
+            let roster = roster::received(
+                summary.roster.as_ref(),
+                &team.key,
+                &team.id,
+                team.epoch,
+                team.roster.as_ref(),
+                true,
+            )?;
             return Ok(TeamLocal {
                 role: summary.role,
                 rekey_needed: summary.rekey_needed,
+                roster,
                 ..team.clone()
             });
         }
     }
-    // Una clave nueva solo se acepta de alguien cuya clave ya se confirmó.
-    local.check_key(&summary.wrapped_by, summary.wrapped_by_key)?;
+    // La clave nueva de un Team que ya se tenía solo se acepta de un admin de su lista
+    // de miembros; la de uno nuevo, de alguien cuya clave ya se confirmó.
+    match existing {
+        Some(team) => {
+            roster::check_new_key(local, team, &summary.wrapped_by, summary.wrapped_by_key)?
+        }
+        None => local.check_key(&summary.wrapped_by, summary.wrapped_by_key)?,
+    }
     let wrapped = summary
         .key
         .as_ref()
@@ -145,6 +161,14 @@ fn adopt(local: &SyncLocal, summary: &TeamSummary) -> Result<TeamLocal, SyncErro
         Some(blob) => open_team_name(&key, &summary.id, blob)?,
         None => String::new(),
     };
+    let roster = roster::received(
+        summary.roster.as_ref(),
+        &key,
+        &summary.id,
+        summary.epoch,
+        existing.and_then(|t| t.roster.as_ref()),
+        false,
+    )?;
     // Con una clave nueva el servidor volvió a cifrar todo: se descarga desde el
     // principio, conservando las versiones y lo pendiente de subir.
     let state = match existing {
@@ -162,6 +186,7 @@ fn adopt(local: &SyncLocal, summary: &TeamSummary) -> Result<TeamLocal, SyncErro
         key,
         state,
         rekey_needed: summary.rekey_needed,
+        roster,
     };
     Ok(team)
 }
@@ -268,10 +293,16 @@ pub async fn create_team(local: &SyncLocal, name: &str) -> Result<(SyncLocal, St
         team: &id,
         epoch: 0,
     };
+    let me = RosterMember {
+        key: pair.public(),
+        role: TeamRole::Admin,
+    };
+    let roster = Roster::default().with(&normalize_email(&local.email), me);
     let request = CreateTeamRequest {
         id: id.clone(),
         name: seal_team_name(&key, &id, name)?,
         key: wrap_team_key(&key, context, pair, &pair.public())?,
+        roster: Some(roster.seal(&key, &id, 0)?),
     };
     call!(&mut session, |api, token| api.create_team(token, &request))?;
     let team = TeamLocal {
@@ -282,6 +313,7 @@ pub async fn create_team(local: &SyncLocal, name: &str) -> Result<(SyncLocal, St
         key,
         state: SyncState::new(local.state.device),
         rekey_needed: false,
+        roster: Some(roster),
     };
     let teams = [local.teams.clone(), vec![team]].concat();
     let next = SyncLocal {
@@ -321,6 +353,14 @@ pub async fn invite(
         return Err(KeyProblem::Changed(email).into());
     }
     let next = local.pin(&email, confirmed)?;
+    // Primero la lista: si la invitación falla después, que sobre alguien en ella no
+    // da acceso a nadie.
+    let member = RosterMember {
+        key: confirmed,
+        role,
+    };
+    let listed = roster::put_member(&mut session, &next, team, &email, member).await?;
+    let next = with_team(&next, listed);
     let context = TeamKeyContext {
         team: &team.id,
         epoch: team.epoch,
@@ -394,11 +434,41 @@ pub async fn set_role(
     email: &str,
     role: TeamRole,
 ) -> Result<SyncLocal, SyncError> {
-    admin_team(local, team)?;
+    let team = admin_team(local, team)?.clone();
     let mut session = Session::new(local)?;
     call!(&mut session, |api, token| api
-        .set_role(token, team, email, role))?;
-    Ok(finish(session, local.clone()))
+        .set_role(token, &team.id, email, role))?;
+    let members = call!(&mut session, |api, token| api.members(token, &team.id))?;
+    let email = normalize_email(email);
+    let Some(changed) = members.iter().find(|m| m.email == email) else {
+        return Ok(finish(session, local.clone()));
+    };
+    let listed = match roster::member_of(local, &team, &email, changed.public_key, role) {
+        Ok(member) => roster::put_member(&mut session, local, &team, &email, member).await?,
+        // Un Team sin lista sigue sin ella hasta que se puedan confirmar las claves.
+        Err(_) if team.roster.is_none() => team,
+        Err(e) => return Err(e),
+    };
+    Ok(finish(session, with_team(local, listed)))
+}
+
+/// `local` con `team` en lugar del Team con su mismo identificador.
+fn with_team(local: &SyncLocal, team: TeamLocal) -> SyncLocal {
+    let teams = local
+        .teams
+        .iter()
+        .map(|t| {
+            if t.id == team.id {
+                team.clone()
+            } else {
+                t.clone()
+            }
+        })
+        .collect();
+    SyncLocal {
+        teams,
+        ..local.clone()
+    }
 }
 
 pub(crate) fn key_status(local: &SyncLocal, email: &str, key: PublicKey) -> KeyStatus {
@@ -478,11 +548,14 @@ pub(crate) async fn rotate_with(
         let state = space.state;
 
         let members = call!(session, |api, token| api.members(token, team_id))?;
-        // La clave nueva solo se envuelve para claves ya confirmadas: el servidor podría
-        // haber añadido a alguien con una suya.
-        for member in &members {
-            local.check_key(&member.email, member.public_key)?;
-        }
+        // La clave nueva solo se envuelve para quien está en la lista de miembros (o, sin
+        // lista, para claves ya confirmadas): el servidor podría haber vuelto a meter a
+        // alguien que se sacó, o añadido a alguien con una clave suya.
+        let current = TeamLocal {
+            roster: roster::latest(session, &team).await?,
+            ..team.clone()
+        };
+        let next_roster = roster::for_rotation(local, &current, &members)?;
         let pinned = local.clone();
 
         let epoch = team.epoch + 1;
@@ -527,6 +600,7 @@ pub(crate) async fn rotate_with(
                 .iter()
                 .map(|e| key.seal_record(e))
                 .collect::<Result<_, _>>()?,
+            roster: Some(next_roster.seal(&key, team_id, epoch)?),
         };
         let rotated = call!(session, |api, token| api
             .rotate_team(token, team_id, &request));
@@ -542,21 +616,11 @@ pub(crate) async fn rotate_with(
                     key,
                     state,
                     rekey_needed: false,
+                    roster: Some(next_roster),
                     ..team.clone()
                 };
-                let teams = pinned
-                    .teams
-                    .iter()
-                    .map(|t| {
-                        if t.id == team_id {
-                            renewed.clone()
-                        } else {
-                            t.clone()
-                        }
-                    })
-                    .collect();
                 let data = absorb(data, Space::Team(team_id), &part, &merged)?;
-                return Ok((SyncLocal { teams, ..pinned }, data));
+                return Ok((with_team(&pinned, renewed), data));
             }
             // Otro miembro subió algo entretanto, o cambiaron los miembros: otra vez.
             Err(SyncError::Conflict(_)) => continue,

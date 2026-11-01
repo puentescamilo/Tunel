@@ -263,6 +263,20 @@ impl Api {
         self.send(self.get(token, &path)).await
     }
 
+    pub async fn set_roster(
+        &self,
+        token: &str,
+        team: &str,
+        request: &RosterRequest,
+    ) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .put(format!("{}/v1/teams/{}/roster", self.base, segment(team)))
+            .bearer_auth(token)
+            .json(request);
+        self.execute(request).await.map(|_| ())
+    }
+
     pub async fn add_member(
         &self,
         token: &str,
