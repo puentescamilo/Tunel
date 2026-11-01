@@ -25,7 +25,10 @@ pub enum SyncError {
     InvalidServer(String),
     #[error("no se pudo conectar con el servidor: {0}")]
     Network(#[source] reqwest::Error),
-    #[error("correo o contraseña incorrectos")]
+    #[error(
+        "correo o contraseña incorrectos; si la cuenta pasó a entrar con Google, Microsoft u \
+         otro proveedor, desvincula este equipo y vuelve a entrar con él"
+    )]
     Unauthorized,
     #[error("ya existe una cuenta con ese correo en este servidor")]
     AccountExists,

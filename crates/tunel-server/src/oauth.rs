@@ -43,8 +43,8 @@ use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use tunel_core::sync::SealedBlob;
 use tunel_core::sync::protocol::{
-    AuthProvider, AuthProviders, OAuthLogin, OAuthRegisterRequest, OAuthRegisterResponse,
-    OAuthTokenRequest, VaultKeyUpdate,
+    AuthProvider, AuthProviders, OAuthLinkRequest, OAuthLogin, OAuthRegisterRequest,
+    OAuthRegisterResponse, OAuthTokenRequest, VaultKeyUpdate,
 };
 
 /// Tiempo para completar el inicio de sesión en el navegador.
@@ -225,6 +225,8 @@ struct Flow {
     nonce: String,
     /// Verificador PKCE ante el proveedor.
     verifier: String,
+    /// Túnel quiere pasar al proveedor una cuenta con contraseña.
+    link: bool,
     created: Instant,
 }
 
@@ -239,6 +241,8 @@ enum Outcome {
     },
     /// La persona y el proveedor con el que creará la cuenta.
     New(Identity, String),
+    /// La persona, el proveedor y la cuenta con contraseña que pasará a él.
+    Link(Identity, String, i64),
 }
 
 struct Pending {
@@ -247,10 +251,12 @@ struct Pending {
     created: Instant,
 }
 
-/// Permiso para crear la cuenta de quien ya demostró su correo.
+/// Permiso para crear la cuenta de quien ya demostró su correo o, con `link`, para pasar
+/// a él esa cuenta con contraseña.
 struct Ticket {
     identity: Identity,
     provider: String,
+    link: Option<i64>,
     created: Instant,
 }
 
@@ -520,6 +526,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/v1/auth/{provider}/callback", get(callback))
         .route("/v1/auth/token", post(token))
         .route("/v1/accounts/oauth", post(register))
+        .route("/v1/accounts/oauth/link", post(link))
         .route("/v1/accounts/current/vault-key", put(update_vault_key))
 }
 
@@ -556,6 +563,9 @@ struct StartQuery {
     challenge: String,
     /// Valor aleatorio de Túnel que vuelve con la respuesta.
     state: String,
+    /// Pasar al proveedor la cuenta con contraseña de ese correo.
+    #[serde(default)]
+    link: bool,
 }
 
 /// Valor en base64 apto para URL de entre `min` y `max` caracteres.
@@ -618,6 +628,7 @@ async fn start(
         app_state: query.state,
         nonce: random_token(),
         verifier: random_token(),
+        link: query.link,
         created: Instant::now(),
     };
     let redirect_uri = oauth.config.redirect_uri(&provider);
@@ -715,7 +726,7 @@ async fn callback(
             return Ok(back_to_app(&flow, ("error", &message)));
         }
     };
-    let outcome = match decide(&state, &config, identity).await {
+    let outcome = match decide(&state, &config, identity, flow.link).await {
         Ok(outcome) => outcome,
         Err(message) => return Ok(back_to_app(&flow, ("error", &message))),
     };
@@ -734,6 +745,7 @@ async fn decide(
     state: &AppState,
     provider: &ProviderConfig,
     identity: Identity,
+    link: bool,
 ) -> Result<Outcome, String> {
     let internal = |_| "error interno del servidor".to_string();
     // La cuenta ligada a esta persona, aunque su correo haya cambiado desde entonces.
@@ -776,8 +788,15 @@ async fn decide(
             "ya hay una cuenta con {email} ligada a otro inicio de sesión; entra con el \
              proveedor y la cuenta con los que la creaste"
         )),
+        Some(account) if link => Ok(Outcome::Link(
+            Identity { email, ..identity },
+            provider.id.clone(),
+            account.id,
+        )),
         Some(_) => Err(format!(
-            "ya hay una cuenta con {email} que entra con contraseña; inicia sesión con ella"
+            "ya hay una cuenta con {email} que entra con contraseña; inicia sesión con ella \
+             y pásala a {} desde Ajustes → Cuenta y sincronización",
+            provider.name
         )),
         // Sin dominios permitidos ni registro abierto, Google o un emisor genérico
         // abrirían el servidor a cualquier correo del mundo. Un inquilino de Microsoft
@@ -836,23 +855,43 @@ async fn token(
             vault_key,
         },
         Outcome::New(identity, provider) => {
-            let ticket = random_token();
             let email = identity.email.clone();
-            let entry = Ticket {
-                identity,
-                provider,
-                created: Instant::now(),
-            };
-            insert_bounded(
-                &oauth.tickets,
-                ticket.clone(),
-                entry,
-                |t| t.created,
-                TICKET_TTL,
-            );
+            let ticket = issue_ticket(oauth, identity, provider, None);
             OAuthLogin::New { email, ticket }
         }
+        Outcome::Link(identity, provider, account) => {
+            let email = identity.email.clone();
+            let ticket = issue_ticket(oauth, identity, provider, Some(account));
+            OAuthLogin::Link { email, ticket }
+        }
     }))
+}
+
+fn issue_ticket(oauth: &OAuth, identity: Identity, provider: String, link: Option<i64>) -> String {
+    let ticket = random_token();
+    let entry = Ticket {
+        identity,
+        provider,
+        link,
+        created: Instant::now(),
+    };
+    insert_bounded(
+        &oauth.tickets,
+        ticket.clone(),
+        entry,
+        |t| t.created,
+        TICKET_TTL,
+    );
+    ticket
+}
+
+/// Saca el permiso `ticket` si sigue vigente y es del tipo pedido: para crear una cuenta
+/// (`link == false`) o para pasar una a un proveedor.
+fn take_ticket(oauth: &OAuth, ticket: &str, link: bool) -> ApiResult<Ticket> {
+    lock(&oauth.tickets)
+        .remove(ticket)
+        .filter(|t| t.created.elapsed() < TICKET_TTL && t.link.is_some() == link)
+        .ok_or_else(|| ApiError::bad_request("permiso caducado; vuelve a iniciar sesión"))
 }
 
 /// Clave de acceso que nadie conoce: la cuenta solo entra a través del proveedor.
@@ -872,10 +911,7 @@ async fn register(
     let oauth = oauth(&state)?;
     check_account_kdf(&request.salt, request.kdf)?;
     check_blob(&request.vault_key, MAX_VAULT_KEY_CIPHERTEXT)?;
-    let ticket = lock(&oauth.tickets)
-        .remove(&request.ticket)
-        .filter(|t| t.created.elapsed() < TICKET_TTL)
-        .ok_or_else(|| ApiError::bad_request("permiso caducado; vuelve a iniciar sesión"))?;
+    let ticket = take_ticket(oauth, &request.ticket, false)?;
     let account = state
         .db
         .insert_oauth_account(NewOAuthAccount {
@@ -891,6 +927,86 @@ async fn register(
         .await?;
     let token = new_session(&state, account).await?;
     Ok((StatusCode::CREATED, Json(OAuthRegisterResponse { token })))
+}
+
+/// Pasa una cuenta con contraseña al proveedor que confirmó su correo. Además del permiso
+/// del proveedor, hay que demostrar la contraseña de la cuenta: sirve aunque el servidor
+/// ya no acepte sesiones de contraseña (`TUNEL_SOLO_PROVEEDORES`), y nadie que solo
+/// controle el correo en el proveedor puede quedarse con la cuenta.
+async fn link(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<OAuthLinkRequest>,
+) -> ApiResult<Json<OAuthRegisterResponse>> {
+    take_unauthenticated(&state)?;
+    let oauth = oauth(&state)?;
+    check_account_kdf(&request.salt, request.kdf)?;
+    check_blob(&request.vault_key, MAX_VAULT_KEY_CIPHERTEXT)?;
+    let ticket = take_ticket(oauth, &request.ticket, true)?;
+    let email = ticket.identity.email.clone();
+    let unauthorized = || {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "la contraseña de la cuenta no es correcta",
+        )
+    };
+    // Los intentos cuentan como los de iniciar sesión con contraseña.
+    if !state.limiter.try_begin(&email) {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "demasiados intentos; espera unos minutos",
+        ));
+    }
+    let auth = auth::decode_auth(&request.auth).ok_or_else(unauthorized)?;
+    let account = match state.db.account_by_email(email.clone()).await? {
+        Some(account) if Some(account.id) == ticket.link && account.oauth.is_none() => account,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "la cuenta cambió mientras tanto; vuelve a intentarlo",
+            ));
+        }
+    };
+    if !state.hasher.verify(&auth, &account.auth).await? {
+        return Err(unauthorized());
+    }
+    state.limiter.succeeded(&email);
+    let linked = state
+        .db
+        .link_oauth_account(
+            account.id,
+            email,
+            NewOAuthAccount {
+                email: ticket.identity.email,
+                subject: ticket.identity.subject,
+                provider: ticket.provider,
+                kdf: request.kdf,
+                salt: request.salt,
+                unusable_auth: unusable_auth(state.config.auth_kdf),
+                vault_key: request.vault_key,
+                created_at: now(),
+            },
+        )
+        .await;
+    match linked {
+        Ok(()) => {}
+        Err(crate::db::DbError::NotFound) => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "la cuenta cambió mientras tanto; vuelve a intentarlo",
+            ));
+        }
+        Err(crate::db::DbError::AccountExists) => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "esa cuenta del proveedor ya está ligada a otra cuenta de este servidor",
+            ));
+        }
+        Err(e) => return Err(e.into()),
+    }
+    // Las sesiones en vivo abiertas con la contraseña se cortan solas: comprueban su
+    // sesión, que ya no existe.
+    let token = new_session(&state, account.id).await?;
+    Ok(Json(OAuthRegisterResponse { token }))
 }
 
 async fn update_vault_key(

@@ -131,8 +131,8 @@ const SESSION_SWEEP: Duration = Duration::from_secs(60 * 60);
 pub struct AppState {
     pub db: Db,
     pub config: Config,
-    hasher: AuthHasher,
-    limiter: LoginLimiter,
+    pub(crate) hasher: AuthHasher,
+    pub(crate) limiter: LoginLimiter,
     unauthenticated: RateBucket,
     rotations: tokio::sync::Semaphore,
     pub(crate) live: LiveRegistry,

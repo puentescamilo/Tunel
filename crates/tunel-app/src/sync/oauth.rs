@@ -14,16 +14,33 @@ use tunel_sync::SyncError;
 use tunel_sync::oauth::OAuthSignIn;
 use zeroize::{Zeroize, Zeroizing};
 
+/// Para qué se inicia sesión con el proveedor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Purpose {
+    /// Unir este equipo a una cuenta de proveedor, nueva o existente.
+    #[default]
+    SignIn,
+    /// Renovar la sesión caducada de la cuenta de proveedor ya unida.
+    Renew,
+    /// Pasar al proveedor la cuenta con contraseña ya unida.
+    Link,
+}
+
 /// Resultados de las operaciones en segundo plano.
 pub enum OAuthEvent {
     Providers {
         server: String,
         result: Result<AuthProviders, SyncError>,
     },
-    /// Volvió el navegador. `renewing`: era para renovar la sesión de una cuenta ya unida.
+    /// Volvió el navegador.
     SignedIn {
-        renewing: bool,
+        purpose: Purpose,
         result: Result<OAuthSignIn, SyncError>,
+    },
+    /// La cuenta con contraseña ya entra con el proveedor.
+    Linked {
+        round: u64,
+        result: Result<Box<SyncLocal>, SyncError>,
     },
     /// Se volvió a envolver la clave en el servidor con la contraseña maestra nueva.
     Rewrapped {
@@ -42,7 +59,7 @@ pub struct OAuthUi {
     loading: Option<String>,
     /// Esperando al navegador, con el nombre del proveedor.
     pub waiting: Option<String>,
-    renewing: bool,
+    pub purpose: Purpose,
     /// Volvió el navegador: falta la contraseña maestra.
     pub signed_in: Option<OAuthSignIn>,
     pub master: String,
@@ -81,7 +98,13 @@ impl OAuthUi {
 
 /// Pide los proveedores del servidor escrito, si no se pidieron ya para esa dirección.
 pub fn refresh_providers(app: &mut TunelApp) {
-    let Ok(server) = tunel_sync::check_server_url(&app.sync.form.server) else {
+    let server = app.sync.form.server.clone();
+    refresh_providers_for(app, &server);
+}
+
+/// Pide los proveedores del servidor `server`, si no se pidieron ya.
+pub fn refresh_providers_for(app: &mut TunelApp, server: &str) {
+    let Ok(server) = tunel_sync::check_server_url(server) else {
         return;
     };
     let ui = &app.sync.oauth;
@@ -101,19 +124,30 @@ pub fn start(app: &mut TunelApp, provider: AuthProvider) {
     let Ok(server) = tunel_sync::check_server_url(&app.sync.form.server) else {
         return app.notify("Escribe primero la dirección del servidor");
     };
-    begin(app, server, provider, false);
+    begin(app, server, provider, Purpose::SignIn);
+}
+
+/// Empieza a pasar a `provider` la cuenta con contraseña a la que está unido el equipo.
+pub fn start_link(app: &mut TunelApp, provider: AuthProvider) {
+    let Some(local) = app.sync.local().filter(|l| l.oauth.is_none()) else {
+        return;
+    };
+    let Ok(server) = tunel_sync::check_server_url(&local.server) else {
+        return;
+    };
+    begin(app, server, provider, Purpose::Link);
 }
 
 fn begin(
     app: &mut TunelApp,
     server: tunel_sync::ServerUrl,
     provider: AuthProvider,
-    renewing: bool,
+    purpose: Purpose,
 ) {
     app.sync.oauth.cancel();
     app.sync.oauth.waiting = Some(provider.name.clone());
-    app.sync.oauth.renewing = renewing;
-    app.engine.oauth_sign_in(server, provider, renewing);
+    app.sync.oauth.purpose = purpose;
+    app.engine.oauth_sign_in(server, provider, purpose);
 }
 
 /// La sesión de una cuenta de proveedor caducó: vuelve a pasar por el navegador.
@@ -129,7 +163,7 @@ pub fn renew(app: &mut TunelApp) {
         id: oauth.provider.clone(),
         name: oauth.provider_name.clone(),
     };
-    begin(app, server, provider, true);
+    begin(app, server, provider, Purpose::Renew);
 }
 
 /// Con la contraseña maestra escrita, abre o crea la cuenta.
@@ -138,6 +172,9 @@ pub fn finish(app: &mut TunelApp) {
     let Some(sign_in) = app.sync.oauth.signed_in.take() else {
         return;
     };
+    if sign_in.is_link() {
+        return finish_link(app, sign_in, master);
+    }
     if sign_in.is_new() {
         let missing = tunel_core::password::problems(&master);
         if !missing.is_empty() {
@@ -157,6 +194,34 @@ pub fn finish(app: &mut TunelApp) {
     let round = app.sync.begin(data.clone());
     app.engine
         .oauth_complete(round, sign_in, master, data, check);
+}
+
+/// Pasa la cuenta al proveedor. La contraseña maestra se vuelve la que cifra la
+/// sincronización, así que tiene que ser la de esta bóveda y cumplir las reglas.
+fn finish_link(app: &mut TunelApp, sign_in: OAuthSignIn, master: Zeroizing<String>) {
+    let missing = tunel_core::password::problems(&master);
+    if !missing.is_empty() {
+        app.sync.oauth.signed_in = Some(sign_in);
+        return app.notify(format!(
+            "Tu contraseña maestra no cumple las reglas para cifrar la sincronización. {}. \
+             Cámbiala en Ajustes → Seguridad y vuelve a intentarlo.",
+            tunel_core::password::describe(&missing)
+        ));
+    }
+    let (Some(local), Some(vault), Some(data)) = (
+        app.sync.local().cloned(),
+        app.vault.as_ref(),
+        app.data().cloned(),
+    ) else {
+        return;
+    };
+    if app.sync.busy() {
+        app.sync.oauth.signed_in = Some(sign_in);
+        return app.notify("Espera a que termine la sincronización en curso");
+    }
+    let check = vault.password_check();
+    let round = app.sync.begin(data);
+    app.engine.oauth_link(round, local, sign_in, master, check);
 }
 
 /// La contraseña maestra va a cambiar: con una cuenta de proveedor, primero se vuelve a
@@ -190,7 +255,8 @@ pub fn on_event(app: &mut TunelApp, event: OAuthEvent) {
                 Err(e) => tracing::info!(error = %e, "no se pudieron pedir los proveedores"),
             }
         }
-        OAuthEvent::SignedIn { renewing, result } => on_signed_in(app, renewing, result),
+        OAuthEvent::SignedIn { purpose, result } => on_signed_in(app, purpose, result),
+        OAuthEvent::Linked { round, result } => on_linked(app, round, result),
         OAuthEvent::Rewrapped {
             round,
             password,
@@ -199,16 +265,16 @@ pub fn on_event(app: &mut TunelApp, event: OAuthEvent) {
     }
 }
 
-fn on_signed_in(app: &mut TunelApp, renewing: bool, result: Result<OAuthSignIn, SyncError>) {
+fn on_signed_in(app: &mut TunelApp, purpose: Purpose, result: Result<OAuthSignIn, SyncError>) {
     // Se canceló mientras tanto.
-    if app.sync.oauth.waiting.take().is_none() || renewing != app.sync.oauth.renewing {
+    if app.sync.oauth.waiting.take().is_none() || purpose != app.sync.oauth.purpose {
         return;
     }
     let sign_in = match result {
         Ok(sign_in) => sign_in,
         Err(e) => return app.notify(e.to_string()),
     };
-    if !renewing {
+    if purpose != Purpose::Renew {
         app.sync.oauth.signed_in = Some(sign_in);
         return;
     }
@@ -227,6 +293,31 @@ fn on_signed_in(app: &mut TunelApp, renewing: bool, result: Result<OAuthSignIn, 
             app.notify("Sesión renovada; sincronizando…");
         }
         Err(e) => app.notify(e.to_string()),
+    }
+}
+
+fn on_linked(app: &mut TunelApp, round: u64, result: Result<Box<SyncLocal>, SyncError>) {
+    if app.sync.finish(round).is_none() {
+        return;
+    }
+    match result {
+        Ok(local) => {
+            let provider = local
+                .oauth
+                .as_ref()
+                .map(|o| o.provider_name.clone())
+                .unwrap_or_default();
+            app.sync.local = Some(*local);
+            save(app);
+            app.sync.sign_in_again = false;
+            app.sync.oauth.purpose = Purpose::SignIn;
+            super::sync_now(app);
+            app.notify(format!(
+                "Tu cuenta ya entra con {provider}. En tus otros equipos, vuelve a iniciar \
+                 sesión con {provider} y tu contraseña maestra."
+            ));
+        }
+        Err(e) => app.notify(format!("No se pudo pasar la cuenta: {e}")),
     }
 }
 

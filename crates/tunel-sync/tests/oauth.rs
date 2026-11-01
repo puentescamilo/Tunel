@@ -16,7 +16,9 @@ use tunel_core::vault::VaultData;
 use tunel_server::oauth::ProviderConfig;
 use tunel_server::{AppState, Config, Db, OAuthConfig, router};
 use tunel_sync::oauth::{self, OAuthSignIn};
-use tunel_sync::{ServerUrl, SyncError, check_server_url, sync_once};
+use tunel_sync::{
+    ServerUrl, SyncError, check_server_url, create_account, sign_in as password_sign_in, sync_once,
+};
 use zeroize::Zeroizing;
 
 const MASTER: &str = "Maestra-Fuerte-2026!";
@@ -60,8 +62,14 @@ struct World {
 }
 
 async fn world() -> World {
+    world_on(Db::open_in_memory().unwrap(), false).await
+}
+
+/// Un servidor sobre `db`; con `providers_only`, sin correo y contraseña.
+async fn world_on(db: Db, providers_only: bool) -> World {
     let (issuer, claims) = fake_idp().await;
     let config = Config {
+        providers_only,
         auth_kdf: KdfParams::FAST_FOR_TESTS,
         unauthenticated_burst: 1000,
         allowed_domains: vec!["empresa.com".into()],
@@ -79,9 +87,7 @@ async fn world() -> World {
         }),
         ..Config::default()
     };
-    let state = AppState::new(Db::open_in_memory().unwrap(), config)
-        .await
-        .unwrap();
+    let state = AppState::new(db, config).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
@@ -113,11 +119,20 @@ fn param(url: &str, name: &str) -> String {
 impl World {
     /// Inicia sesión con Google como la persona `sub` con correo `email`.
     async fn sign_in(&self, sub: &str, email: &str) -> OAuthSignIn {
+        self.attempt(sub, email, false).await.unwrap()
+    }
+
+    /// Como `sign_in`; con `link`, para pasar a Google la cuenta con contraseña.
+    async fn attempt(&self, sub: &str, email: &str, link: bool) -> Result<OAuthSignIn, SyncError> {
         let providers = oauth::providers(&self.server).await.unwrap().providers;
         assert_eq!(providers.len(), 1);
-        let start = oauth::begin(&self.server, providers[0].clone())
-            .await
-            .unwrap();
+        let provider = providers[0].clone();
+        let start = if link {
+            oauth::begin_link(&self.server, provider).await
+        } else {
+            oauth::begin(&self.server, provider).await
+        }
+        .unwrap();
         let url = start.url.clone();
         let waiting = tokio::spawn(start.wait());
         // El navegador: servidor → proveedor (que da el visto bueno) → servidor → Túnel.
@@ -141,14 +156,8 @@ impl World {
         let to_app = self.browser.get(&callback).send().await.unwrap();
         let back = location(&to_app);
         assert!(back.starts_with("http://127.0.0.1:"), "{back}");
-        let page = self.browser.get(&back).send().await.unwrap();
-        assert!(
-            page.text()
-                .await
-                .unwrap()
-                .contains("Ya puedes volver a Túnel")
-        );
-        waiting.await.unwrap().unwrap()
+        self.browser.get(&back).send().await.unwrap();
+        waiting.await.unwrap()
     }
 }
 
@@ -291,4 +300,121 @@ async fn a_server_without_providers_lists_none() {
     let none = oauth::providers(&server).await.unwrap();
     assert!(none.providers.is_empty());
     assert!(none.password_login);
+}
+
+const ACCOUNT_PASSWORD: &str = "contraseña de la cuenta";
+
+#[tokio::test]
+async fn a_password_account_moves_to_the_provider_and_keeps_its_data() {
+    let w = world().await;
+    let data = hosts(&["web-01"]);
+    let laptop = create_account(
+        &w.server,
+        "ana@empresa.com",
+        Zeroizing::new(ACCOUNT_PASSWORD.into()),
+        &data,
+    )
+    .await
+    .unwrap();
+    let (laptop, _) = sync(&laptop, &data).await;
+    let (laptop, team) = tunel_sync::teams::create_team(&laptop, "Operaciones")
+        .await
+        .unwrap();
+
+    // Sin pedirlo, Google no sustituye a la contraseña.
+    let refused = w.attempt("ana-1", "ana@empresa.com", false).await;
+    let Err(SyncError::Provider(why)) = refused else {
+        panic!("se esperaba el rechazo del proveedor");
+    };
+    assert!(why.contains("pásala a Google"), "{why}");
+
+    // Otra persona del proveedor no puede pasar la cuenta de Ana a la suya.
+    let bob = w.attempt("bob-1", "bob@empresa.com", true).await.unwrap();
+    assert!(
+        oauth::link(&laptop, bob, Zeroizing::new(MASTER.into()))
+            .await
+            .is_err()
+    );
+
+    // Sin la contraseña de la cuenta, controlar el correo en Google no basta.
+    let sign_in = w.attempt("ana-1", "ana@empresa.com", true).await.unwrap();
+    assert!(sign_in.is_link());
+    let forged = SyncLocal {
+        auth: Zeroizing::new("Y2xhdmUtZGUtYWNjZXNvLWZhbHNhLTEyMzQ1Njc4OTA".into()),
+        ..laptop.clone()
+    };
+    assert!(
+        oauth::link(&forged, sign_in, Zeroizing::new(MASTER.into()))
+            .await
+            .is_err()
+    );
+
+    // La contraseña maestra tiene que ser fuerte.
+    let sign_in = w.attempt("ana-1", "ana@empresa.com", true).await.unwrap();
+    let weak = oauth::link(&laptop, sign_in, Zeroizing::new("corta".into())).await;
+    assert!(matches!(weak, Err(SyncError::WeakMasterPassword(_))));
+
+    let sign_in = w.attempt("ana-1", "ana@empresa.com", true).await.unwrap();
+    let laptop = oauth::link(&laptop, sign_in, Zeroizing::new(MASTER.into()))
+        .await
+        .unwrap();
+    assert_eq!(laptop.oauth.as_ref().unwrap().provider, "google");
+    assert!(laptop.auth.is_empty());
+    assert!(laptop.teams.iter().any(|t| t.id == team));
+    sync(&laptop, &data).await;
+
+    // La contraseña de la cuenta ya no sirve, y otro equipo entra con Google y la
+    // contraseña maestra, con los mismos datos.
+    let old = password_sign_in(
+        &w.server,
+        "ana@empresa.com",
+        Zeroizing::new(ACCOUNT_PASSWORD.into()),
+        &VaultData::default(),
+    )
+    .await;
+    assert!(old.is_err());
+    let again = w.sign_in("ana-1", "ana@empresa.com").await;
+    assert!(!again.is_new());
+    let desktop = oauth::complete(again, Zeroizing::new(MASTER.into()), &VaultData::default())
+        .await
+        .unwrap();
+    let (desktop, received) = sync(&desktop, &VaultData::default()).await;
+    assert!(received.hosts.iter().any(|h| h.label == "web-01"));
+    assert_eq!(
+        desktop.keypair.as_ref().map(|k| k.public()),
+        laptop.keypair.as_ref().map(|k| k.public())
+    );
+}
+
+#[tokio::test]
+async fn the_move_also_works_when_only_providers_are_allowed() {
+    let db = Db::open_in_memory().unwrap();
+    let before = world_on(db.clone(), false).await;
+    let data = hosts(&["db-01"]);
+    let laptop = create_account(
+        &before.server,
+        "ana@empresa.com",
+        Zeroizing::new(ACCOUNT_PASSWORD.into()),
+        &data,
+    )
+    .await
+    .unwrap();
+    sync(&laptop, &data).await;
+
+    let w = world_on(db, true).await;
+    let laptop = SyncLocal {
+        server: w.server.base.clone(),
+        ..laptop
+    };
+    let sign_in = w.attempt("ana-1", "ana@empresa.com", true).await.unwrap();
+    let laptop = oauth::link(&laptop, sign_in, Zeroizing::new(MASTER.into()))
+        .await
+        .unwrap();
+    sync(&laptop, &data).await;
+    let again = w.sign_in("ana-1", "ana@empresa.com").await;
+    let desktop = oauth::complete(again, Zeroizing::new(MASTER.into()), &VaultData::default())
+        .await
+        .unwrap();
+    let (_, received) = sync(&desktop, &VaultData::default()).await;
+    assert!(received.hosts.iter().any(|h| h.label == "db-01"));
 }

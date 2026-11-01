@@ -504,19 +504,24 @@ impl Engine {
         &self,
         server: ServerUrl,
         provider: tunel_core::sync::protocol::AuthProvider,
-        renewing: bool,
+        purpose: crate::sync::oauth::Purpose,
     ) {
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();
         self.spawn(async move {
-            let result = match tunel_sync::oauth::begin(&server, provider).await {
+            let started = if purpose == crate::sync::oauth::Purpose::Link {
+                tunel_sync::oauth::begin_link(&server, provider).await
+            } else {
+                tunel_sync::oauth::begin(&server, provider).await
+            };
+            let result = match started {
                 Ok(start) => {
                     ctx.open_url(egui::OpenUrl::new_tab(&start.url));
                     start.wait().await
                 }
                 Err(e) => Err(e),
             };
-            let event = crate::sync::oauth::OAuthEvent::SignedIn { renewing, result };
+            let event = crate::sync::oauth::OAuthEvent::SignedIn { purpose, result };
             let _ = events.send(AppEvent::OAuth(event));
             ctx.request_repaint();
         });
@@ -551,6 +556,40 @@ impl Engine {
                 ))
             };
             let _ = events.send(AppEvent::SyncLinked { round, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Pasa al proveedor la cuenta con contraseña del equipo, con la contraseña maestra, que
+    /// tiene que ser la de esta bóveda.
+    pub fn oauth_link(
+        &self,
+        round: u64,
+        local: SyncLocal,
+        sign_in: tunel_sync::oauth::OAuthSignIn,
+        master: Zeroizing<String>,
+        check: tunel_core::PasswordCheck,
+    ) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let password = master.clone();
+            let matches = tokio::task::spawn_blocking(move || check.matches(&password))
+                .await
+                .unwrap_or(false);
+            let result = if matches {
+                tunel_sync::oauth::link(&local, sign_in, master)
+                    .await
+                    .map(Box::new)
+            } else {
+                Err(SyncError::Provider(
+                    "esa no es la contraseña maestra de este equipo; la sincronización se \
+                     cifrará con ella"
+                        .into(),
+                ))
+            };
+            let event = crate::sync::oauth::OAuthEvent::Linked { round, result };
+            let _ = events.send(AppEvent::OAuth(event));
             ctx.request_repaint();
         });
     }
