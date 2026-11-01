@@ -36,6 +36,31 @@ struct TestServer {
     forward_sessions: Arc<std::sync::Mutex<Vec<server::Handle>>>,
     /// Sesiones que abrieron un canal `direct-tcpip`, como hace un bastión.
     tunnel_sessions: Arc<std::sync::Mutex<Vec<server::Handle>>>,
+    /// Entrada recibida por los canales que ejecutan `sh`, hasta su EOF.
+    sh_inputs: Arc<std::sync::Mutex<std::collections::HashMap<ChannelId, Vec<u8>>>>,
+    /// Carpeta personal de la cuenta de prueba, donde corre `sh`.
+    home: Arc<tempfile::TempDir>,
+}
+
+/// Comando con el que se instala una clave pública (ver `tunel_ssh::authorized_keys`).
+const SH_COMMAND: &[u8] = b"sh 2>&1";
+
+/// Ejecuta en este equipo, con `home` como carpeta personal, el script que llegó por la
+/// entrada de `sh`. Devuelve la salida y el código de salida.
+fn run_sh(home: &std::path::Path, script: &[u8]) -> (Vec<u8>, u32) {
+    use std::io::Write;
+    let mut child = std::process::Command::new("sh")
+        .env("HOME", home)
+        .current_dir(home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(script).unwrap();
+    let out = child.wait_with_output().unwrap();
+    let output = [out.stdout, out.stderr].concat();
+    (output, out.status.code().unwrap_or(1) as u32)
 }
 
 /// Mensaje de inicio de conexión X11 (orden de bytes little-endian).
@@ -193,6 +218,10 @@ impl server::Handler for TestServer {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if let Some(input) = self.sh_inputs.lock().unwrap().get_mut(&channel) {
+            input.extend_from_slice(data);
+            return Ok(());
+        }
         if !self.shells.lock().unwrap().contains(&channel) {
             return Ok(());
         }
@@ -214,8 +243,29 @@ impl server::Handler for TestServer {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
+        if command == SH_COMMAND {
+            self.sh_inputs.lock().unwrap().insert(channel, Vec::new());
+            return Ok(());
+        }
         session.data(channel, [b"eco:", command].concat())?;
         session.exit_status_request(channel, 0)?;
+        session.eof(channel)?;
+        session.close(channel)?;
+        Ok(())
+    }
+
+    /// Al cerrarse la entrada de `sh`, ejecuta lo recibido y contesta.
+    async fn channel_eof(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let Some(script) = self.sh_inputs.lock().unwrap().remove(&channel) else {
+            return Ok(());
+        };
+        let (output, status) = run_sh(self.home.path(), &script);
+        session.data(channel, output)?;
+        session.exit_status_request(channel, status)?;
         session.eof(channel)?;
         session.close(channel)?;
         Ok(())
@@ -280,6 +330,8 @@ async fn start_server_with_state() -> (u16, TestServer) {
         x11_cookie: Arc::default(),
         forward_sessions: Arc::default(),
         tunnel_sessions: Arc::default(),
+        sh_inputs: Arc::default(),
+        home: Arc::new(tempfile::tempdir().unwrap()),
     };
     let mut server = state.clone();
     tokio::spawn(async move {
@@ -386,6 +438,27 @@ async fn password_auth_then_exec_returns_output_and_status() {
         seen[0].starts_with("SHA256:"),
         "se pidió confirmar la huella: {seen:?}"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_public_key_is_installed_once_in_authorized_keys() {
+    use tunel_ssh::authorized_keys::{Installed, install};
+    let (port, server) = start_server_with_state().await;
+    let f = fixture(port, password_identity());
+    let (tx, _answers) = auto_answer(None);
+    let conn = connect(&f, tx).await.unwrap();
+    assert_eq!(install(&conn, CLIENT_PUB).await.unwrap(), Installed::Added);
+    assert_eq!(
+        install(&conn, CLIENT_PUB).await.unwrap(),
+        Installed::AlreadyThere
+    );
+    let file = server.home.path().join(".ssh/authorized_keys");
+    let text = std::fs::read_to_string(file).unwrap();
+    assert_eq!(text.lines().count(), 1);
+    let installed = PublicKey::from_openssh(text.trim()).unwrap();
+    let expected = PublicKey::from_openssh(CLIENT_PUB.trim()).unwrap();
+    assert_eq!(installed.key_data(), expected.key_data());
 }
 
 #[tokio::test]
