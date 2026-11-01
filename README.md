@@ -460,6 +460,12 @@ Si cambias la contraseña maestra, Túnel vuelve a cifrar la clave de la cuenta 
 en tus otros equipos tendrás que usar la nueva al volver a iniciar sesión. Cuando la sesión
 caduca (a los 30 días), Ajustes muestra **Iniciar sesión con Google** para renovarla.
 
+Para que **todas** las personas entren con el proveedor, añade `TUNEL_SOLO_PROVEEDORES=1` al
+`.env`. Túnel oculta entonces el correo y la contraseña en Ajustes (desde la 0.6.2), y el
+servidor rechaza crear o abrir cuentas con contraseña. Las cuentas con contraseña que ya
+existían dejan de funcionar: sus personas tienen que volver a entrar con el proveedor, y si el
+correo es el mismo, hay que borrar antes esa cuenta del servidor.
+
 - **Quién puede crear cuenta:** con Google o un emisor genérico hace falta
   `TUNEL_DOMINIOS_PERMITIDOS`; si no, cualquiera con una cuenta de Google podría crear una.
   Con Microsoft 365, el inquilino ya limita las cuentas a tu organización, y no se admiten
@@ -518,6 +524,7 @@ si usas la opción A.
 | `TUNEL_GOOGLE_ID_CLIENTE`, `TUNEL_GOOGLE_SECRETO` | Iniciar sesión con Google | sin definir |
 | `TUNEL_MICROSOFT_ID_CLIENTE`, `TUNEL_MICROSOFT_SECRETO`, `TUNEL_MICROSOFT_INQUILINO` | Iniciar sesión con Microsoft 365 | sin definir |
 | `TUNEL_OIDC_NOMBRE`, `TUNEL_OIDC_EMISOR`, `TUNEL_OIDC_ID_CLIENTE`, `TUNEL_OIDC_SECRETO` | Iniciar sesión con otro proveedor OpenID Connect | sin definir |
+| `TUNEL_SOLO_PROVEEDORES` | `1` obliga a entrar con un proveedor: desactiva el correo y la contraseña | sin definir |
 | `TUNEL_DB` | Archivo de la base de datos SQLite | `/datos/tunel.db` |
 | `TUNEL_ESCUCHA` | Dirección y puerto en los que escucha | `0.0.0.0:8080` |
 

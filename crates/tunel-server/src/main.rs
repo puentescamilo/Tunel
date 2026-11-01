@@ -48,6 +48,9 @@ fn warn_about_oauth(config: &Config) {
     };
     let names: Vec<_> = oauth.providers.iter().map(|p| p.name.as_str()).collect();
     tracing::info!(proveedores = %names.join(", "), url = %oauth.public_url, "inicio de sesión con proveedores de identidad");
+    if config.providers_only {
+        tracing::info!("solo se entra con proveedores: correo y contraseña desactivados");
+    }
     for provider in &oauth.providers {
         tracing::info!(
             "dirección de retorno que hay que registrar en {}: {}/v1/auth/{}/callback",
@@ -87,7 +90,14 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("TUNEL_DOMINIOS_PERMITIDOS: {e}"))?;
     let oauth = OAuthConfig::from_env(|name| std::env::var(name).ok())
         .map_err(|e| anyhow::anyhow!("proveedores de identidad: {e}"))?;
+    let providers_only = std::env::var("TUNEL_SOLO_PROVEEDORES").is_ok_and(|v| v == "1");
+    anyhow::ensure!(
+        !providers_only || oauth.is_some(),
+        "TUNEL_SOLO_PROVEEDORES=1 necesita al menos un proveedor de identidad configurado: \
+         si no, nadie podría iniciar sesión"
+    );
     let config = Config {
+        providers_only,
         open_registration: std::env::var("TUNEL_REGISTRO_ABIERTO").is_ok_and(|v| v == "1"),
         allowed_domains,
         oauth,

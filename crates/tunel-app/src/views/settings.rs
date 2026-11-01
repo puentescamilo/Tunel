@@ -260,12 +260,12 @@ fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
         .sync
         .local()
         .and_then(|l| l.oauth.as_ref())
-        .map(|o| o.provider_name.clone());
+        .map(|o| (o.provider.clone(), o.provider_name.clone()));
     ui.horizontal(|ui| {
         let shown = ui::masked(&server, app.sync.form.show_server);
         ui.label(RichText::new(format!("{email} · {shown}")).strong());
         ui::reveal_button(ui, &mut app.sync.form.show_server);
-        if let Some(provider) = &provider {
+        if let Some((_, provider)) = &provider {
             ui::chip(ui, &format!("con {provider}"), p.muted);
         }
     });
@@ -323,10 +323,7 @@ fn sync_card(app: &mut TunelApp, ui: &mut egui::Ui) {
             });
         } else if ui
             .add_enabled_ui(!busy, |ui| {
-                ui::primary_button(
-                    ui,
-                    &ui::with_icon(icons::IDENTITY, &format!("Iniciar sesión con {provider}")),
-                )
+                ui::brand::sign_in_button(ui, &provider.0, &provider.1)
             })
             .inner
             .clicked()
@@ -407,26 +404,27 @@ fn account_form(app: &mut TunelApp, ui: &mut egui::Ui, status: &SyncStatus) {
         .map(|s| s.base)
         .unwrap_or_default();
     let providers = app.sync.oauth.providers_for(&server).to_vec();
+    let password_login = app.sync.oauth.password_login_for(&server);
     if !providers.is_empty() {
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            for provider in providers {
-                let label =
-                    ui::with_icon(icons::IDENTITY, &format!("Entrar con {}", provider.name));
-                if ui::primary_button(ui, &label).clicked() {
-                    crate::sync::oauth::start(app, provider);
-                }
+        ui.add_space(8.0);
+        for provider in providers {
+            if ui::brand::sign_in_button(ui, &provider.id, &provider.name).clicked() {
+                crate::sync::oauth::start(app, provider);
             }
-        });
-        ui.label(
-            RichText::new(
-                "Con tu cuenta de la organización: sin contraseña de cuenta; la sincronización se \
-                 cifra con tu contraseña maestra de Túnel. O, con correo y contraseña:",
-            )
-            .size(12.0)
-            .color(p.muted),
-        );
+            ui.add_space(4.0);
+        }
+        let how = if password_login {
+            "Con tu cuenta de la organización: sin contraseña de cuenta; la sincronización se \
+             cifra con tu contraseña maestra de Túnel. O, con correo y contraseña:"
+        } else {
+            "Este servidor solo admite tu cuenta de la organización. La sincronización se \
+             cifra con tu contraseña maestra de Túnel: el servidor no puede leer nada."
+        };
+        ui.label(RichText::new(how).size(12.0).color(p.muted));
         ui.add_space(4.0);
+    }
+    if !password_login {
+        return;
     }
     let form = &mut app.sync.form;
     field(ui, &mut form.email, "Correo de la cuenta", false);

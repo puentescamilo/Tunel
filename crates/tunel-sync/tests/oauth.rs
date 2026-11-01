@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use tunel_core::crypto::KdfParams;
 use tunel_core::model::Host;
 use tunel_core::sync::SyncLocal;
-use tunel_core::sync::protocol::AuthProvider;
 use tunel_core::vault::VaultData;
 use tunel_server::oauth::ProviderConfig;
 use tunel_server::{AppState, Config, Db, OAuthConfig, router};
@@ -114,7 +113,7 @@ fn param(url: &str, name: &str) -> String {
 impl World {
     /// Inicia sesión con Google como la persona `sub` con correo `email`.
     async fn sign_in(&self, sub: &str, email: &str) -> OAuthSignIn {
-        let providers = oauth::providers(&self.server).await.unwrap();
+        let providers = oauth::providers(&self.server).await.unwrap().providers;
         assert_eq!(providers.len(), 1);
         let start = oauth::begin(&self.server, providers[0].clone())
             .await
@@ -289,6 +288,7 @@ async fn a_server_without_providers_lists_none() {
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
     let server = check_server_url(&format!("http://{address}")).unwrap();
-    let none: Vec<AuthProvider> = oauth::providers(&server).await.unwrap();
-    assert!(none.is_empty());
+    let none = oauth::providers(&server).await.unwrap();
+    assert!(none.providers.is_empty());
+    assert!(none.password_login);
 }

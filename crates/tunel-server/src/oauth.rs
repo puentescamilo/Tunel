@@ -544,7 +544,10 @@ async fn list_providers(State(state): State<Arc<AppState>>) -> Json<AuthProvider
                 .collect()
         })
         .unwrap_or_default();
-    Json(AuthProviders { providers })
+    Json(AuthProviders {
+        providers,
+        password_login: !state.config.providers_only,
+    })
 }
 
 #[derive(Deserialize)]

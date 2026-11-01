@@ -628,7 +628,9 @@ impl Connection<'_> {
     /// La cuenta sigue con su sesión abierta y en el Team.
     async fn still_allowed(&self) -> bool {
         let db = &self.state.db;
-        let session = db.session_account(self.token_hash, now()).await;
+        let session = db
+            .session_account(self.token_hash, now(), self.state.config.providers_only)
+            .await;
         if !matches!(session, Ok(Some(account)) if account == self.account) {
             return false;
         }
