@@ -36,6 +36,20 @@ pub enum ResolveError {
     HostNotFound,
     #[error("la cadena de jump hosts contiene un ciclo")]
     JumpCycle,
+    #[error(
+        "«{0}» es de un Team y usa un host que no es de ese Team; elige uno del Team en su \
+         configuración"
+    )]
+    OtherSpace(String),
+}
+
+/// Un elemento del espacio `from` puede usar uno del espacio `to`. Lo personal puede usar
+/// lo de cualquier espacio: lo eligió la propia persona. Lo de un Team solo usa lo de ese
+/// mismo Team: cualquier miembro puede escribirlo, y si pudiera apuntar a la identidad, el
+/// grupo, el jump host o el snippet personal de otro, le haría mandar sus credenciales o
+/// su script al servidor que eligiera.
+pub fn can_use(from: &Option<String>, to: &Option<String>) -> bool {
+    from.is_none() || from == to
 }
 
 /// Valores de conexión ya resueltos con herencia de grupos.
@@ -110,6 +124,24 @@ impl VaultData {
 
     pub fn snippet(&self, id: SnippetId) -> Option<&Snippet> {
         self.snippets.iter().find(|s| s.id == id)
+    }
+
+    /// Snippet que se ejecuta al conectar a `host`, si es de un espacio que puede usar.
+    pub fn startup_snippet(&self, host: &Host) -> Option<&Snippet> {
+        host.startup_snippet
+            .and_then(|s| self.snippet(s))
+            .filter(|s| can_use(&host.team, &s.team))
+    }
+
+    /// Host por el que va el túnel `rule`. Una regla de un Team solo usa un host de ese
+    /// Team: si no, iría con las credenciales personales de quien la abre.
+    pub fn forward_host(&self, rule: &PortForward) -> Result<&Host, ResolveError> {
+        let host = self.host(rule.host).ok_or(ResolveError::HostNotFound)?;
+        if can_use(&rule.team, &host.team) {
+            Ok(host)
+        } else {
+            Err(ResolveError::OtherSpace(rule.label.clone()))
+        }
     }
 
     /// Elimina el host y las reglas de túnel que dependen de él.
@@ -288,17 +320,29 @@ impl VaultData {
             .unwrap_or(&self.settings.theme)
     }
 
+    /// Valores con los que conectar al host `id`. Lo que un host de un Team hereda o usa de
+    /// otro espacio no cuenta (ver [`can_use`]).
     pub fn resolve(&self, id: HostId) -> Result<ResolvedHost, ResolveError> {
         let host = self.host(id).ok_or(ResolveError::HostNotFound)?;
-        let chain = self.group_chain(host.group);
+        let chain: Vec<&Group> = self
+            .group_chain(host.group)
+            .into_iter()
+            .take_while(|g| can_use(&host.team, &g.team))
+            .collect();
         let identity_id = host
             .identity
             .or_else(|| chain.iter().find_map(|g| g.identity));
-        let identity = identity_id.and_then(|i| self.identity(i)).cloned();
+        let identity = identity_id
+            .and_then(|i| self.identity(i))
+            .filter(|i| can_use(&host.team, &i.team))
+            .cloned();
         let key = identity
             .as_ref()
-            .and_then(|i| i.key)
-            .and_then(|k| self.key(k))
+            .and_then(|i| {
+                i.key
+                    .and_then(|k| self.key(k))
+                    .filter(|k| can_use(&i.team, &k.team))
+            })
             .cloned();
         let port = host
             .port
@@ -326,6 +370,13 @@ impl VaultData {
             path.push(id);
             let host = vault.host(id).ok_or(ResolveError::HostNotFound)?;
             for jump in &host.jump_hosts {
+                // Saltarse el jump host conectaría por otro camino sin avisar.
+                let usable = vault
+                    .host(*jump)
+                    .is_none_or(|j| can_use(&host.team, &j.team));
+                if !usable {
+                    return Err(ResolveError::OtherSpace(host.display_name().to_string()));
+                }
                 walk(vault, *jump, path, out)?;
                 out.push(vault.resolve(*jump)?);
             }
@@ -634,6 +685,113 @@ mod tests {
             .map(|r| r.host.label)
             .collect();
         assert_eq!(chain, vec!["bastion", "middle"]);
+    }
+
+    const TEAM: &str = "6c2b8f0e-6f4e-4d55-9a37-1e2f3a4b5c6d";
+
+    /// La bóveda de quien recibe un host de un Team que apunta a sus cosas personales.
+    fn team_host_pointing_at_personal_items() -> (VaultData, HostId, ForwardId) {
+        let identity = Identity {
+            password: Some("personal".into()),
+            ..Identity::new("mía", "ana")
+        };
+        let group = Group {
+            identity: Some(identity.id),
+            ..Group::new("personal")
+        };
+        let snippet = Snippet::new("mío", "cat ~/.secreto");
+        let bastion = Host::new("bastión", "10.0.0.1");
+        let host = Host {
+            team: Some(TEAM.into()),
+            group: Some(group.id),
+            startup_snippet: Some(snippet.id),
+            ..Host::new("trampa", "atacante.invalid")
+        };
+        let rule = PortForward {
+            team: Some(TEAM.into()),
+            ..PortForward::local(bastion.id, 1080, "localhost", 80)
+        };
+        let (host_id, rule_id) = (host.id, rule.id);
+        let data = VaultData::default()
+            .with_identity(identity)
+            .with_group(group)
+            .with_snippet(snippet)
+            .with_host(bastion)
+            .with_host(host)
+            .with_forward(rule);
+        (data, host_id, rule_id)
+    }
+
+    #[test]
+    fn a_team_host_does_not_use_personal_credentials_groups_or_snippets() {
+        let (data, id, _) = team_host_pointing_at_personal_items();
+        let resolved = data.resolve(id).unwrap();
+        assert_eq!(resolved.identity, None, "ni heredada del grupo personal");
+        let personal_identity = data.identities[0].id;
+        let direct = data.with_host(Host {
+            identity: Some(personal_identity),
+            ..data.host(id).unwrap().clone()
+        });
+        assert_eq!(direct.resolve(id).unwrap().identity, None, "ni directa");
+        assert!(data.startup_snippet(data.host(id).unwrap()).is_none());
+
+        // En el mismo Team sí.
+        let shared = data
+            .with_identity(Identity {
+                team: Some(TEAM.into()),
+                ..data.identities[0].clone()
+            })
+            .with_snippet(Snippet {
+                team: Some(TEAM.into()),
+                ..data.snippets[0].clone()
+            })
+            .with_group(Group {
+                team: Some(TEAM.into()),
+                ..data.groups[0].clone()
+            });
+        assert!(shared.resolve(id).unwrap().identity.is_some());
+        assert!(shared.startup_snippet(shared.host(id).unwrap()).is_some());
+    }
+
+    #[test]
+    fn a_team_host_cannot_jump_through_a_personal_host() {
+        let (data, id, _) = team_host_pointing_at_personal_items();
+        let bastion = data.hosts[0].id;
+        let data = data.with_host(Host {
+            jump_hosts: vec![bastion],
+            ..data.host(id).unwrap().clone()
+        });
+        assert!(matches!(
+            data.resolve_jump_chain(id),
+            Err(ResolveError::OtherSpace(_))
+        ));
+        // Un host personal sí puede saltar por uno de un Team.
+        let personal = Host {
+            jump_hosts: vec![id],
+            ..Host::new("mío", "10.0.0.9")
+        };
+        let personal_id = personal.id;
+        let data = data.with_host(Host {
+            jump_hosts: Vec::new(),
+            ..data.host(id).unwrap().clone()
+        });
+        let data = data.with_host(personal);
+        assert_eq!(data.resolve_jump_chain(personal_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_team_forward_cannot_run_through_a_personal_host() {
+        let (data, _, rule) = team_host_pointing_at_personal_items();
+        let rule = data.forwards.iter().find(|f| f.id == rule).unwrap();
+        assert!(matches!(
+            data.forward_host(rule),
+            Err(ResolveError::OtherSpace(_))
+        ));
+        let personal = PortForward {
+            team: None,
+            ..rule.clone()
+        };
+        assert!(data.forward_host(&personal).is_ok());
     }
 
     #[test]
