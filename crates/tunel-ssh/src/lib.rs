@@ -4,6 +4,7 @@ pub mod authorized_keys;
 pub mod client;
 pub mod fido;
 pub mod forward;
+pub mod key_audit;
 pub mod keygen;
 pub mod mosh;
 pub mod proxy;

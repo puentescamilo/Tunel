@@ -3,6 +3,7 @@
 pub mod fonts;
 pub mod forwards;
 pub mod hosts;
+pub mod key_audit;
 pub mod keychain;
 pub mod known_hosts;
 pub mod live;
