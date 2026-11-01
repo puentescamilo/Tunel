@@ -554,6 +554,9 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
 
 ## Estado y hoja de ruta
 
+La hoja de ruta detallada, con el orden de las próximas entregas, está en
+[`docs/hoja-de-ruta.md`](docs/hoja-de-ruta.md).
+
 | Función | Estado |
 |---|---|
 | Bóveda, hosts, grupos, llavero, importar `~/.ssh/config` | ✅ |
@@ -588,7 +591,7 @@ cargo fmt --all                                         # formato
 | `tunel-sync` | Cliente de sincronización: cuentas y rondas de sincronización con el servidor |
 | `tunel-server` | Servidor de sincronización (axum + SQLite): cuentas, sesiones y registros cifrados |
 
-**Pruebas:** 298 en total.
+**Pruebas:** 465 en total.
 
 - **SSH:** 16 de punta a punta contra un servidor SSH que arranca el propio test
   (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de
