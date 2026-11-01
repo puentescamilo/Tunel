@@ -1,9 +1,12 @@
 //! Aviso de versiones nuevas: consulta la última versión publicada en GitHub y, si es
-//! más reciente que la instalada, ofrece descargar el instalador de este sistema.
+//! más reciente que la instalada, ofrece actualizar.
 //!
-//! No instala nada por su cuenta: abre la descarga en el navegador y es el usuario quien
-//! ejecuta el instalador, con las mismas comprobaciones del sistema que la primera vez.
+//! Si la versión trae la lista de sumas firmada, Túnel descarga el instalador, lo
+//! comprueba y lo abre (ver [`install`]); si no, abre la descarga en el navegador.
 
+pub mod install;
+
+use install::Installer;
 use serde::Deserialize;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
@@ -78,6 +81,8 @@ pub struct Update {
     pub notes_url: String,
     /// Instalador de este sistema o, si no hay uno, la página de la versión.
     pub download_url: String,
+    /// El instalador de este sistema, si la versión trae la lista de sumas firmada.
+    pub installer: Option<Installer>,
 }
 
 /// Solo se abren direcciones de las versiones del repositorio, aunque la respuesta diga
@@ -131,25 +136,41 @@ fn evaluate(release: &Release, current: Version, suffix: Option<&str>) -> Option
     } else {
         LATEST_RELEASE_PAGE.to_string()
     };
-    let download_url = suffix
-        .and_then(|suffix| {
-            release
-                .assets
-                .iter()
-                .find(|a| a.name.ends_with(suffix) && is_release_url(&a.browser_download_url))
-        })
-        .map_or_else(|| notes_url.clone(), |a| a.browser_download_url.clone());
+    let asset = |matches: &dyn Fn(&str) -> bool| {
+        release
+            .assets
+            .iter()
+            .find(|a| matches(&a.name) && is_release_url(&a.browser_download_url))
+    };
+    let installer = suffix.and_then(|suffix| asset(&|name| name.ends_with(suffix)));
+    let download_url =
+        installer.map_or_else(|| notes_url.clone(), |a| a.browser_download_url.clone());
+    let installer = installer
+        .filter(|a| install::is_safe_file_name(&a.name))
+        .and_then(|a| {
+            Some(Installer {
+                name: a.name.clone(),
+                url: a.browser_download_url.clone(),
+                sums_url: asset(&|name| name == install::SUMS_FILE)?
+                    .browser_download_url
+                    .clone(),
+                signature_url: asset(&|name| name == install::SIGNATURE_FILE)?
+                    .browser_download_url
+                    .clone(),
+            })
+        });
     Some(Update {
         version: format!("{}.{}.{}", version.0, version.1, version.2),
         notes_url,
         download_url,
+        installer,
     })
 }
 
-async fn read_limited(mut response: reqwest::Response) -> Result<Vec<u8>, String> {
+async fn read_limited(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+        if body.len() + chunk.len() > limit {
             return Err("respuesta demasiado grande".into());
         }
         body.extend_from_slice(&chunk);
@@ -178,7 +199,7 @@ pub async fn fetch_latest() -> Result<Option<Update>, String> {
         status if !status.is_success() => return Err(format!("GitHub respondió {status}")),
         _ => {}
     }
-    let body = read_limited(response).await?;
+    let body = read_limited(response, MAX_RESPONSE_BYTES).await?;
     let release: Release =
         serde_json::from_slice(&body).map_err(|e| format!("respuesta no válida ({e})"))?;
     Ok(evaluate(&release, current, this_installer_suffix()))
@@ -202,6 +223,7 @@ pub struct UpdateChecker {
     pub status: UpdateStatus,
     pending: Option<Pending>,
     next_check: Instant,
+    pub install: install::UpdateInstall,
 }
 
 impl Default for UpdateChecker {
@@ -210,6 +232,7 @@ impl Default for UpdateChecker {
             status: UpdateStatus::NotChecked,
             pending: None,
             next_check: Instant::now() + FIRST_CHECK_DELAY,
+            install: Default::default(),
         }
     }
 }
@@ -260,7 +283,12 @@ impl UpdateChecker {
             Ok(Some(update)) => {
                 self.next_check = now + CHECK_PERIOD;
                 self.status = UpdateStatus::Available(update.clone());
-                (previous.as_ref() != Some(&update)).then_some(update)
+                let discovered = previous.as_ref() != Some(&update);
+                // El instalador ya descargado era de la versión anterior.
+                if discovered && !self.install.running() {
+                    self.install = Default::default();
+                }
+                discovered.then_some(update)
             }
             Ok(None) => {
                 self.next_check = now + CHECK_PERIOD;
@@ -281,7 +309,7 @@ impl UpdateChecker {
 
     /// Cuánto falta para que haya algo que hacer, para despertar a la interfaz.
     pub fn wait(&self) -> Duration {
-        if self.pending.is_some() {
+        if self.pending.is_some() || self.install.running() {
             return Duration::from_millis(500);
         }
         self.next_check.saturating_duration_since(Instant::now())
@@ -308,12 +336,13 @@ mod tests {
         }
     }
 
-    const ASSETS: [&str; 5] = [
+    const ASSETS: [&str; 6] = [
         "tunel_0.3.0_universal.dmg",
         "tunel_0.3.0_amd64.deb",
         "tunel_0.3.0_x64_es-ES.msi",
         "tunel_0.3.0_x64-setup.exe",
         "SHA256SUMS.txt",
+        "SHA256SUMS.txt.sig",
     ];
 
     #[test]
@@ -337,6 +366,29 @@ mod tests {
             format!("{RELEASES_PAGE}download/v0.3.0/tunel_0.3.0_amd64.deb")
         );
         assert_eq!(update.notes_url, format!("{RELEASES_PAGE}tag/v0.3.0"));
+        let download = format!("{RELEASES_PAGE}download/v0.3.0/");
+        assert_eq!(
+            update.installer,
+            Some(Installer {
+                name: "tunel_0.3.0_amd64.deb".into(),
+                url: format!("{download}tunel_0.3.0_amd64.deb"),
+                sums_url: format!("{download}SHA256SUMS.txt"),
+                signature_url: format!("{download}SHA256SUMS.txt.sig"),
+            })
+        );
+    }
+
+    #[test]
+    fn without_a_signed_list_the_installer_is_downloaded_in_the_browser() {
+        let unsigned = &ASSETS[..5];
+        let update = evaluate(
+            &release("v0.3.0", unsigned),
+            Version(0, 2, 0),
+            Some("_amd64.deb"),
+        );
+        let update = update.unwrap();
+        assert_eq!(update.installer, None);
+        assert!(update.download_url.ends_with("tunel_0.3.0_amd64.deb"));
     }
 
     #[test]
@@ -377,6 +429,7 @@ mod tests {
             asset.browser_download_url = format!("https://example.com/{}", asset.name);
         }
         let update = evaluate(&tampered, Version(0, 2, 0), Some("_universal.dmg")).unwrap();
+        assert_eq!(update.installer, None);
         assert_eq!(update.notes_url, LATEST_RELEASE_PAGE);
         assert_eq!(update.download_url, LATEST_RELEASE_PAGE);
         assert!(!is_release_url(
@@ -413,6 +466,7 @@ mod tests {
             version: version.into(),
             notes_url: LATEST_RELEASE_PAGE.into(),
             download_url: LATEST_RELEASE_PAGE.into(),
+            installer: None,
         }
     }
 
@@ -427,10 +481,12 @@ mod tests {
         assert_eq!(checker.apply(Ok(Some(update("0.3.0"))), now), None);
         assert_eq!(checker.apply(Err("sin red".into()), now), None);
         assert_eq!(checker.available(), Some(&update("0.3.0")));
+        checker.install.status = install::InstallStatus::Ready("tunel_0.3.0_amd64.deb".into());
         assert_eq!(
             checker.apply(Ok(Some(update("0.4.0"))), now),
             Some(update("0.4.0"))
         );
+        assert_eq!(checker.install.status, install::InstallStatus::Idle);
     }
 
     #[test]
