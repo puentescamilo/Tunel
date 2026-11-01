@@ -3,6 +3,7 @@
 use crate::crypto::{self, CryptoError, KdfParams, MasterKey, NONCE_LEN, SALT_LEN, Sealed};
 use crate::sync::SyncLocal;
 use crate::vault::VaultData;
+use crate::workspace::Workspace;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,10 @@ use std::path::{Path, PathBuf};
 const FORMAT_VERSION: u32 = 1;
 const AAD: &[u8] = b"tunel-vault-v1";
 const SYNC_AAD: &[u8] = b"tunel-sync-local-v1";
+const WORKSPACE_AAD: &[u8] = b"tunel-workspace-v1";
+/// Archivos cifrados junto a la bóveda, solo de este equipo: sufijo y datos asociados.
+const SYNC_FILE: (&str, &[u8]) = (".sync", SYNC_AAD);
+const WORKSPACE_FILE: (&str, &[u8]) = (".pestanas", WORKSPACE_AAD);
 pub const MIN_PASSWORD_LEN: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
@@ -32,9 +37,10 @@ pub enum StoreError {
     Locked,
 }
 
-/// Configuración de sincronización cifrada, en un archivo junto a la bóveda.
+/// Un archivo cifrado junto a la bóveda: la configuración de sincronización o las
+/// pestañas abiertas.
 #[derive(Serialize, Deserialize)]
-struct SyncFile {
+struct SideFile {
     version: u32,
     nonce: String,
     ciphertext: String,
@@ -107,12 +113,12 @@ fn lock_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn sync_path(path: &Path) -> PathBuf {
+fn side_path(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path
         .file_name()
         .map(|n| n.to_os_string())
         .unwrap_or_default();
-    name.push(".sync");
+    name.push(suffix);
     path.with_file_name(name)
 }
 
@@ -227,25 +233,60 @@ impl UnlockedVault {
             eprintln!("aviso: se descarta la configuración de sincronización ilegible: {e}");
             None
         });
+        let workspace = self.load_workspace().unwrap_or(None);
         // Guardar primero con la clave nueva; solo si funciona se adopta en memoria, y desde
         // ese momento, para que memoria y disco usen siempre la misma clave.
         write_sealed(&self.path, &self.data, &key, &salt, self.kdf)?;
         self.key = key;
         self.salt = salt;
+        // Las pestañas no son importantes: si no se pueden volver a cifrar, se pierden.
+        let _ = match &workspace {
+            Some(workspace) => self.save_workspace(workspace),
+            None => self.delete_workspace(),
+        };
         match &sync {
-            Some(sync) => write_sync(&self.path, sync, &self.key),
+            Some(sync) => self.save_sync(sync),
             None => self.delete_sync(),
         }
     }
 
     /// Configuración de sincronización de este equipo, si está unido a una cuenta.
     pub fn load_sync(&self) -> Result<Option<SyncLocal>, StoreError> {
-        let raw = match std::fs::read(sync_path(&self.path)) {
+        self.read_side(SYNC_FILE)
+    }
+
+    pub fn save_sync(&self, sync: &SyncLocal) -> Result<(), StoreError> {
+        self.write_side(SYNC_FILE, sync)
+    }
+
+    /// Desvincula el equipo de la cuenta; la bóveda local no cambia.
+    pub fn delete_sync(&self) -> Result<(), StoreError> {
+        self.delete_side(SYNC_FILE)
+    }
+
+    /// Pestañas que quedaron abiertas en este equipo, si se guardaron.
+    pub fn load_workspace(&self) -> Result<Option<Workspace>, StoreError> {
+        self.read_side(WORKSPACE_FILE)
+    }
+
+    pub fn save_workspace(&self, workspace: &Workspace) -> Result<(), StoreError> {
+        self.write_side(WORKSPACE_FILE, workspace)
+    }
+
+    pub fn delete_workspace(&self) -> Result<(), StoreError> {
+        self.delete_side(WORKSPACE_FILE)
+    }
+
+    fn read_side<T: serde::de::DeserializeOwned>(
+        &self,
+        (suffix, aad): (&str, &[u8]),
+    ) -> Result<Option<T>, StoreError> {
+        let raw = match std::fs::read(side_path(&self.path, suffix)) {
             Ok(raw) => raw,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        let file: SyncFile = serde_json::from_slice(&raw).map_err(|_| StoreError::Corrupt)?;
+        let file: SideFile = serde_json::from_slice(&raw).map_err(|_| StoreError::Corrupt)?;
         if file.version != FORMAT_VERSION {
             return Err(StoreError::UnsupportedVersion(file.version));
         }
@@ -253,19 +294,32 @@ impl UnlockedVault {
         let ciphertext = B64
             .decode(&file.ciphertext)
             .map_err(|_| StoreError::Corrupt)?;
-        let plaintext = crypto::open(&self.key, &Sealed { nonce, ciphertext }, SYNC_AAD)?;
+        let plaintext =
+            zeroize::Zeroizing::new(crypto::open(&self.key, &Sealed { nonce, ciphertext }, aad)?);
         serde_json::from_slice(&plaintext)
             .map(Some)
             .map_err(|_| StoreError::Corrupt)
     }
 
-    pub fn save_sync(&self, sync: &SyncLocal) -> Result<(), StoreError> {
-        write_sync(&self.path, sync, &self.key)
+    fn write_side<T: Serialize>(
+        &self,
+        (suffix, aad): (&str, &[u8]),
+        value: &T,
+    ) -> Result<(), StoreError> {
+        let plaintext =
+            zeroize::Zeroizing::new(serde_json::to_vec(value).map_err(|_| StoreError::Corrupt)?);
+        let sealed = crypto::seal(&self.key, &plaintext, aad)?;
+        let file = SideFile {
+            version: FORMAT_VERSION,
+            nonce: B64.encode(sealed.nonce),
+            ciphertext: B64.encode(&sealed.ciphertext),
+        };
+        let json = serde_json::to_vec_pretty(&file).map_err(|_| StoreError::Corrupt)?;
+        write_atomically(&side_path(&self.path, suffix), &json)
     }
 
-    /// Desvincula el equipo de la cuenta; la bóveda local no cambia.
-    pub fn delete_sync(&self) -> Result<(), StoreError> {
-        match std::fs::remove_file(sync_path(&self.path)) {
+    fn delete_side(&self, (suffix, _): (&str, &[u8])) -> Result<(), StoreError> {
+        match std::fs::remove_file(side_path(&self.path, suffix)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
             _ => Ok(()),
         }
@@ -297,19 +351,6 @@ fn write_sealed(
         let json = serde_json::to_vec_pretty(&file).map_err(|_| StoreError::Corrupt)?;
         write_atomically(path, &json)
     }
-}
-
-fn write_sync(path: &Path, sync: &SyncLocal, key: &MasterKey) -> Result<(), StoreError> {
-    let plaintext =
-        zeroize::Zeroizing::new(serde_json::to_vec(sync).map_err(|_| StoreError::Corrupt)?);
-    let sealed = crypto::seal(key, &plaintext, SYNC_AAD)?;
-    let file = SyncFile {
-        version: FORMAT_VERSION,
-        nonce: B64.encode(sealed.nonce),
-        ciphertext: B64.encode(&sealed.ciphertext),
-    };
-    let json = serde_json::to_vec_pretty(&file).map_err(|_| StoreError::Corrupt)?;
-    write_atomically(&sync_path(path), &json)
 }
 
 /// Escribe en un archivo temporal privado, lo sincroniza a disco y lo renombra,
@@ -466,7 +507,7 @@ mod tests {
             UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
         assert!(vault.load_sync().unwrap().is_none());
         vault.save_sync(&sync_config()).unwrap();
-        let raw = std::fs::read_to_string(sync_path(&vault_path(&dir))).unwrap();
+        let raw = std::fs::read_to_string(side_path(&vault_path(&dir), ".sync")).unwrap();
         assert!(!raw.contains("ana@ejemplo.com"));
 
         vault.change_password("nueva-contraseña").unwrap();
@@ -480,11 +521,45 @@ mod tests {
     }
 
     #[test]
+    fn open_tabs_are_saved_encrypted_apart_from_sync_and_survive_password_changes() {
+        use crate::workspace::{SavedTab, SavedTabKind, Workspace};
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault =
+            UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
+        assert!(vault.load_workspace().unwrap().is_none());
+        let workspace = Workspace {
+            tabs: vec![SavedTab {
+                kind: SavedTabKind::Local,
+                title: "producción-secreta".into(),
+            }],
+            active: Some(0),
+        };
+        vault.save_workspace(&workspace).unwrap();
+        let raw = std::fs::read_to_string(side_path(&vault_path(&dir), ".pestanas")).unwrap();
+        assert!(!raw.contains("producción"));
+        // Un archivo no se puede hacer pasar por el otro.
+        std::fs::copy(
+            side_path(&vault_path(&dir), ".pestanas"),
+            side_path(&vault_path(&dir), ".sync"),
+        )
+        .unwrap();
+        assert!(vault.load_sync().is_err());
+        vault.delete_sync().unwrap();
+
+        vault.change_password("nueva-contraseña").unwrap();
+        drop(vault);
+        let vault = UnlockedVault::unlock(vault_path(&dir), "nueva-contraseña").unwrap();
+        assert_eq!(vault.load_workspace().unwrap(), Some(workspace));
+        vault.delete_workspace().unwrap();
+        assert!(vault.load_workspace().unwrap().is_none());
+    }
+
+    #[test]
     fn a_corrupt_sync_config_does_not_block_a_password_change() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault =
             UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
-        std::fs::write(sync_path(&vault_path(&dir)), b"{basura").unwrap();
+        std::fs::write(side_path(&vault_path(&dir), ".sync"), b"{basura").unwrap();
         vault.change_password("nueva-contraseña").unwrap();
         assert!(vault.load_sync().unwrap().is_none());
     }

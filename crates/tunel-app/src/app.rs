@@ -65,6 +65,8 @@ impl Section {
 pub enum Tab {
     Terminal(Box<TerminalSession>),
     Sftp(Box<SftpTab>),
+    /// Restaurada de la última vez: se conecta al seleccionarla.
+    Pending(Box<tunel_core::workspace::SavedTab>),
 }
 
 /// Estado resumido de una pestaña, para su indicador de color.
@@ -81,6 +83,7 @@ impl Tab {
         match self {
             Tab::Terminal(t) => &t.title,
             Tab::Sftp(s) => &s.title,
+            Tab::Pending(p) => &p.title,
         }
     }
 
@@ -88,7 +91,27 @@ impl Tab {
         match self {
             Tab::Terminal(t) => t.title = title,
             Tab::Sftp(s) => s.title = title,
+            Tab::Pending(p) => p.title = title,
         }
+    }
+
+    /// Cómo volver a abrir la pestaña la próxima vez; `None` si no se puede (una sesión
+    /// de otra persona que se está mirando).
+    pub fn saved(&self) -> Option<tunel_core::workspace::SavedTab> {
+        use tunel_core::workspace::{SavedTab, SavedTabKind};
+        let kind = match self {
+            Tab::Terminal(t) if t.is_watching() => return None,
+            Tab::Terminal(t) => match t.host {
+                Some(host) => SavedTabKind::Host { host },
+                None => SavedTabKind::Local,
+            },
+            Tab::Sftp(s) => SavedTabKind::Sftp { host: s.host },
+            Tab::Pending(p) => return Some((**p).clone()),
+        };
+        Some(SavedTab {
+            kind,
+            title: self.title().to_string(),
+        })
     }
 
     pub fn icon(&self) -> &'static str {
@@ -96,6 +119,10 @@ impl Tab {
             Tab::Terminal(t) if t.live.is_some() => crate::ui::icons::BROADCAST,
             Tab::Terminal(_) => crate::ui::icons::TERMINAL,
             Tab::Sftp(_) => crate::ui::icons::FOLDER_OPEN,
+            Tab::Pending(p) => match p.kind {
+                tunel_core::workspace::SavedTabKind::Sftp { .. } => crate::ui::icons::FOLDER_OPEN,
+                _ => crate::ui::icons::TERMINAL,
+            },
         }
     }
 
@@ -108,6 +135,7 @@ impl Tab {
                 SessionStatus::Failed(_) => TabState::Failed,
             },
             Tab::Sftp(s) => s.state(),
+            Tab::Pending(_) => TabState::Ended,
         }
     }
 }
@@ -135,6 +163,8 @@ pub struct TunelApp {
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     /// Pestaña a la que se está cambiando el nombre.
     pub tab_rename: Option<crate::tabs::TabRename>,
+    /// Pestañas guardadas por última vez; `None` si no se guardan.
+    pub saved_workspace: Option<tunel_core::workspace::Workspace>,
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
@@ -166,6 +196,7 @@ impl TunelApp {
             Err(e) => return self.notify(format!("TUNEL_DEV_PASSWORD: {e}")),
         }
         crate::sync::on_unlock(self);
+        crate::workspace::restore(self);
         // `TUNEL_DEV_SERVER=<url>` deja escrita la dirección del servidor en Ajustes.
         if let Ok(server) = std::env::var("TUNEL_DEV_SERVER") {
             self.sync.form.server = server;
@@ -317,6 +348,7 @@ impl TunelApp {
             password_change: Default::default(),
             quick_connect: None,
             tab_rename: None,
+            saved_workspace: None,
             notices: Vec::new(),
             sync: Default::default(),
             updates: Default::default(),
@@ -381,6 +413,7 @@ impl TunelApp {
         self.editor = None;
         self.sync = Default::default();
         self.live = Default::default();
+        self.saved_workspace = None;
         self.vault = None;
     }
 
@@ -425,7 +458,7 @@ impl TunelApp {
             .map(|h| h.display_name().to_string())
             .unwrap_or_default();
         match self.engine.open_sftp(&data, host) {
-            Ok(id) => self.push_tab(Tab::Sftp(Box::new(SftpTab::new(id, title)))),
+            Ok(id) => self.push_tab(Tab::Sftp(Box::new(SftpTab::new(id, host, title)))),
             Err(e) => self.notify(format!("No se pudo abrir SFTP: {e:#}")),
         }
     }
@@ -607,7 +640,7 @@ impl TunelApp {
     fn show_tab(&mut self, ui: &mut egui::Ui, index: usize) {
         let host = match &self.tabs[index] {
             Tab::Terminal(session) => session.host,
-            Tab::Sftp(_) => None,
+            Tab::Sftp(_) | Tab::Pending(_) => None,
         };
         let theme = self.terminal_theme(host);
         let settings = self.data().map(|d| d.settings.clone()).unwrap_or_default();
@@ -634,6 +667,10 @@ impl TunelApp {
                 crate::terminal_view::show(ui, session, &theme, &settings);
             }
             Tab::Sftp(_) => views::sftp::show(self, ui, index),
+            // Se conecta antes de dibujarse (ver `workspace::tick`).
+            Tab::Pending(_) => {
+                ui.centered_and_justified(|ui| ui.spinner());
+            }
         }
         match live_action {
             Some(views::live::BarAction::Grant(conn)) => crate::live::grant(self, tab_key, conn),
@@ -678,11 +715,13 @@ impl eframe::App for TunelApp {
             if let Some(vault) = self.lock.show(ui) {
                 self.vault = Some(vault);
                 crate::sync::on_unlock(self);
+                crate::workspace::restore(self);
                 self.apply_theme(&ctx);
             }
             return;
         }
         self.process_background();
+        crate::workspace::tick(self);
         crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
         let wait = if crate::live::active(self) {

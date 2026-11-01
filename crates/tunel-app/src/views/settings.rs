@@ -166,6 +166,9 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             themes::gallery(ui, &mut settings);
         });
         card(ui, icons::TERMINAL, "Terminal", |ui| {
+            setting_row(ui, "Restaurar las pestañas", "Al abrir Túnel vuelven las de la última vez; cada una se conecta al seleccionarla", |ui| {
+                ui::toggle(ui, &mut settings.restore_tabs);
+            });
             setting_row(ui, "Líneas de historial", "Cuántas líneas se guardan para desplazarse hacia atrás", |ui| {
                 ui.add(egui::DragValue::new(&mut settings.scrollback_lines).range(0..=200_000).speed(100));
             });
