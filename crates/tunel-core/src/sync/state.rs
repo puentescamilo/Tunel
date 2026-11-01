@@ -378,6 +378,44 @@ mod tests {
     }
 
     #[test]
+    fn a_replayed_history_ends_in_the_latest_version() {
+        let id = Uuid::from_u128(77).to_string();
+        let version = |millis, value| RecordEnvelope {
+            key: RecordKey::new(record::RecordKind::Host, id.clone()),
+            hlc: Hlc {
+                millis,
+                counter: 0,
+                device: device(2),
+            },
+            value,
+        };
+        let host = |address: &str| {
+            let host = Host {
+                id: crate::model::HostId(Uuid::from_u128(77)),
+                ..Host::new("x", address)
+            };
+            Some(serde_json::to_value(host).unwrap())
+        };
+        let state = SyncState::new(device(1));
+        // El servidor manda toda la historia del registro en una página, en orden.
+        let history = [
+            version(1000, host("10.0.0.1")),
+            version(2000, host("10.0.0.2")),
+        ];
+        let merged = state
+            .merge_remote(&VaultData::default(), &history, 2, 3000)
+            .unwrap();
+        assert_eq!(merged.data.hosts.len(), 1);
+        assert_eq!(merged.data.hosts[0].address, "10.0.0.2");
+
+        let deleted = [version(1000, host("10.0.0.1")), version(2000, None)];
+        let merged = state
+            .merge_remote(&VaultData::default(), &deleted, 2, 3000)
+            .unwrap();
+        assert!(merged.data.hosts.is_empty(), "el borrado no se deshace");
+    }
+
+    #[test]
     fn records_from_the_far_future_are_set_aside() {
         let laptop = Device::new(1);
         let host = Host::new("futuro", "1.1.1.1");

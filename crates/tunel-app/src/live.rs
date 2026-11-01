@@ -422,18 +422,14 @@ fn on_key(
     }
 }
 
-/// Mantiene al día las sesiones que se comparten: si cambió la clave del Team, el
-/// anuncio se vuelve a cifrar para que los miembros puedan seguir abriéndolo.
+/// Mantiene al día las sesiones que se comparten. Si cambió la clave del Team, alguien
+/// salió de él: la terminal deja de compartirse, porque quien salió podría conservar la
+/// clave de la sesión y seguir leyendo lo que el servidor le reenviara.
 pub fn tick(app: &mut TunelApp) {
-    let epochs: HashMap<String, (u64, tunel_core::sync::VaultKey)> = app
+    let epochs: HashMap<String, u64> = app
         .sync
         .local()
-        .map(|l| {
-            l.teams
-                .iter()
-                .map(|t| (t.id.clone(), (t.epoch, t.key.clone())))
-                .collect()
-        })
+        .map(|l| l.teams.iter().map(|t| (t.id.clone(), t.epoch)).collect())
         .unwrap_or_default();
     let mut notices = Vec::new();
     for tab in &mut app.tabs {
@@ -441,12 +437,15 @@ pub fn tick(app: &mut TunelApp) {
             continue;
         };
         notices.extend(session.take_notices());
-        if let Some(Live::Host(share)) = session.live.as_mut()
-            && let Some((epoch, key)) = epochs.get(&share.host.team)
-            && *epoch != share.epoch
+        if let Some(Live::Host(share)) = session.live.as_ref()
+            && epochs.get(&share.host.team) != Some(&share.epoch)
         {
-            share.epoch = *epoch;
-            share.host.reannounce(key.clone(), *epoch);
+            notices.push(format!(
+                "Se dejó de compartir la terminal con «{}»: cambió la clave del Team o ya no \
+                 eres miembro. Vuelve a compartirla si quieres.",
+                share.team_name
+            ));
+            session.live = None;
         }
     }
     for notice in notices {

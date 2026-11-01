@@ -146,10 +146,6 @@ enum HostCommand {
     },
     Revoke(ConnId),
     Kick(ConnId),
-    Reannounce {
-        key: VaultKey,
-        epoch: u64,
-    },
 }
 
 /// Lo que pasa en una sesión que se comparte.
@@ -254,11 +250,6 @@ impl LiveHost {
         self.command(HostCommand::Kick(conn));
     }
 
-    /// Vuelve a cifrar el anuncio con la clave nueva del Team.
-    pub fn reannounce(&self, key: VaultKey, epoch: u64) {
-        self.command(HostCommand::Reannounce { key, epoch });
-    }
-
     pub fn try_update(&mut self) -> Option<HostUpdate> {
         self.updates.try_recv().ok()
     }
@@ -306,11 +297,8 @@ pub async fn share(
     let (sink, stream) = socket.split();
     let task = HostTask {
         sink,
-        session,
-        team: team.to_string(),
         id: id.clone(),
         sealer: OutputSealer::new(&meta.key, &id),
-        meta,
         keypair,
         viewers: HashMap::new(),
         grants: 0,
@@ -358,10 +346,7 @@ struct Watcher {
 
 struct HostTask {
     sink: Sink,
-    session: Session,
-    team: String,
     id: String,
-    meta: LiveMeta,
     keypair: AccountKeypair,
     sealer: OutputSealer,
     viewers: HashMap<ConnId, Watcher>,
@@ -469,28 +454,8 @@ impl HostTask {
                     self.send(&HostMessage::Kick { to: conn }).await?;
                 }
             }
-            HostCommand::Reannounce { key, epoch } => {
-                let announcement = announcement(&key, &self.team, epoch, &self.id, &self.meta)
-                    .map_err(|e| e.to_string())?;
-                if let Err(e) = self.update_announcement(&announcement).await {
-                    tracing::warn!(error = %e, "no se pudo renovar el anuncio de la sesión");
-                }
-            }
         }
         Ok(())
-    }
-
-    async fn update_announcement(
-        &mut self,
-        announcement: &LiveAnnouncement,
-    ) -> Result<(), SyncError> {
-        let (team, id) = (&self.team, &self.id);
-        call!(&mut self.session, |api, token| api.update_live(
-            token,
-            team,
-            id,
-            announcement
-        ))
     }
 
     async fn grant(&mut self, conn: ConnId, key: PublicKey) -> Outcome {

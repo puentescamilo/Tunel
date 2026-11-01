@@ -233,10 +233,13 @@ fn apply_kind<T: Serialize + DeserializeOwned + Clone>(
         }
         seen.insert(id);
     }
+    // Lo nuevo va en el orden en que aparece, pero con su último valor, como lo que ya
+    // existía: si el mismo registro llega varias veces, cuenta la última.
     for change in changes.iter().filter(|c| c.key.kind == kind) {
-        if let (Some(value), false) = (&change.value, seen.contains(&change.key.id)) {
+        if seen.insert(change.key.id.clone())
+            && let Some(Some(value)) = for_kind.get(change.key.id.as_str())
+        {
             out.push(decode(value, &change.key.id, &id_of)?);
-            seen.insert(change.key.id.clone());
         }
     }
     Ok(out)
