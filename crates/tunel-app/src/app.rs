@@ -163,6 +163,10 @@ pub struct TunelApp {
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     /// Pestaña a la que se está cambiando el nombre.
     pub tab_rename: Option<crate::tabs::TabRename>,
+    /// Snippet con variables esperando sus valores.
+    pub snippet_prompt: Option<crate::views::snippets::SnippetPrompt>,
+    /// Último valor de cada variable de snippet, mientras la bóveda está abierta.
+    pub snippet_values: HashMap<String, String>,
     /// Pestañas guardadas por última vez; `None` si no se guardan.
     pub saved_workspace: Option<tunel_core::workspace::Workspace>,
     pub notices: Vec<(Instant, String)>,
@@ -226,6 +230,11 @@ impl TunelApp {
             Ok("settings") => Section::Settings,
             _ => Section::Hosts,
         };
+        // `TUNEL_DEV_SNIPPET=<script>` pide las variables de ese script como un snippet.
+        if let Ok(script) = std::env::var("TUNEL_DEV_SNIPPET") {
+            let snippet = tunel_core::Snippet::new("Reiniciar un servicio", &script);
+            views::snippets::run(self, &snippet, false);
+        }
         if std::env::var("TUNEL_DEV_LOCAL").as_deref() == Ok("1") {
             self.open_local();
             if let Ok(command) = std::env::var("TUNEL_DEV_RUN") {
@@ -348,6 +357,8 @@ impl TunelApp {
             password_change: Default::default(),
             quick_connect: None,
             tab_rename: None,
+            snippet_prompt: None,
+            snippet_values: HashMap::new(),
             saved_workspace: None,
             notices: Vec::new(),
             sync: Default::default(),
@@ -414,6 +425,8 @@ impl TunelApp {
         self.sync = Default::default();
         self.live = Default::default();
         self.saved_workspace = None;
+        self.snippet_prompt = None;
+        self.snippet_values.clear();
         self.vault = None;
     }
 
@@ -760,6 +773,7 @@ impl eframe::App for TunelApp {
         crate::prompts::show(self, &ctx);
         crate::quick_connect::show(self, &ctx);
         crate::tabs::rename_dialog(self, &ctx);
+        views::snippets::prompt_dialog(self, &ctx);
         crate::chrome::notices(self, &ctx);
     }
 }

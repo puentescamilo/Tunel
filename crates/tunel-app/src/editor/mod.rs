@@ -270,6 +270,14 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                                 .desired_rows(8)
                                 .code_editor(),
                         );
+                        ui.label(
+                            egui::RichText::new(
+                                "Escribe {{nombre}} para que pida un valor al ejecutarlo, por \
+                                 ejemplo: systemctl restart {{servicio}}",
+                            )
+                            .size(12.0)
+                            .color(crate::ui::pal(ui).muted),
+                        );
                     }
                     Editor::Forward {
                         rule,
