@@ -21,7 +21,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tunel_core::sync::keys::MIN_SALT_LEN;
 use tunel_core::sync::protocol::{
-    AuthProvider, OAuthLogin, OAuthRegisterRequest, OAuthTokenRequest, VaultKeyUpdate,
+    AuthProvider, AuthProviders, OAuthLogin, OAuthRegisterRequest, OAuthTokenRequest,
+    VaultKeyUpdate,
 };
 use tunel_core::sync::{OAuthAccount, SyncLocal, SyncState, VaultKey};
 use tunel_core::vault::VaultData;
@@ -35,7 +36,7 @@ const MAX_REQUEST: usize = 16 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Proveedores de identidad del servidor; vacío si no tiene ninguno.
-pub async fn providers(server: &ServerUrl) -> Result<Vec<AuthProvider>, SyncError> {
+pub async fn providers(server: &ServerUrl) -> Result<AuthProviders, SyncError> {
     Api::new(server)?.auth_providers().await
 }
 

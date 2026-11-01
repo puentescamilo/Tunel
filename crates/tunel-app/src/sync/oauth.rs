@@ -1,7 +1,7 @@
 //! Iniciar sesión con un proveedor de identidad (Google, Microsoft 365…) desde Ajustes.
 //!
 //! 1. Con la dirección del servidor escrita, se piden sus proveedores.
-//! 2. Al pulsar «Entrar con…», el motor abre el navegador y espera a que vuelva.
+//! 2. Al pulsar «Iniciar sesión con…», el motor abre el navegador y espera a que vuelva.
 //! 3. La persona escribe su contraseña maestra: tiene que ser la de esta bóveda, y con ella
 //!    se abre o se crea la cuenta. Termina como «Iniciar sesión» (`AppEvent::SyncLinked`).
 
@@ -9,7 +9,7 @@ use super::{SyncStatus, save};
 use crate::app::TunelApp;
 use std::time::Duration;
 use tunel_core::sync::SyncLocal;
-use tunel_core::sync::protocol::AuthProvider;
+use tunel_core::sync::protocol::{AuthProvider, AuthProviders};
 use tunel_sync::SyncError;
 use tunel_sync::oauth::OAuthSignIn;
 use zeroize::{Zeroize, Zeroizing};
@@ -18,7 +18,7 @@ use zeroize::{Zeroize, Zeroizing};
 pub enum OAuthEvent {
     Providers {
         server: String,
-        result: Result<Vec<AuthProvider>, SyncError>,
+        result: Result<AuthProviders, SyncError>,
     },
     /// Volvió el navegador. `renewing`: era para renovar la sesión de una cuenta ya unida.
     SignedIn {
@@ -37,7 +37,7 @@ pub enum OAuthEvent {
 #[derive(Default)]
 pub struct OAuthUi {
     /// Proveedores del servidor con esa dirección.
-    pub providers: Option<(String, Vec<AuthProvider>)>,
+    pub providers: Option<(String, AuthProviders)>,
     /// Dirección cuyos proveedores se están pidiendo.
     loading: Option<String>,
     /// Esperando al navegador, con el nombre del proveedor.
@@ -58,8 +58,17 @@ impl OAuthUi {
     /// Proveedores para la dirección `server`, si ya se conocen.
     pub fn providers_for(&self, server: &str) -> &[AuthProvider] {
         match &self.providers {
-            Some((url, list)) if url == server => list,
+            Some((url, list)) if url == server => &list.providers,
             _ => &[],
+        }
+    }
+
+    /// El servidor con la dirección `server` admite correo y contraseña. Mientras no se
+    /// sabe, se supone que sí.
+    pub fn password_login_for(&self, server: &str) -> bool {
+        match &self.providers {
+            Some((url, list)) if url == server => list.password_login,
+            _ => true,
         }
     }
 

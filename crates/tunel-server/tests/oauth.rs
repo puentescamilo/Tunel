@@ -68,8 +68,20 @@ struct Setup {
 }
 
 async fn setup(allowed: &[&str], trusted_tenant: bool) -> Setup {
+    setup_on(
+        Db::open_in_memory().unwrap(),
+        allowed,
+        trusted_tenant,
+        false,
+    )
+    .await
+}
+
+/// Un servidor sobre la base de datos `db`; con `providers_only`, sin correo y contraseña.
+async fn setup_on(db: Db, allowed: &[&str], trusted_tenant: bool, providers_only: bool) -> Setup {
     let (issuer, idp) = fake_idp().await;
     let config = Config {
+        providers_only,
         auth_kdf: KdfParams::FAST_FOR_TESTS,
         unauthenticated_burst: 1000,
         allowed_domains: allowed.iter().map(|d| d.to_string()).collect(),
@@ -87,9 +99,7 @@ async fn setup(allowed: &[&str], trusted_tenant: bool) -> Setup {
         }),
         ..Config::default()
     };
-    let state = AppState::new(Db::open_in_memory().unwrap(), config)
-        .await
-        .unwrap();
+    let state = AppState::new(db, config).await.unwrap();
     Setup {
         app: router(state),
         idp,
@@ -293,7 +303,7 @@ async fn the_server_lists_its_providers() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body,
-        json!({"providers": [{"id": "google", "name": "Google"}]})
+        json!({"providers": [{"id": "google", "name": "Google"}], "password_login": true})
     );
 }
 
@@ -519,4 +529,44 @@ async fn a_provider_account_cannot_sign_in_with_a_password() {
     let login = json!({"email": "ana@empresa.com", "auth": keys.auth_token().as_str()});
     let (status, _, _) = call(&s.app, "POST", "/v1/sessions", None, Some(login)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn with_providers_only_passwords_are_refused_and_old_sessions_stop_working() {
+    let db = Db::open_in_memory().unwrap();
+    let before = setup_on(db.clone(), &["empresa.com"], false, false).await;
+    let old_token = password_account(&before, "luis@empresa.com").await;
+
+    let s = setup_on(db, &["empresa.com"], false, true).await;
+    let (_, _, body) = call(&s.app, "GET", "/v1/auth/providers", None, None).await;
+    assert_eq!(body["password_login"], json!(false));
+    // Ni crear, ni preparar, ni abrir cuentas con contraseña.
+    let keys = AccountKeys::derive_for_tests(b"clave", SALT);
+    let register = serde_json::to_value(RegisterRequest {
+        email: "eva@empresa.com".into(),
+        kdf: KdfParams::RECOMMENDED,
+        salt: B64.encode(SALT),
+        auth: keys.auth_token().to_string(),
+        vault_key: VaultKey::generate().wrap(&keys).unwrap(),
+    })
+    .unwrap();
+    let (status, _, body) = call(&s.app, "POST", "/v1/accounts", None, Some(register)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body["error"].as_str().unwrap().contains("Google"), "{body}");
+    let prelogin = json!({"email": "luis@empresa.com"});
+    let (status, _, _) = call(&s.app, "POST", "/v1/prelogin", None, Some(prelogin)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let login = json!({"email": "luis@empresa.com", "auth": keys.auth_token().as_str()});
+    let (status, _, _) = call(&s.app, "POST", "/v1/sessions", None, Some(login)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // La sesión que la cuenta con contraseña abrió antes ya no vale.
+    let (status, _, _) = call(&s.app, "GET", "/v1/records", Some(&old_token), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Con el proveedor se sigue entrando.
+    let (token, _) = s
+        .sign_up(person("eva-1", "eva@empresa.com"), "Contraseña-Maestra-1")
+        .await;
+    let (status, _, _) = call(&s.app, "GET", "/v1/records", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
 }

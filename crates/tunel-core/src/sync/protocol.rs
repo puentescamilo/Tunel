@@ -311,9 +311,26 @@ pub struct AuthProvider {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthProviders {
     pub providers: Vec<AuthProvider>,
+    /// `false` si el servidor solo deja entrar con un proveedor, sin correo y contraseña.
+    /// Los servidores anteriores no lo envían: admiten contraseña.
+    #[serde(default = "password_login_default")]
+    pub password_login: bool,
+}
+
+fn password_login_default() -> bool {
+    true
+}
+
+impl Default for AuthProviders {
+    fn default() -> Self {
+        Self {
+            providers: Vec::new(),
+            password_login: true,
+        }
+    }
 }
 
 /// Canjea el código que el servidor dejó en el equipo al terminar el inicio de sesión
@@ -371,4 +388,19 @@ pub struct VaultKeyUpdate {
     /// Sal en base64.
     pub salt: String,
     pub vault_key: SealedBlob,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn servers_that_do_not_say_otherwise_admit_passwords() {
+        let old: AuthProviders = serde_json::from_str(r#"{"providers":[]}"#).unwrap();
+        assert!(old.password_login);
+        assert_eq!(old, AuthProviders::default());
+        let only: AuthProviders =
+            serde_json::from_str(r#"{"providers":[],"password_login":false}"#).unwrap();
+        assert!(!only.password_login);
+    }
 }

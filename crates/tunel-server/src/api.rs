@@ -64,6 +64,9 @@ pub struct Config {
     /// Proveedores de identidad (Google, Microsoft 365, OpenID Connect); `None` si solo
     /// se entra con contraseña.
     pub oauth: Option<crate::oauth::OAuthConfig>,
+    /// Solo se entra con un proveedor de identidad: no se crean ni se abren cuentas con
+    /// correo y contraseña, y las sesiones de las que ya existían dejan de valer.
+    pub providers_only: bool,
 }
 
 impl Default for Config {
@@ -100,6 +103,7 @@ impl Default for Config {
             concurrent_rotations: 2,
             live: LiveLimits::default(),
             oauth: None,
+            providers_only: false,
         }
     }
 }
@@ -249,6 +253,26 @@ impl ApiError {
 
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    /// El servidor solo deja entrar con un proveedor de identidad.
+    fn password_login_disabled(state: &AppState) -> Self {
+        let names = state
+            .config
+            .oauth
+            .as_ref()
+            .map(|o| {
+                o.providers
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" o ")
+            })
+            .unwrap_or_default();
+        Self::new(
+            StatusCode::FORBIDDEN,
+            format!("este servidor no admite correo y contraseña: inicia sesión con {names}"),
+        )
     }
 
     fn unauthorized() -> Self {
@@ -415,6 +439,7 @@ async fn prelogin(
     Json(request): Json<PreloginRequest>,
 ) -> ApiResult<Json<PreloginResponse>> {
     take_unauthenticated(&state)?;
+    require_password_login(&state)?;
     let email = normalize_email(&request.email)?;
     if let Some(account) = state.db.account_by_email(email.clone()).await? {
         return Ok(Json(PreloginResponse {
@@ -446,6 +471,15 @@ pub(crate) fn check_account_kdf(salt: &str, kdf: KdfParams) -> ApiResult<()> {
     Ok(())
 }
 
+/// Responde 403 si el servidor solo deja entrar con un proveedor de identidad.
+fn require_password_login(state: &AppState) -> ApiResult<()> {
+    if state.config.providers_only {
+        Err(ApiError::password_login_disabled(state))
+    } else {
+        Ok(())
+    }
+}
+
 /// Gasta una ficha de las rutas sin sesión, o responde 429.
 pub(crate) fn take_unauthenticated(state: &AppState) -> ApiResult<()> {
     if state.unauthenticated.try_take() {
@@ -460,6 +494,7 @@ async fn register(
     Json(request): Json<RegisterRequest>,
 ) -> ApiResult<StatusCode> {
     take_unauthenticated(&state)?;
+    require_password_login(&state)?;
     let email = normalize_email(&request.email)?;
     let allowed = &state.config.allowed_domains;
     if !domain_allowed(allowed, &email) {
@@ -500,6 +535,7 @@ async fn login(
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
     take_unauthenticated(&state)?;
+    require_password_login(&state)?;
     let email = normalize_email(&request.email)?;
     // El intento se cuenta antes de comprobar la clave: lanzar muchas peticiones a la vez
     // no permite probar más claves de las permitidas.
@@ -547,7 +583,7 @@ impl FromRequestParts<Arc<AppState>> for Session {
         let token_hash = auth::token_hash(token);
         let account = state
             .db
-            .session_account(token_hash, now())
+            .session_account(token_hash, now(), state.config.providers_only)
             .await?
             .ok_or_else(ApiError::unauthorized)?;
         Ok(Self {

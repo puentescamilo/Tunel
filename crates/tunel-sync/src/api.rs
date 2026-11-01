@@ -323,13 +323,13 @@ impl Api {
             .await
     }
 
-    /// Proveedores de identidad del servidor. Uno anterior a ellos no tiene la ruta: se
-    /// toma como que no hay ninguno.
-    pub async fn auth_providers(&self) -> Result<Vec<AuthProvider>, SyncError> {
+    /// Proveedores de identidad del servidor y si admite correo y contraseña. Uno anterior
+    /// a ellos no tiene la ruta: se toma como que no hay ninguno.
+    pub async fn auth_providers(&self) -> Result<AuthProviders, SyncError> {
         let request = self.client.get(format!("{}/v1/auth/providers", self.base));
         match self.send::<AuthProviders>(request).await {
-            Ok(list) => Ok(list.providers),
-            Err(SyncError::NotFound(_)) => Ok(Vec::new()),
+            Ok(list) => Ok(list),
+            Err(SyncError::NotFound(_)) => Ok(AuthProviders::default()),
             Err(e) => Err(e),
         }
     }

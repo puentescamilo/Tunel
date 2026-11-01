@@ -583,16 +583,21 @@ impl Db {
     }
 
     /// Cuenta de una sesión vigente.
+    /// Cuenta de una sesión abierta. Con `providers_only`, solo si la cuenta entra con un
+    /// proveedor de identidad.
     pub async fn session_account(
         &self,
         token_hash: [u8; 32],
         now: i64,
+        providers_only: bool,
     ) -> Result<Option<i64>, DbError> {
         self.call(move |conn| {
             Ok(conn
                 .query_row(
-                    "SELECT account_id FROM sessions WHERE token_hash = ?1 AND expires_at > ?2",
-                    params![token_hash.to_vec(), now],
+                    "SELECT s.account_id FROM sessions s JOIN accounts a ON a.id = s.account_id
+                     WHERE s.token_hash = ?1 AND s.expires_at > ?2
+                       AND (?3 = 0 OR a.oauth_provider IS NOT NULL)",
+                    params![token_hash.to_vec(), now, providers_only],
                     |row| row.get(0),
                 )
                 .optional()?)
