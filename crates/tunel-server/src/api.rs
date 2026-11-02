@@ -230,6 +230,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(roster_routes)
         .merge(rotate_routes)
         .merge(live::routes())
+        .merge(crate::audit::routes().layer(DefaultBodyLimit::max(MAX_PUSH_BODY)))
         .merge(crate::oauth::routes().layer(DefaultBodyLimit::max(MAX_AUTH_BODY)))
         .route("/health", get(|| async { "ok" }))
         .layer(TimeoutLayer::with_status_code(
@@ -1024,6 +1025,9 @@ async fn rotate_team(
     if let Some(roster) = &request.roster {
         check_blob(&roster.blob, MAX_ROSTER_CIPHERTEXT)?;
     }
+    if let Some(previous) = &request.previous_key {
+        check_blob(previous, crate::audit::MAX_PREVIOUS_KEY_CIPHERTEXT)?;
+    }
     let mut keys = Vec::with_capacity(request.keys.len());
     for member in request.keys {
         check_blob(&member.key, MAX_VAULT_KEY_CIPHERTEXT)?;
@@ -1040,6 +1044,7 @@ async fn rotate_team(
         manifest: request.manifest,
         records: request.records,
         roster: request.roster,
+        previous_key: request.previous_key,
     };
     let cursor = state
         .db

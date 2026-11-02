@@ -497,6 +497,7 @@ mod tests {
             invitations: Vec::new(),
             contacts: Default::default(),
             oauth: None,
+            audit_queue: Vec::new(),
         }
     }
 

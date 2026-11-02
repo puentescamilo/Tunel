@@ -144,10 +144,12 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                 ui.add_space(2.0);
             }
         });
-    if let Some(rule) = start
-        && let Err(e) = app.engine.start_forward(&data, rule)
-    {
-        app.notify(format!("No se pudo iniciar el túnel: {e:#}"));
+    if let Some(rule) = start {
+        let host = rule.host;
+        match app.engine.start_forward(&data, rule) {
+            Ok(()) => crate::audit::connected(app, &data, host),
+            Err(e) => app.notify(format!("No se pudo iniciar el túnel: {e:#}")),
+        }
     }
     if let Some(active) = stop.and_then(|id| app.forwards.remove(&id)) {
         app.engine.stop_forward(active);

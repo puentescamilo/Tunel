@@ -8,6 +8,7 @@
 //! Cualquier equipo con la clave de bóveda puede escribir cualquier registro, incluidos los
 //! snippets que se ejecutan al conectar.
 
+pub mod audit;
 pub mod hlc;
 pub mod keys;
 pub mod live;
@@ -23,7 +24,7 @@ pub mod team;
 
 pub use hlc::Hlc;
 pub use keys::{AccountKeys, RecordEnvelope, SealedBlob, SealedRecord, SyncCryptoError, VaultKey};
-pub use local::{Contact, Invitation, KeyProblem, OAuthAccount, SyncLocal, TeamLocal};
+pub use local::{Contact, Invitation, KeyProblem, OAuthAccount, QueuedAudit, SyncLocal, TeamLocal};
 pub use manifest::{Manifest, ManifestError};
 pub use record::{Change, RecordKey, RecordKind};
 pub use roster::{Roster, RosterMember};

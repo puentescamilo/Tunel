@@ -5,7 +5,7 @@ mod install_key;
 mod keygen;
 
 use crate::app::TunelApp;
-use host::{HostForm, host_form, inherited_theme, parse_port, team_picker};
+use host::{HostForm, effective_identity, host_form, inherited_theme, parse_port, team_picker};
 pub use install_key::installed_message;
 use install_key::{InstallKeyForm, install_key_form};
 use keygen::{KeyGenForm, keygen_form};
@@ -404,6 +404,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
             });
         });
     cancel |= modal.should_close();
+    record_revealed(app, ctx, &data);
 
     if cancel {
         crate::ui::forget_revealed(ctx, &PASSWORD_FIELDS);
@@ -498,5 +499,22 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         app.commit(updated);
         crate::ui::forget_revealed(ctx, &PASSWORD_FIELDS);
         app.editor = None;
+    }
+}
+
+/// Anota en el registro del Team las contraseñas guardadas que se acaban de mostrar.
+fn record_revealed(app: &mut TunelApp, ctx: &egui::Context, data: &VaultData) {
+    for field in crate::ui::take_revealed(ctx) {
+        let identity = match (field.as_str(), app.editor.as_ref()) {
+            // Solo si lo que se ve es la guardada, no una que se está escribiendo.
+            ("identidad", Some(Editor::Identity(i))) => data
+                .identity(i.id)
+                .filter(|saved| saved.password == i.password),
+            ("host-identidad", Some(Editor::Host(form))) => effective_identity(form, data),
+            _ => None,
+        };
+        if let Some(identity) = identity.filter(|i| i.password.is_some()).cloned() {
+            crate::audit::secret_viewed(app, &identity);
+        }
     }
 }

@@ -2,13 +2,15 @@
 //! controlador de sincronización, así nunca coincide con una ronda: las dos cambian la
 //! configuración y la bóveda, y la segunda en terminar pisaría a la primera.
 
-use super::{SyncStatus, rebase, save};
+use super::{SyncStatus, rebase, save, with_audit_queue};
 use crate::app::TunelApp;
 use std::time::Duration;
+use tunel_core::sync::audit::AuditAction;
 use tunel_core::sync::protocol::TeamRole;
 use tunel_core::sync::{PublicKey, SyncLocal};
 use tunel_core::vault::VaultData;
 use tunel_sync::SyncError;
+use tunel_sync::audit;
 use tunel_sync::teams::{self, MemberView};
 
 /// Lo que se le pide al servidor.
@@ -99,6 +101,8 @@ pub struct TeamDone {
     /// La bóveda nueva, si la operación la cambió.
     data: Option<VaultData>,
     done: Done,
+    /// Entradas del registro de auditoría que la operación ya subió.
+    audit_sent: Vec<String>,
 }
 
 /// Corre la operación; se llama desde el motor, fuera del hilo de la interfaz.
@@ -107,8 +111,9 @@ pub async fn run(op: TeamOp, local: SyncLocal, data: VaultData) -> Result<TeamDo
         local,
         data: None,
         done,
+        audit_sent: Vec::new(),
     };
-    Ok(match op {
+    let done = match op {
         TeamOp::Create { name } => {
             let (local, team) = teams::create_team(&local, &name).await?;
             keep(local, Done::Created { team })
@@ -124,18 +129,36 @@ pub async fn run(op: TeamOp, local: SyncLocal, data: VaultData) -> Result<TeamDo
             key,
         } => {
             let local = teams::invite(&local, &team, &email, role, key).await?;
-            keep(local, Done::Invited { team, email })
+            let action = AuditAction::MemberInvited {
+                email: email.clone(),
+                role,
+            };
+            return Ok(audited(
+                keep(
+                    local,
+                    Done::Invited {
+                        team: team.clone(),
+                        email,
+                    },
+                ),
+                &team,
+                action,
+            )
+            .await);
         }
         TeamOp::Accept { team } => {
             let local = teams::accept_invitation(&local, &team).await?;
-            keep(local, Done::Accepted)
+            return Ok(audited(keep(local, Done::Accepted), &team, AuditAction::Joined).await);
         }
         TeamOp::Leave { team } => {
+            // Se anota antes: después ya no se puede escribir en el registro del Team.
+            let (local, audit_sent) = audit::record_now(&local, &team, AuditAction::Left).await;
             let (local, data) = teams::leave_team(&local, &data, &team).await?;
             TeamDone {
                 local,
                 data: Some(data),
                 done: Done::Left,
+                audit_sent,
             }
         }
         TeamOp::Delete { team } => {
@@ -144,25 +167,51 @@ pub async fn run(op: TeamOp, local: SyncLocal, data: VaultData) -> Result<TeamDo
                 local,
                 data: Some(data),
                 done: Done::Deleted,
+                audit_sent: Vec::new(),
             }
         }
         TeamOp::SetRole { team, email, role } => {
             let local = teams::set_role(&local, &team, &email, role).await?;
-            keep(local, Done::RoleChanged { team })
+            let action = AuditAction::RoleChanged { email, role };
+            return Ok(audited(
+                keep(local, Done::RoleChanged { team: team.clone() }),
+                &team,
+                action,
+            )
+            .await);
         }
         TeamOp::Remove { team, email } => {
             let (local, data) = teams::remove_member(&local, &data, &team, &email).await?;
-            TeamDone {
+            let action = AuditAction::MemberRemoved {
+                email: email.clone(),
+            };
+            let done = TeamDone {
                 local,
                 data: Some(data),
-                done: Done::Removed { team, email },
-            }
+                done: Done::Removed {
+                    team: team.clone(),
+                    email,
+                },
+                audit_sent: Vec::new(),
+            };
+            return Ok(audited(done, &team, action).await);
         }
         TeamOp::Members { team } => {
             let (local, members) = teams::members(&local, &team).await?;
             keep(local, Done::Members { team, members })
         }
-    })
+    };
+    Ok(done)
+}
+
+/// Anota en el registro de `team` lo que hizo la operación y lo sube ya.
+async fn audited(done: TeamDone, team: &str, action: AuditAction) -> TeamDone {
+    let (local, audit_sent) = audit::record_now(&done.local, team, action).await;
+    TeamDone {
+        local,
+        audit_sent,
+        ..done
+    }
 }
 
 /// Acción destructiva a la espera de que la persona la confirme.
@@ -188,6 +237,8 @@ pub struct TeamsUi {
     pub confirm: Option<Confirm>,
     /// Operación en curso.
     pub working: Option<&'static str>,
+    /// Registro de auditoría a la vista.
+    pub audit: Option<crate::views::team_audit::AuditView>,
 }
 
 /// Lanza una operación si no hay otra tarea en curso.
@@ -220,6 +271,7 @@ pub fn on_done(app: &mut TunelApp, round: u64, result: Result<Box<TeamDone>, Syn
         Ok(rebased) => rebased,
         Err(e) => return app.notify(format!("No se pudo aplicar el cambio del Team: {e}")),
     };
+    let local = with_audit_queue(app, local, &done.audit_sent);
     if data != current
         && let Err(e) = app.commit_synced(data)
     {

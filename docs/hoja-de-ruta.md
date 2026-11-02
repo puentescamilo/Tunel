@@ -18,8 +18,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 5a | Generar claves SSH en el llavero | 0.8.0 | ✅ |
 | 5b | Instalar una clave pública en un host | 0.8.0 | ✅ |
 | 5c | Avisar de claves débiles | 0.8.0 | ✅ |
-| 2a | Actualización automática con paquetes verificados | 0.8.1 | en curso |
-| 3a | Registro de auditoría de los Teams | 0.9.0 | — |
+| 2a | Actualización automática con paquetes verificados | 0.8.1 | hecha, sin publicar |
+| 3a | Registro de auditoría de los Teams | 0.9.0 | hecha, sin publicar |
 | 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | depende de 3a |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 

@@ -80,6 +80,12 @@ pub enum AppEvent {
         host: String,
         result: Result<Installed, String>,
     },
+    AuditLoaded {
+        team: String,
+        /// La página se pidió a continuación de otra.
+        more: bool,
+        result: Result<tunel_sync::audit::AuditLog, String>,
+    },
 }
 
 /// Unir el equipo a una cuenta nueva o a una que ya existe.
@@ -448,6 +454,27 @@ impl Engine {
         self.spawn(async move {
             let result = tunel_sync::sync_once(&local, &data).await.map(Box::new);
             let _ = events.send(AppEvent::SyncFinished { round, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Pide una página del registro de auditoría de `team`, anterior a `before`.
+    pub fn load_audit(&self, local: SyncLocal, team: String, before: Option<u64>) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            // La sesión renovada no se guarda: la siguiente ronda la renueva si hace falta.
+            let result = tunel_sync::audit::read(&local, &team, before)
+                .await
+                .map(|(_, log)| log)
+                .map_err(|e| match e {
+                    SyncError::NotFound(_) => {
+                        "el servidor no tiene registro de actividad; actualízalo".to_string()
+                    }
+                    e => e.to_string(),
+                });
+            let more = before.is_some();
+            let _ = events.send(AppEvent::AuditLoaded { team, more, result });
             ctx.request_repaint();
         });
     }

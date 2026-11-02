@@ -225,6 +225,53 @@ pub struct RotateTeamRequest {
     /// Lista de miembros cifrada con la clave nueva.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roster: Option<RosterBlob>,
+    /// La clave anterior cifrada con la nueva, para leer el registro de auditoría viejo
+    /// (ver [`super::audit::seal_previous_key`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_key: Option<SealedBlob>,
+}
+
+/// Máximo de entradas del registro de auditoría por subida.
+pub const MAX_AUDIT_UPLOAD: usize = 100;
+/// Máximo de entradas por página al leer el registro.
+pub const MAX_AUDIT_PAGE: usize = 500;
+
+/// Entradas del registro de auditoría cifradas con la clave del Team en `epoch`, que
+/// tiene que ser la actual.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditUpload {
+    pub epoch: u64,
+    pub entries: Vec<SealedBlob>,
+}
+
+/// Una entrada del registro tal como la guarda el servidor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditRecord {
+    /// Crece con cada entrada; sirve para pedir la página anterior.
+    pub id: u64,
+    pub epoch: u64,
+    /// Cuenta que la subió, según el servidor.
+    pub author: String,
+    /// Segundos desde 1970, según el servidor.
+    pub received_at: u64,
+    pub blob: SealedBlob,
+}
+
+/// La clave de la época `epoch - 1` cifrada con la de `epoch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviousKey {
+    pub epoch: u64,
+    pub blob: SealedBlob,
+}
+
+/// Una página del registro, de la entrada más nueva a la más vieja.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditPage {
+    pub entries: Vec<AuditRecord>,
+    /// Todas las claves anteriores que el servidor tiene del Team.
+    pub previous_keys: Vec<PreviousKey>,
+    /// Hay entradas más viejas.
+    pub more: bool,
 }
 
 /// Cuerpo de las respuestas de error.

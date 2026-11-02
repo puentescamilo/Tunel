@@ -13,6 +13,7 @@ use crate::SyncError;
 use crate::roster;
 use crate::run::{Counters, MAX_ROUNDS, SpaceSync, TeamProblem, pull};
 use crate::session::{Session, call};
+use tunel_core::sync::audit;
 use tunel_core::sync::local::normalize_email;
 use tunel_core::sync::protocol::{
     AddMemberRequest, CreateTeamRequest, ManifestBlob, MemberKey, RosterEntry, RotateTeamRequest,
@@ -281,7 +282,7 @@ pub(crate) async fn refresh(
 }
 
 /// Guarda en la configuración el token con el que terminó la sesión.
-fn finish(session: Session, local: SyncLocal) -> SyncLocal {
+pub(crate) fn finish(session: Session, local: SyncLocal) -> SyncLocal {
     SyncLocal {
         token: session.into_token(),
         ..local
@@ -634,6 +635,7 @@ pub(crate) async fn rotate_with(
                 .map(|e| key.seal_record(e))
                 .collect::<Result<_, _>>()?,
             roster: Some(next_roster.seal(&key, team_id, epoch, &author, &pair)?),
+            previous_key: Some(audit::seal_previous_key(&key, &team.key, team_id, epoch)?),
         };
         let rotated = call!(session, |api, token| api
             .rotate_team(token, team_id, &request));

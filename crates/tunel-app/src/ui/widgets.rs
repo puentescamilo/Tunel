@@ -199,9 +199,24 @@ fn reveal_toggle(ui: &mut Ui, field: &str, can_reveal: bool) -> bool {
         return false;
     }
     let mut revealed = is_revealed(ui, field);
-    reveal_button(ui, &mut revealed);
+    if reveal_button(ui, &mut revealed).clicked() && revealed {
+        ui.data_mut(|d| {
+            d.get_temp_mut_or_default::<Vec<String>>(just_revealed_id())
+                .push(field.to_string())
+        });
+    }
     ui.data_mut(|d| d.insert_temp(revealed_id(field), revealed));
     revealed
+}
+
+fn just_revealed_id() -> egui::Id {
+    egui::Id::unique("contraseñas-recién-vistas")
+}
+
+/// Los campos cuya contraseña se acaba de mostrar con el ojo, para anotarlo; los olvida.
+pub fn take_revealed(ctx: &egui::Context) -> Vec<String> {
+    ctx.data_mut(|d| d.remove_temp::<Vec<String>>(just_revealed_id()))
+        .unwrap_or_default()
 }
 
 /// Campo de contraseña. Con `can_reveal` lleva un ojo para verla; sin él, siempre se
