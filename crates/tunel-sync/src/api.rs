@@ -347,6 +347,33 @@ impl Api {
             .await
     }
 
+    /// Sube entradas del registro de auditoría del Team.
+    pub async fn add_audit(
+        &self,
+        token: &str,
+        team: &str,
+        upload: &AuditUpload,
+    ) -> Result<(), SyncError> {
+        let path = format!("/v1/teams/{}/audit", segment(team));
+        self.execute(self.post(&path, upload).bearer_auth(token))
+            .await
+            .map(|_| ())
+    }
+
+    /// Una página del registro de auditoría, anterior a la entrada `before` si se indica.
+    pub async fn audit(
+        &self,
+        token: &str,
+        team: &str,
+        before: Option<u64>,
+    ) -> Result<AuditPage, SyncError> {
+        let mut path = format!("/v1/teams/{}/audit", segment(team));
+        if let Some(before) = before {
+            path.push_str(&format!("?before={before}"));
+        }
+        self.send(self.get(token, &path)).await
+    }
+
     /// Proveedores de identidad del servidor y si admite correo y contraseña. Uno anterior
     /// a ellos no tiene la ruta: se toma como que no hay ninguno.
     pub async fn auth_providers(&self) -> Result<AuthProviders, SyncError> {

@@ -404,7 +404,10 @@ impl TunelApp {
         };
         let old = vault.data.clone();
         match vault.commit(data.clone()) {
-            Ok(()) => crate::sync::after_commit(self, &old, &data),
+            Ok(()) => {
+                crate::sync::after_commit(self, &old, &data);
+                crate::audit::after_commit(self, &old, &data);
+            }
             Err(e) => self.notify(format!("No se pudo guardar la bóveda: {e}")),
         }
     }
@@ -452,7 +455,10 @@ impl TunelApp {
             .engine
             .open_host(data, host, DEFAULT_COLS, DEFAULT_ROWS)
         {
-            Ok(session) => self.push_tab(Tab::Terminal(Box::new(session))),
+            Ok(session) => {
+                crate::audit::connected(self, data, host);
+                self.push_tab(Tab::Terminal(Box::new(session)));
+            }
             Err(e) => self.notify(format!("No se pudo abrir la sesión: {e:#}")),
         }
     }
@@ -480,7 +486,10 @@ impl TunelApp {
             .map(|h| h.display_name().to_string())
             .unwrap_or_default();
         match self.engine.open_sftp(&data, host) {
-            Ok(id) => self.push_tab(Tab::Sftp(Box::new(SftpTab::new(id, host, title)))),
+            Ok(id) => {
+                crate::audit::connected(self, &data, host);
+                self.push_tab(Tab::Sftp(Box::new(SftpTab::new(id, host, title))));
+            }
             Err(e) => self.notify(format!("No se pudo abrir SFTP: {e:#}")),
         }
     }
@@ -621,6 +630,9 @@ impl TunelApp {
                 }
                 AppEvent::KeyInstalled { host, result } => {
                     self.notify(crate::editor::installed_message(&host, &result))
+                }
+                AppEvent::AuditLoaded { team, more, result } => {
+                    views::team_audit::on_loaded(self, team, more, result)
                 }
                 sftp_event => views::sftp::apply_event(self, sftp_event),
             }

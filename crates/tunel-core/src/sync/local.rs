@@ -5,6 +5,7 @@
 //! clave de bóveda y la clave de acceso. Con ella el equipo sincroniza sin volver a pedir
 //! la contraseña de la cuenta.
 
+use super::audit::{AuditAction, AuditEvent, SignedAuditEvent};
 use super::keys::VaultKey;
 use super::protocol::TeamRole;
 use super::space::{Space, partition};
@@ -44,6 +45,19 @@ pub struct SyncLocal {
     /// contraseña: su clave de bóveda se envuelve con la contraseña maestra.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<OAuthAccount>,
+    /// Entradas del registro de auditoría de los Teams que esperan a subir.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit_queue: Vec<QueuedAudit>,
+}
+
+/// Entradas que esperan a subir como mucho; si se llega, se descartan las más viejas.
+const MAX_AUDIT_QUEUE: usize = 1000;
+
+/// Una entrada del registro de auditoría de `team`, firmada y pendiente de subir.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueuedAudit {
+    pub team: String,
+    pub event: SignedAuditEvent,
 }
 
 /// Datos de una cuenta que entra con un proveedor de identidad.
@@ -158,6 +172,52 @@ impl SyncLocal {
         })
     }
 
+    /// Anota en la cola del registro de `team` que esta cuenta hizo `action`, firmado con
+    /// su clave. `None` si la cuenta no tiene claves, no es miembro de ese Team o la
+    /// entrada no cabe.
+    pub fn record_audit(&self, team: &str, action: AuditAction, wall_millis: u64) -> Option<Self> {
+        let pair = self.keypair.as_ref()?;
+        self.team(team)?;
+        let event = AuditEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            team: team.to_string(),
+            actor: normalize_email(&self.email),
+            at: wall_millis,
+            action,
+        };
+        // Solo falla con una entrada desmesurada, que no se registra.
+        let signed = SignedAuditEvent::sign(&event, pair).ok()?;
+        Some(self.with_audit(team, signed))
+    }
+
+    /// Añade una entrada a la cola del registro de auditoría.
+    pub fn with_audit(&self, team: &str, event: SignedAuditEvent) -> Self {
+        let mut audit_queue = self.audit_queue.clone();
+        audit_queue.push(QueuedAudit {
+            team: team.to_string(),
+            event,
+        });
+        let excess = audit_queue.len().saturating_sub(MAX_AUDIT_QUEUE);
+        audit_queue.drain(..excess);
+        Self {
+            audit_queue,
+            ..self.clone()
+        }
+    }
+
+    /// Quita de la cola las entradas ya subidas, por su identificador.
+    pub fn without_audit(&self, sent: &[String]) -> Self {
+        Self {
+            audit_queue: self
+                .audit_queue
+                .iter()
+                .filter(|q| !q.event.id().is_some_and(|id| sent.contains(&id)))
+                .cloned()
+                .collect(),
+            ..self.clone()
+        }
+    }
+
     /// Cambios de todos los espacios que esperan a subir.
     pub fn pending(&self) -> usize {
         self.state.pending.len()
@@ -254,6 +314,7 @@ mod tests {
             invitations: Vec::new(),
             contacts: BTreeMap::new(),
             oauth: None,
+            audit_queue: Vec::new(),
         }
     }
 

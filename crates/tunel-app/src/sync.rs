@@ -13,6 +13,7 @@ use crate::engine::LinkAccount;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 use tunel_core::store::MIN_PASSWORD_LEN;
+use tunel_core::sync::audit::AuditAction;
 use tunel_core::sync::{SyncLocal, record};
 use tunel_core::vault::VaultData;
 use tunel_sync::{SyncError, SyncOutcome};
@@ -253,6 +254,44 @@ pub fn after_commit(app: &mut TunelApp, old: &VaultData, new: &VaultData) {
     }
 }
 
+/// Anota en el registro de auditoría de `team` que esta cuenta hizo `action`; se sube en
+/// la siguiente ronda. No hace nada fuera de un Team o sin cuenta.
+pub fn record_audit(app: &mut TunelApp, team: &str, action: AuditAction) {
+    let Some(next) = app
+        .sync
+        .local
+        .as_ref()
+        .and_then(|local| local.record_audit(team, action, now_millis()))
+    else {
+        return;
+    };
+    app.sync.local = Some(next);
+    save(app);
+    app.sync.schedule_in(DEBOUNCE);
+}
+
+/// `task`, la configuración que devuelve una tarea en segundo plano, con la cola del
+/// registro de auditoría bien puesta: la de ahora, que pudo crecer mientras la tarea
+/// corría, más lo que anotó la tarea, menos lo que ya se subió.
+fn with_audit_queue(app: &TunelApp, task: SyncLocal, sent: &[String]) -> SyncLocal {
+    let current = app
+        .sync
+        .local
+        .as_ref()
+        .map_or(&[][..], |l| &l.audit_queue[..]);
+    let mut audit_queue = current.to_vec();
+    for queued in &task.audit_queue {
+        if !audit_queue.contains(queued) {
+            audit_queue.push(queued.clone());
+        }
+    }
+    SyncLocal {
+        audit_queue,
+        ..task
+    }
+    .without_audit(sent)
+}
+
 /// Lanza una ronda si toca.
 pub fn tick(app: &mut TunelApp) {
     let due = app.sync.next.is_some_and(|at| at <= Instant::now());
@@ -338,6 +377,7 @@ fn apply_outcome(app: &mut TunelApp, snapshot: &VaultData, outcome: SyncOutcome)
             true,
         );
     }
+    let local = with_audit_queue(app, local, &outcome.audit_sent);
     let has_pending = local.pending() > 0;
     app.sync.local = Some(local);
     save(app);
@@ -469,6 +509,7 @@ mod tests {
             invitations: Vec::new(),
             contacts: Default::default(),
             oauth: None,
+            audit_queue: Vec::new(),
         }
     }
 

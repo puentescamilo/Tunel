@@ -29,6 +29,9 @@ pub struct SyncOutcome {
     /// Teams que no se pudieron sincronizar en esta ronda. No impiden sincronizar la
     /// bóveda personal ni los demás Teams.
     pub team_problems: Vec<TeamProblem>,
+    /// Entradas del registro de auditoría que ya salieron de la cola, por su
+    /// identificador. Quien llama las quita de su cola, que pudo crecer entretanto.
+    pub audit_sent: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,6 +256,8 @@ async fn run_round(local: &SyncLocal, data: &VaultData) -> Result<SyncOutcome, S
         local.keypair = keypair::try_fetch_or_create(&session.api, &token, &local.vault_key).await;
     }
     let team_problems = sync_teams(&mut session, &mut local, &mut data, &mut counters).await;
+    let audit_sent = flush_audit(&mut session, &local).await;
+    local = local.without_audit(&audit_sent);
     local.token = session.into_token();
     Ok(SyncOutcome {
         data,
@@ -261,7 +266,28 @@ async fn run_round(local: &SyncLocal, data: &VaultData) -> Result<SyncOutcome, S
         downloaded: counters.downloaded,
         uploaded: counters.uploaded,
         team_problems,
+        audit_sent,
     })
+}
+
+/// Sube la cola del registro de auditoría de cada Team. Lo que falla espera a la
+/// siguiente ronda; lo de Teams que ya no están se descarta.
+async fn flush_audit(session: &mut Session, local: &SyncLocal) -> Vec<String> {
+    let mut sent: Vec<String> = local
+        .audit_queue
+        .iter()
+        .filter(|q| local.team(&q.team).is_none())
+        .filter_map(|q| q.event.id())
+        .collect();
+    for team in &local.teams {
+        match crate::audit::flush(session, local, team).await {
+            Ok(ids) => sent.extend(ids),
+            Err(e) => {
+                tracing::info!(team = %team.id, error = %e, "registro de auditoría pendiente")
+            }
+        }
+    }
+    sent
 }
 
 /// Actualiza la lista de Teams y sincroniza cada uno.

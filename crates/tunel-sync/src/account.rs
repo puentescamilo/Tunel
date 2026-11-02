@@ -86,6 +86,7 @@ pub async fn create_account(
         invitations: Vec::new(),
         contacts: Default::default(),
         oauth: None,
+        audit_queue: Vec::new(),
     })
 }
 
@@ -126,6 +127,7 @@ pub async fn sign_in(
         invitations: Vec::new(),
         contacts: Default::default(),
         oauth: None,
+        audit_queue: Vec::new(),
     })
 }
 

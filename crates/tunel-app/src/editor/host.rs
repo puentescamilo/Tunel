@@ -443,17 +443,7 @@ pub(super) fn host_form(
                 &inherited,
             );
             ui.end_row();
-            // La contraseña de la identidad que usará el host, elegida o heredada.
-            let identity = form
-                .host
-                .identity
-                .or_else(|| {
-                    form.host
-                        .group
-                        .and_then(|g| data.group(g))
-                        .and_then(|g| g.identity)
-                })
-                .and_then(|i| data.identity(i));
+            let identity = effective_identity(form, data);
             if let Some((identity, password)) =
                 identity.and_then(|i| i.password.as_deref().map(|p| (i, p)))
             {
@@ -611,6 +601,19 @@ pub(super) fn host_form(
 }
 
 /// Lee el contenido de un archivo elegido por el usuario (clave o certificado).
+/// La identidad que usará el host del formulario, elegida o heredada de su grupo.
+pub(super) fn effective_identity<'a>(form: &HostForm, data: &'a VaultData) -> Option<&'a Identity> {
+    form.host
+        .identity
+        .or_else(|| {
+            form.host
+                .group
+                .and_then(|g| data.group(g))
+                .and_then(|g| g.identity)
+        })
+        .and_then(|i| data.identity(i))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

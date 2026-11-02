@@ -150,6 +150,24 @@ CREATE TABLE IF NOT EXISTS team_rosters (
     blob TEXT NOT NULL,
     PRIMARY KEY (team_id, version)
 );
+-- Registro de auditoría cifrado de cada Team (ver `crate::audit`).
+CREATE TABLE IF NOT EXISTS team_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    epoch INTEGER NOT NULL,
+    -- Correo de la cuenta que la subió; se queda aunque la cuenta se borre.
+    author TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    blob TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS team_audit_by_team ON team_audit (team_id, id);
+-- La clave de la época anterior cifrada con la de `epoch`, para leer el registro viejo.
+CREATE TABLE IF NOT EXISTS team_previous_keys (
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    epoch INTEGER NOT NULL,
+    blob TEXT NOT NULL,
+    PRIMARY KEY (team_id, epoch)
+);
 ";
 
 /// Columnas añadidas a `accounts` después de la primera versión, con su tipo.
@@ -289,6 +307,7 @@ pub struct Rotation {
     pub manifest: ManifestBlob,
     pub records: Vec<SealedRecord>,
     pub roster: Option<RosterBlob>,
+    pub previous_key: Option<SealedBlob>,
 }
 
 /// Un equipo recién creado, tal como lo manda quien lo crea.
@@ -1444,6 +1463,9 @@ impl Db {
             )?;
             if let Some(roster) = &rotation.roster {
                 insert_roster(&tx, &team, rotation.epoch, roster)?;
+            }
+            if let Some(previous) = &rotation.previous_key {
+                crate::audit::insert_previous_key(&tx, &team, rotation.epoch, previous)?;
             }
             // Basta con las listas de esta época y la anterior: con una clave más antigua
             // ya no se puede seguir.

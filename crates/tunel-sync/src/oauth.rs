@@ -332,6 +332,7 @@ pub async fn complete(
             provider_name: provider.name,
             wrapped_vault_key: wrapped,
         }),
+        audit_queue: Vec::new(),
     })
 }
 

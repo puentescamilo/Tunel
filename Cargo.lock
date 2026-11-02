@@ -6159,6 +6159,7 @@ name = "tunel-app"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "directories",
  "eframe",
  "egui",

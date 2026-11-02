@@ -487,6 +487,7 @@ async fn removing_a_member_and_rotating_the_key_locks_them_out() {
     .with_pushed(outgoing.iter().map(|e| (new_key.record_id(&e.key), e.hlc)));
     let rotation = |keys: Vec<MemberKey>| RotateTeamRequest {
         roster: None,
+        previous_key: None,
         epoch: 1,
         base_version: manifest.version,
         name: seal_team_name(&new_key, TEAM, "Equipo").unwrap(),
@@ -943,6 +944,7 @@ async fn deleting_the_only_admin_needs_a_new_one_and_the_others_keep_their_key()
     let next = Manifest::empty().with_pushed(std::iter::empty());
     let rotation = RotateTeamRequest {
         roster: None,
+        previous_key: None,
         epoch: 1,
         base_version: 0,
         name: seal_team_name(&new_key, TEAM, "Equipo").unwrap(),

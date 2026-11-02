@@ -285,6 +285,23 @@ que cada cual ponga las suyas. Los hosts compartidos muestran el nombre del Team
   identidad, grupo, jump host o snippet personal, ni un túnel compartido ir por un host tuyo.
 - Las claves de host conocidas no se comparten: cada persona decide de qué servidores se fía.
 
+### Registro de actividad
+
+Los admins ven en la ficha del Team, en **Ajustes → Teams**, quién hizo qué y cuándo:
+
+- quién se conectó a un host del Team (terminal, SFTP o túnel);
+- quién vio la contraseña de una identidad del Team o cambió una contraseña o clave privada;
+- a quién invitaron, quién entró o salió, a quién sacaron y quién cambió un rol.
+
+Cada entrada la firma con su clave quien hizo la acción y va cifrada con la clave del Team:
+el servidor la guarda pero no puede leerla ni inventarla, y un miembro no puede escribir en
+nombre de otro. Una entrada con la firma de otra persona aparece marcada. Al renovar la
+clave del Team, la anterior queda guardada con la nueva, así se sigue leyendo lo de antes.
+
+Lo escribe la app de cada persona: sin conexión, las entradas esperan y se suben al
+sincronizar. El servidor sí podría borrar entradas o no entregarlas, y guarda las 20.000
+más recientes de cada Team. Hace falta `tunel-server` 0.9.0 o posterior.
+
 ### Sesiones compartidas
 
 Puedes dejar que los miembros de un Team vean en vivo una terminal abierta y darle el control

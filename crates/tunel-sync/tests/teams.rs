@@ -4,10 +4,12 @@
 
 use tunel_core::crypto::KdfParams;
 use tunel_core::model::Host;
+use tunel_core::sync::audit::AuditAction;
 use tunel_core::sync::protocol::TeamRole;
 use tunel_core::sync::{AccountKeypair, Contact, KeyProblem, RosterMember, SyncLocal};
 use tunel_core::vault::VaultData;
 use tunel_server::{AppState, Config, Db, router};
+use tunel_sync::audit::{self, Trust};
 use tunel_sync::teams::{self, KeyStatus};
 use tunel_sync::{ServerUrl, SyncError, check_server_url, create_account, sync_once};
 use zeroize::Zeroizing;
@@ -391,6 +393,7 @@ async fn a_pinned_contact_who_is_not_an_admin_cannot_slip_in_a_team_key() {
         },
         records: Vec::new(),
         roster: None,
+        previous_key: None,
     };
     let quota = tunel_server::Quota {
         records: 100,
@@ -583,4 +586,78 @@ async fn deleting_the_team_removes_its_hosts_everywhere() {
     bob.sync().await;
     assert!(bob.host("web").is_none());
     assert!(bob.local.teams.is_empty());
+}
+
+impl Person {
+    fn audit(&mut self, team: &str, action: AuditAction) {
+        self.local = self.local.record_audit(team, action, now()).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn the_audit_log_reaches_the_admins_signed_and_survives_a_new_key() {
+    let server = start_server().await;
+    let (mut ana, mut bob, team) = shared_team(&server).await;
+    let mut carol = Person::new(&server, "carol@ejemplo.com", VaultData::default()).await;
+    carol.sync().await;
+    ana.invite(&team, "carol@ejemplo.com").await;
+    carol.accept(&team).await;
+
+    bob.audit(&team, AuditAction::Connected { host: "web".into() });
+    let outcome = bob.sync().await;
+    assert_eq!(outcome.audit_sent.len(), 1);
+    assert!(bob.local.audit_queue.is_empty());
+
+    // Al sacar a bob cambia la clave; lo de antes se sigue leyendo.
+    let (local, data) = teams::remove_member(&ana.local, &ana.data, &team, "bob@ejemplo.com")
+        .await
+        .unwrap();
+    ana.local = local;
+    ana.data = data;
+    carol.sync().await;
+    carol.audit(&team, AuditAction::SecretViewed { item: "web".into() });
+    carol.sync().await;
+
+    let (_, log) = audit::read(&ana.local, &team, None).await.unwrap();
+    let seen: Vec<_> = log
+        .entries
+        .iter()
+        .map(|e| (e.actor.as_str(), e.action.clone(), e.trust))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            (
+                "carol@ejemplo.com",
+                Some(AuditAction::SecretViewed { item: "web".into() }),
+                Trust::Verified
+            ),
+            (
+                "bob@ejemplo.com",
+                Some(AuditAction::Connected { host: "web".into() }),
+                Trust::Verified
+            ),
+        ]
+    );
+    assert!(!log.more);
+
+    // Solo los admins leen el registro.
+    assert!(matches!(
+        audit::read(&carol.local, &team, None).await,
+        Err(SyncError::Forbidden(_))
+    ));
+}
+
+#[tokio::test]
+async fn entries_of_a_team_left_behind_are_dropped_from_the_queue() {
+    let server = start_server().await;
+    let (_ana, mut bob, team) = shared_team(&server).await;
+    bob.audit(&team, AuditAction::Connected { host: "web".into() });
+    let (local, data) = teams::leave_team(&bob.local, &bob.data, &team)
+        .await
+        .unwrap();
+    bob.local = local;
+    bob.data = data;
+    assert_eq!(bob.sync().await.audit_sent.len(), 1);
+    assert!(bob.local.audit_queue.is_empty());
 }

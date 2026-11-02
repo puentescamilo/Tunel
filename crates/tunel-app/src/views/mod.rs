@@ -10,5 +10,6 @@ pub mod live;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;
+pub mod team_audit;
 pub mod teams;
 pub mod themes;

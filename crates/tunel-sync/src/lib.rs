@@ -6,6 +6,7 @@
 
 pub mod account;
 pub mod api;
+pub mod audit;
 mod keypair;
 pub mod live;
 pub mod oauth;
