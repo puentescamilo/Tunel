@@ -1,5 +1,6 @@
 //! Vistas de cada sección de la aplicación.
 
+pub mod cloud_import;
 pub mod fonts;
 pub mod forwards;
 pub mod hosts;

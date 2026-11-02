@@ -1,5 +1,6 @@
 //! Núcleo de Túnel: modelos de dominio, bóveda cifrada y verificación de known_hosts.
 
+pub mod cloud;
 pub mod crypto;
 pub mod io;
 pub mod model;

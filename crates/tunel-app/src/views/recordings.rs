@@ -159,7 +159,7 @@ fn load(app: &mut TunelApp, team: &str) {
         }
     }
     let team = team.to_string();
-    app.engine.recordings_task(async move {
+    app.engine.background(async move {
         let result = recording::list(&local, &team)
             .await
             .map_err(|e| e.to_string());
@@ -189,7 +189,7 @@ fn open(app: &mut TunelApp, team: &str, summary: &RecordingSummary, export: Opti
     };
     let (team, id, author) = (team.to_string(), summary.id.clone(), summary.author.clone());
     app.notify("Descargando la grabación…");
-    app.engine.recordings_task(async move {
+    app.engine.background(async move {
         let result = recording::open(&local, &team, &id, &author)
             .await
             .map(Box::new)
@@ -235,7 +235,7 @@ fn delete(app: &mut TunelApp, team: &str, id: &str) {
         return;
     };
     let (team, id) = (team.to_string(), id.to_string());
-    app.engine.recordings_task(async move {
+    app.engine.background(async move {
         let result = match recording::delete(&local, &team, &id).await {
             Ok(()) => recording::list(&local, &team).await,
             Err(e) => Err(e),

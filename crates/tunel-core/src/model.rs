@@ -101,6 +101,10 @@ pub struct Host {
     pub notes: String,
     /// Tema de terminal propio de este host (p. ej. rojo para producción).
     pub terminal_theme: Option<String>,
+    /// Máquina de la nube de la que se importó, como `aws:i-0abc…`: al volver a importar se
+    /// actualiza su dirección en vez de duplicarla (ver [`crate::cloud`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud_id: Option<String>,
 }
 
 impl Host {

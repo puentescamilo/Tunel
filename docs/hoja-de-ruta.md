@@ -21,6 +21,9 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 2a | Actualización automática con paquetes verificados | 0.9.0 | ✅ |
 | 3a | Registro de auditoría de los Teams | 0.9.0 | ✅ |
 | 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | ✅ |
+| 6a | Importar máquinas de AWS, Azure y DigitalOcean | 0.10.0 | en curso |
+| 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | — |
+| 6c | Contenedores Docker de un host SSH | 0.10.0 | — |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -92,13 +95,25 @@ el resto: el servidor guarda el registro pero no puede leerlo. Los admins lo ven
 - **5c. Claves débiles:** aviso en el llavero para RSA de menos de 3072 bits, DSA y claves
   sin frase de paso que no están en el llavero cifrado (las de `~/.ssh`).
 
+## 6. Nube y contenedores
+
+Se usan las herramientas oficiales (`aws`, `az`, `doctl`, `docker`, `kubectl`) con la sesión
+que ya tenga el usuario: Túnel no guarda credenciales de la nube.
+
+- **6a. Importar de la nube:** en **Ajustes → Importar**, elegir proveedor y cuenta, ver sus
+  máquinas y marcar las que se importan como hosts. Volver a importar actualiza la IP de las
+  que ya estaban sin tocar el resto de su configuración.
+- **6b. Contenedores y pods de este equipo:** listar los contenedores de `docker` y los pods de
+  cada contexto de `kubectl`, y abrir una shell en ellos en una pestaña.
+- **6c. Docker en un host SSH:** lo mismo con los contenedores de un servidor, a través de la
+  conexión SSH.
+
 ## Pendiente de fases anteriores
 
 | Función | Estado |
 |---|---|
 | Desbloqueo biométrico (Touch ID, Windows Hello) | fase 2 |
 | Autocompletado de comandos | fase 2 |
-| Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes, y shell en pods y contenedores | fase 3 |
 | Llaves FIDO2 en Windows | pendiente |
 | Cliente Mosh propio | más adelante |
 | Borrar de la memoria las copias temporales de la bóveda en la interfaz | seguridad |

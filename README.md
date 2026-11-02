@@ -23,6 +23,10 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   de las claves RSA de menos de 3072 bits, de las DSA y de las claves de `~/.ssh` sin frase
   de paso.
 - **Importar `~/.ssh/config`**: hosts, usuarios, puertos, `ProxyJump` y claves.
+- **Importar de la nube**: máquinas de AWS EC2, Azure y DigitalOcean, con la sesión que ya
+  tengas en `aws`, `az` o `doctl` (Túnel no guarda credenciales de la nube). Se elige cuenta
+  (y región en AWS), se marcan las máquinas y entran como hosts en un grupo, por su IP pública
+  o la privada. Volver a importar actualiza la IP de las que ya estaban y respeta lo demás.
 - **Conexión rápida** (`⌘K` / `Ctrl+K`): busca un host guardado o escribe
   `usuario@servidor:puerto` (también `ssh usuario@servidor -p 2222`) para conectar sin guardarlo.
 
@@ -704,7 +708,8 @@ La hoja de ruta detallada, con el orden de las próximas entregas, está en
 | Llaves FIDO2 (`sk-*`) | ✅ macOS y Linux · ⏳ Windows |
 | Cliente Mosh propio | ⏳ más adelante |
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
-| Importar de AWS, Azure, DigitalOcean, Docker y Kubernetes | ⏳ fase 3 |
+| Importar de AWS, Azure y DigitalOcean | ✅ |
+| Shell en contenedores Docker y pods de Kubernetes | ⏳ |
 | Sincronización entre equipos (servidor propio, cifrado de extremo a extremo) | ✅ |
 | Teams: hosts compartidos entre cuentas | ✅ |
 | Sesiones compartidas | ✅ |
