@@ -68,6 +68,8 @@ pub struct Config {
     /// Renovaciones de clave que se procesan a la vez como mucho.
     pub concurrent_rotations: usize,
     pub live: LiveLimits,
+    /// Tamaño y duración de las grabaciones de sesiones.
+    pub recordings: crate::recordings::RecordingLimits,
     /// Proveedores de identidad (Google, Microsoft 365, OpenID Connect); `None` si solo
     /// se entra con contraseña.
     pub oauth: Option<crate::oauth::OAuthConfig>,
@@ -112,6 +114,7 @@ impl Default for Config {
             },
             concurrent_rotations: 2,
             live: LiveLimits::default(),
+            recordings: Default::default(),
             oauth: None,
             providers_only: false,
         }
@@ -230,6 +233,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(roster_routes)
         .merge(rotate_routes)
         .merge(live::routes())
+        .merge(crate::recordings::routes())
         .merge(crate::audit::routes().layer(DefaultBodyLimit::max(MAX_PUSH_BODY)))
         .merge(crate::oauth::routes().layer(DefaultBodyLimit::max(MAX_AUTH_BODY)))
         .route("/health", get(|| async { "ok" }))
@@ -255,6 +259,10 @@ pub fn spawn_session_sweeper(state: Arc<AppState>) -> tokio::task::JoinHandle<()
             ticks.tick().await;
             if let Err(e) = state.db.purge_sessions(now()).await {
                 tracing::warn!(error = %e, "no se pudieron borrar las sesiones caducadas");
+            }
+            let retention = state.config.recordings.retention;
+            if let Err(e) = state.db.purge_recordings(now(), retention).await {
+                tracing::warn!(error = %e, "no se pudieron borrar las grabaciones caducadas");
             }
         }
     })

@@ -7,6 +7,7 @@ pub mod key_audit;
 pub mod keychain;
 pub mod known_hosts;
 pub mod live;
+pub mod recordings;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;

@@ -503,3 +503,37 @@ mod tests {
         assert!(!only.password_login);
     }
 }
+
+/// Un trozo de una grabación de sesión, cifrado con la clave del Team en `epoch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordingChunk {
+    pub seq: u64,
+    pub epoch: u64,
+    /// Es el último: la sesión terminó. Va en claro para que el servidor lo sepa.
+    #[serde(default)]
+    pub last: bool,
+    pub blob: SealedBlob,
+}
+
+/// Una grabación tal como la lista el servidor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordingSummary {
+    pub id: String,
+    /// Cuenta que la sube.
+    pub author: String,
+    /// Segundos desde 1970, según el servidor: primer y último trozo recibido.
+    pub started_at: u64,
+    pub updated_at: u64,
+    /// Bytes cifrados que ocupa.
+    pub bytes: u64,
+    pub chunks: u64,
+    /// Llegó el último trozo.
+    pub finished: bool,
+}
+
+/// Todos los trozos de una grabación y las claves anteriores del Team para abrirlos.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordingDownload {
+    pub chunks: Vec<RecordingChunk>,
+    pub previous_keys: Vec<PreviousKey>,
+}

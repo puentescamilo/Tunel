@@ -95,6 +95,9 @@ pub struct SyncController {
     pub oauth: oauth::OAuthUi,
     /// La sesión de la cuenta de proveedor caducó: hay que volver a pasar por él.
     pub sign_in_again: bool,
+    /// La última configuración guardada, para las tareas que necesitan la clave nueva de un
+    /// Team en cuanto llega, como las grabaciones.
+    latest: tokio::sync::watch::Sender<Option<SyncLocal>>,
 }
 
 impl Default for SyncController {
@@ -110,6 +113,7 @@ impl Default for SyncController {
             form: AccountForm::default(),
             oauth: oauth::OAuthUi::default(),
             sign_in_again: false,
+            latest: tokio::sync::watch::Sender::new(None),
         }
     }
 }
@@ -138,6 +142,11 @@ impl SyncController {
     }
 
     /// Problemas de los Teams en la última ronda.
+    /// Sigue la configuración de sincronización según se va guardando.
+    pub fn watch_local(&self) -> tokio::sync::watch::Receiver<Option<SyncLocal>> {
+        self.latest.subscribe()
+    }
+
     pub fn team_problems(&self) -> &[tunel_sync::TeamProblem] {
         &self.team_problems
     }
@@ -218,6 +227,7 @@ fn save(app: &mut TunelApp) {
     let (Some(vault), Some(local)) = (app.vault.as_ref(), app.sync.local.as_ref()) else {
         return;
     };
+    app.sync.latest.send_replace(Some(local.clone()));
     if let Err(e) = vault.save_sync(local) {
         app.notify(format!(
             "No se pudo guardar el estado de la sincronización: {e}"

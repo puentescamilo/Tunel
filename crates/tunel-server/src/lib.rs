@@ -13,6 +13,7 @@ pub mod db;
 pub mod live;
 pub mod oauth;
 mod pulls;
+pub mod recordings;
 
 pub use api::{AppState, Config, parse_allowed_domains, router, spawn_session_sweeper};
 pub use db::{Db, Quota};

@@ -43,6 +43,10 @@ pub struct TerminalSession {
     pub broadcast: bool,
     /// Lo que el usuario tecleó en este fotograma, para repetirlo en las demás marcadas.
     typed: Vec<u8>,
+    /// Se graba para un Team (ver [`crate::recording`]).
+    pub recorder: Option<crate::recording::Recorder>,
+    /// Es la reproducción de una grabación, no una sesión.
+    pub playback: Option<crate::playback::Playback>,
 }
 
 impl TerminalSession {
@@ -69,12 +73,29 @@ impl TerminalSession {
             notices: Vec::new(),
             broadcast: false,
             typed: Vec::new(),
+            recorder: None,
+            playback: None,
         }
     }
 
-    /// Se mira la sesión de otra persona: el tamaño y las respuestas son cosa suya.
+    /// Una pestaña que reproduce `recording`.
+    pub fn replay(title: String, recording: &tunel_sync::recording::Recording) -> Self {
+        let (cols, rows) = recording
+            .header
+            .as_ref()
+            .map_or((80, 24), |h| (h.cols.max(1), h.rows.max(1)));
+        let (io, _backend) = tunel_core::io::session_pair();
+        let mut session = Self::new(title, None, cols, rows, 10_000, io);
+        session.status = SessionStatus::Connected;
+        session.wants_focus = false;
+        session.playback = Some(crate::playback::Playback::new(recording));
+        session
+    }
+
+    /// Se mira la sesión de otra persona o una grabación: el tamaño y las respuestas no
+    /// son cosa de esta terminal, ni se guarda para la próxima vez.
     pub fn is_watching(&self) -> bool {
-        matches!(self.live, Some(Live::Viewer(_)))
+        matches!(self.live, Some(Live::Viewer(_))) || self.playback.is_some()
     }
 
     pub fn take_notices(&mut self) -> Vec<String> {
@@ -106,6 +127,9 @@ impl TerminalSession {
                     if let Some(Live::Host(share)) = &self.live {
                         share.host.output(&bytes);
                     }
+                    if let Some(recorder) = &self.recorder {
+                        recorder.output(&bytes);
+                    }
                     if let Some(log) = self.log.as_mut()
                         && let Err(e) = log.write_all(&bytes)
                     {
@@ -122,10 +146,47 @@ impl TerminalSession {
                 SessionOutput::Error(error) => self.status = SessionStatus::Failed(error),
                 SessionOutput::Resize { cols, rows } => {
                     self.emulator.resize(cols, rows);
+                    if let Some(recorder) = &self.recorder {
+                        recorder.resize(cols, rows);
+                    }
                 }
             }
         }
-        self.pump_live() || changed
+        self.pump_playback() || self.pump_live() || changed
+    }
+
+    /// Lleva la grabación hasta donde toca; devuelve `true` si cambió algo visible.
+    fn pump_playback(&mut self) -> bool {
+        let Some(playback) = self.playback.as_mut() else {
+            return false;
+        };
+        let events = playback.advance(std::time::Instant::now());
+        self.play(events)
+    }
+
+    /// Salta al final de la grabación.
+    pub fn skip_to_end(&mut self) {
+        if let Some(playback) = self.playback.as_mut() {
+            let events = playback.skip_to_end();
+            self.play(events);
+        }
+    }
+
+    fn play(&mut self, events: Vec<tunel_core::sync::recording::RecordingEvent>) -> bool {
+        use tunel_core::sync::recording::RecordingEvent;
+        let changed = !events.is_empty();
+        for event in events {
+            match event {
+                RecordingEvent::Output { data, .. } => {
+                    // Las respuestas a la terminal se descartan: no hay nadie al otro lado.
+                    let _ = self.emulator.feed(&data);
+                }
+                RecordingEvent::Resize { cols, rows, .. } => {
+                    self.emulator.resize(cols, rows);
+                }
+            }
+        }
+        changed
     }
 
     /// Atiende la sesión compartida; devuelve `true` si cambió algo visible.
@@ -267,9 +328,12 @@ impl TerminalSession {
         }
         if self.emulator.resize(cols, rows) {
             let _ = self.io.input.send(SessionInput::Resize { cols, rows });
+            let (cols, rows) = self.emulator.size();
             if let Some(Live::Host(share)) = &self.live {
-                let (cols, rows) = self.emulator.size();
                 share.host.resize(cols, rows);
+            }
+            if let Some(recorder) = &self.recorder {
+                recorder.resize(cols, rows);
             }
         }
     }
@@ -314,6 +378,36 @@ mod tests {
             TerminalSession::new("t".into(), None, 20, 4, 100, io),
             backend,
         )
+    }
+
+    #[test]
+    fn a_replay_is_read_only_and_reaches_the_end() {
+        use tunel_core::sync::recording::{RecordingEvent, RecordingHeader};
+        let recording = tunel_sync::recording::Recording {
+            header: Some(RecordingHeader {
+                host: "web".into(),
+                actor: "ana@ejemplo.com".into(),
+                started_at: 0,
+                cols: 30,
+                rows: 5,
+            }),
+            events: vec![RecordingEvent::Output {
+                at_ms: 60_000,
+                data: b"grabado".to_vec(),
+            }],
+            complete: true,
+            trust: tunel_sync::audit::Trust::Verified,
+            problem: None,
+        };
+        let mut s = TerminalSession::replay("▶ web".into(), &recording);
+        assert!(s.is_watching());
+        assert_eq!(s.emulator.size(), (30, 5));
+        s.resize(100, 40);
+        assert_eq!(s.emulator.size(), (30, 5), "el tamaño es el grabado");
+        s.skip_to_end();
+        let screen = s.emulator.screen(tunel_term::palette::default_theme());
+        assert_eq!(screen.row_text(0), "grabado");
+        assert!(s.playback.as_ref().unwrap().finished());
     }
 
     #[test]

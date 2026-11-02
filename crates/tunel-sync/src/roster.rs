@@ -95,6 +95,7 @@ pub(crate) fn for_rotation(
     let mut next = Roster {
         version: roster.version + 1,
         members: Default::default(),
+        record_sessions: roster.record_sessions,
     };
     for member in members {
         let listed = roster
@@ -141,6 +142,19 @@ pub(crate) async fn put_member(
     email: &str,
     member: RosterMember,
 ) -> Result<TeamLocal, SyncError> {
+    let email = normalize_email(email);
+    let changed = put(session, local, team, |base| base.with(&email, member)).await?;
+    Ok(changed.unwrap_or_else(|| team.clone()))
+}
+
+/// Guarda en el servidor la lista de `team` cambiada con `change`, partiendo de la última,
+/// y devuelve `team` con ella. `None` si el Team no tiene lista y no se puede empezar una.
+pub(crate) async fn put(
+    session: &mut Session,
+    local: &SyncLocal,
+    team: &TeamLocal,
+    change: impl Fn(&Roster) -> Roster,
+) -> Result<Option<TeamLocal>, SyncError> {
     let (me, pair) = author(local)?;
     let team = team.clone();
     for _ in 0..MAX_ROSTER_TRIES {
@@ -152,12 +166,12 @@ pub(crate) async fn put_member(
                     .iter()
                     .all(|m| local.check_key(&m.email, m.public_key).is_ok());
                 if !pinned {
-                    return Ok(team);
+                    return Ok(None);
                 }
                 Roster::trusting(&members)
             }
         };
-        let roster = base.with(&normalize_email(email), member);
+        let roster = change(&base);
         let request = RosterRequest {
             epoch: team.epoch,
             roster: roster.seal(&team.key, &team.id, team.epoch, &me, pair)?,
@@ -166,10 +180,10 @@ pub(crate) async fn put_member(
             .add_roster(token, &team.id, &request));
         match added {
             Ok(()) => {
-                return Ok(TeamLocal {
+                return Ok(Some(TeamLocal {
                     roster: Some(roster),
                     ..team
-                });
+                }));
             }
             // Otro admin la cambió entretanto: se vuelve a leer y se parte de la suya.
             Err(SyncError::Conflict(_)) => {}

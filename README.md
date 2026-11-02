@@ -333,6 +333,45 @@ lo es, y de una cuya fecha no cuadra con su llegada al servidor.
 - Hace falta `tunel-server` 0.9.0 o posterior; con uno anterior las entradas esperan en la
   cola de cada equipo (como mucho 1.000).
 
+### Grabación de sesiones
+
+Un admin puede activar **Grabar** en la ficha del Team (**Ajustes → Teams**). Desde entonces,
+cada terminal que alguien abre con un host del Team se graba, con un aviso visible en la propia
+terminal. Se graba lo que muestra la terminal y sus cambios de tamaño, **nunca lo que se
+teclea**. Ojo: lo que el host repite en pantalla sí queda grabado, como una contraseña escrita
+en un programa que la muestra o un archivo con secretos que se imprime. SFTP y los túneles no
+se graban.
+
+Los admins ven las grabaciones en la misma ficha: quién, cuándo, cuánto duró y si terminó.
+
+- **Ver:** se reproduce en una pestaña de solo lectura, con pausa, velocidad (×1 a ×8) y
+  salto al final. Las pausas de más de dos segundos se acortan.
+- **Guardar** como `.cast`: el formato de [asciinema](https://asciinema.org), para verla con
+  `asciinema play` o compartirla. Lleva tal cual las secuencias de control de la sesión: al
+  reproducirlo en otra terminal, esa terminal las obedece (título, portapapeles…). En Túnel
+  no: la reproducción las ignora.
+- **Borrar.**
+
+Seguridad:
+
+- La grabación se sube por trozos mientras dura la sesión. Cada trozo lo firma quien se
+  conectó y va cifrado con la clave del Team, encadenado al anterior. El servidor no puede
+  leerla, ni cambiar, quitar o reordenar trozos sin que la reproducción lo avise. Sí puede
+  quedarse sin los últimos: la grabación aparece entonces como sin terminar.
+- Que se grabe lo dice la lista de miembros firmada por los admins: ni el servidor ni un
+  miembro lo pueden apagar.
+- Lo hace la app de cada persona: una app modificada podría no grabar. Sin conexión, lo
+  grabado espera en memoria (hasta 32 MiB) y se sube al volver.
+- El servidor guarda como mucho 64 MiB por grabación y `TUNEL_GRABACIONES_GB` por Team, y las
+  borra a los `TUNEL_GRABACIONES_DIAS`. Ninguna cuenta puede ocupar más de la mitad de ese
+  espacio ni pasar de 1.000 grabaciones por Team: así nadie lo llena para que no se grabe a
+  los demás. Al llenarse, las sesiones dejan de grabarse con un aviso y el aviso de la
+  terminal desaparece; un admin puede borrar grabaciones viejas.
+- Si se renueva la clave del Team con una sesión abierta, lo que sigue se graba con la clave
+  nueva en cuanto este equipo la recibe: quien salió no puede leerlo.
+- Hace falta `tunel-server` 0.9.0. Todos los admins deben usar Túnel 0.9.0: uno anterior que
+  cambie la lista de miembros desactivaría la grabación sin darse cuenta.
+
 ### Sesiones compartidas
 
 Puedes dejar que los miembros de un Team vean en vivo una terminal abierta y darle el control
@@ -619,6 +658,8 @@ si usas la opción A.
 | `TUNEL_MICROSOFT_ID_CLIENTE`, `TUNEL_MICROSOFT_SECRETO`, `TUNEL_MICROSOFT_INQUILINO` | Iniciar sesión con Microsoft 365 | sin definir |
 | `TUNEL_OIDC_NOMBRE`, `TUNEL_OIDC_EMISOR`, `TUNEL_OIDC_ID_CLIENTE`, `TUNEL_OIDC_SECRETO` | Iniciar sesión con otro proveedor OpenID Connect | sin definir |
 | `TUNEL_SOLO_PROVEEDORES` | `1` obliga a entrar con un proveedor: desactiva el correo y la contraseña | sin definir |
+| `TUNEL_GRABACIONES_GB` | Espacio de las grabaciones de sesiones de cada Team, en GiB | `2` |
+| `TUNEL_GRABACIONES_DIAS` | Días que se guarda una grabación desde su último trozo | `90` |
 | `TUNEL_DB` | Archivo de la base de datos SQLite | `/datos/tunel.db` |
 | `TUNEL_ESCUCHA` | Dirección y puerto en los que escucha | `0.0.0.0:8080` |
 

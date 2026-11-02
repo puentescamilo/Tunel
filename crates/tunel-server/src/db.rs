@@ -162,6 +162,27 @@ CREATE TABLE IF NOT EXISTS team_audit (
 );
 CREATE INDEX IF NOT EXISTS team_audit_by_team ON team_audit (team_id, id);
 CREATE INDEX IF NOT EXISTS team_audit_by_author ON team_audit (team_id, author, id);
+-- Grabaciones de sesiones de los Teams (ver `crate::recordings`), por trozos cifrados.
+CREATE TABLE IF NOT EXISTS team_recordings (
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    chunks INTEGER NOT NULL DEFAULT 0,
+    finished INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (team_id, id)
+);
+CREATE TABLE IF NOT EXISTS team_recording_chunks (
+    team_id TEXT NOT NULL,
+    recording_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    epoch INTEGER NOT NULL,
+    blob TEXT NOT NULL,
+    PRIMARY KEY (team_id, recording_id, seq),
+    FOREIGN KEY (team_id, recording_id) REFERENCES team_recordings(team_id, id) ON DELETE CASCADE
+);
 -- La clave de la época anterior cifrada con la de `epoch`, para leer el registro viejo.
 CREATE TABLE IF NOT EXISTS team_previous_keys (
     team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,

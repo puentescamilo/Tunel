@@ -488,6 +488,21 @@ pub async fn set_role(
     Ok(finish(session, with_team(local, listed)))
 }
 
+/// Enciende o apaga la grabación de las sesiones con los hosts del Team. Va en su lista de
+/// miembros, firmada por este admin.
+pub async fn set_recording(
+    local: &SyncLocal,
+    team: &str,
+    on: bool,
+) -> Result<SyncLocal, SyncError> {
+    let team = admin_team(local, team)?.clone();
+    let mut session = Session::new(local)?;
+    let changed = roster::put(&mut session, local, &team, |base| base.recording(on))
+        .await?
+        .ok_or(SyncError::NoRoster)?;
+    Ok(finish(session, with_team(local, changed)))
+}
+
 /// `local` con `team` en lugar del Team con su mismo identificador.
 fn with_team(local: &SyncLocal, team: TeamLocal) -> SyncLocal {
     let teams = local

@@ -347,6 +347,56 @@ impl Api {
             .await
     }
 
+    fn recording_path(team: &str, id: &str) -> String {
+        format!("/v1/teams/{}/recordings/{}", segment(team), segment(id))
+    }
+
+    /// Sube el trozo siguiente de una grabación de sesión.
+    pub async fn add_recording_chunk(
+        &self,
+        token: &str,
+        team: &str,
+        id: &str,
+        chunk: &RecordingChunk,
+    ) -> Result<(), SyncError> {
+        let path = Self::recording_path(team, id);
+        self.execute(self.post(&path, chunk).bearer_auth(token))
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn recordings(
+        &self,
+        token: &str,
+        team: &str,
+    ) -> Result<Vec<RecordingSummary>, SyncError> {
+        let path = format!("/v1/teams/{}/recordings", segment(team));
+        self.send(self.get(token, &path)).await
+    }
+
+    pub async fn recording(
+        &self,
+        token: &str,
+        team: &str,
+        id: &str,
+    ) -> Result<RecordingDownload, SyncError> {
+        self.send(self.get(token, &Self::recording_path(team, id)))
+            .await
+    }
+
+    pub async fn delete_recording(
+        &self,
+        token: &str,
+        team: &str,
+        id: &str,
+    ) -> Result<(), SyncError> {
+        let request = self
+            .client
+            .delete(format!("{}{}", self.base, Self::recording_path(team, id)))
+            .bearer_auth(token);
+        self.execute(request).await.map(|_| ())
+    }
+
     /// Sube entradas del registro de auditoría del Team.
     pub async fn add_audit(
         &self,

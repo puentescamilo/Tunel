@@ -48,6 +48,10 @@ pub enum TeamOp {
     Members {
         team: String,
     },
+    SetRecording {
+        team: String,
+        on: bool,
+    },
 }
 
 impl TeamOp {
@@ -63,6 +67,8 @@ impl TeamOp {
             Self::SetRole { .. } => "Cambiando el rol…",
             Self::Remove { .. } => "Expulsando y renovando la clave del Team…",
             Self::Members { .. } => "Cargando los miembros…",
+            Self::SetRecording { on: true, .. } => "Activando la grabación…",
+            Self::SetRecording { on: false, .. } => "Desactivando la grabación…",
         }
     }
 }
@@ -93,6 +99,9 @@ pub enum Done {
     Members {
         team: String,
         members: Vec<MemberView>,
+    },
+    RecordingSet {
+        on: bool,
     },
 }
 
@@ -200,6 +209,11 @@ pub async fn run(op: TeamOp, local: SyncLocal, data: VaultData) -> Result<TeamDo
             let (local, members) = teams::members(&local, &team).await?;
             keep(local, Done::Members { team, members })
         }
+        TeamOp::SetRecording { team, on } => {
+            let local = teams::set_recording(&local, &team, on).await?;
+            let action = AuditAction::RecordingChanged { on };
+            return Ok(audited(keep(local, Done::RecordingSet { on }), &team, action).await);
+        }
     };
     Ok(done)
 }
@@ -239,6 +253,8 @@ pub struct TeamsUi {
     pub working: Option<&'static str>,
     /// Registro de auditoría a la vista.
     pub audit: Option<crate::views::team_audit::AuditView>,
+    /// Grabaciones a la vista.
+    pub recordings: Option<crate::views::recordings::RecordingsView>,
 }
 
 /// Lanza una operación si no hay otra tarea en curso.
@@ -328,6 +344,10 @@ fn after(app: &mut TunelApp, done: Done) {
             app.sync.teams.members = Some((team, members));
             return;
         }
+        Done::RecordingSet { on: true } => {
+            "Grabación activada: las sesiones nuevas con hosts del Team se grabarán".to_string()
+        }
+        Done::RecordingSet { on: false } => "Grabación desactivada".to_string(),
     };
     app.notify(message);
 }

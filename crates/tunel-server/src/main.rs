@@ -108,8 +108,16 @@ async fn main() -> anyhow::Result<()> {
         "TUNEL_SOLO_PROVEEDORES=1 necesita al menos un proveedor de identidad configurado: \
          si no, nadie podría iniciar sesión"
     );
+    let mut recordings = tunel_server::recordings::RecordingLimits::default();
+    if let Some(gib) = env_number("TUNEL_GRABACIONES_GB")? {
+        recordings.per_team = gib.saturating_mul(1024 * 1024 * 1024);
+    }
+    if let Some(days) = env_number("TUNEL_GRABACIONES_DIAS")? {
+        recordings.retention = i64::try_from(days.saturating_mul(24 * 60 * 60)).unwrap_or(i64::MAX);
+    }
     let config = Config {
         providers_only,
+        recordings,
         open_registration: std::env::var("TUNEL_REGISTRO_ABIERTO").is_ok_and(|v| v == "1"),
         allowed_domains,
         oauth,
@@ -178,4 +186,19 @@ async fn shutdown_signal() {
         () = terminate => {}
     }
     tracing::info!("apagando el servidor");
+}
+
+/// Un número entero positivo de la variable de entorno `name`, si está.
+fn env_number(name: &str) -> anyhow::Result<Option<u64>> {
+    match std::env::var(name) {
+        Ok(text) if !text.trim().is_empty() => {
+            let n: u64 = text
+                .trim()
+                .parse()
+                .with_context(|| format!("{name} tiene que ser un número entero"))?;
+            anyhow::ensure!(n > 0, "{name} tiene que ser mayor que cero");
+            Ok(Some(n))
+        }
+        _ => Ok(None),
+    }
 }
