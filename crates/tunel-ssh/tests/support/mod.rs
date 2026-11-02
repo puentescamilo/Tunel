@@ -140,10 +140,12 @@ impl Sftp {
     /// La ruta local de `path`; nada sale de `root`.
     fn local(&self, path: &str) -> Result<PathBuf, StatusCode> {
         let relative = Path::new(path.trim_start_matches('/'));
-        if relative
-            .components()
-            .any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
-        {
+        if relative.components().any(|c| {
+            !matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        }) {
             return Err(StatusCode::PermissionDenied);
         }
         Ok(self.root.join(relative))
@@ -269,7 +271,12 @@ impl russh_sftp::server::Handler for Sftp {
         self.stat(id, path).await
     }
 
-    async fn mkdir(&mut self, id: u32, path: String, _: FileAttributes) -> Result<Status, Self::Error> {
+    async fn mkdir(
+        &mut self,
+        id: u32,
+        path: String,
+        _: FileAttributes,
+    ) -> Result<Status, Self::Error> {
         std::fs::create_dir(self.local(&path)?).map_err(io_error)?;
         Ok(status(id))
     }

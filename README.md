@@ -756,6 +756,14 @@ cargo clippy --workspace --all-targets -- -D warnings   # lint
 cargo fmt --all                                         # formato
 ```
 
+Las pruebas de punta a punta corren contra servidores de prueba en el mismo proceso:
+
+- **SSH:** `russh`, con contraseña, claves, llaves FIDO2, reenvíos, bastiones y X11.
+- **SFTP:** `russh-sftp` sobre una carpeta temporal.
+- **Mosh:** se arranca `mosh-server` por SSH. Si `mosh-server` y `mosh-client` están instalados, también se abre una sesión de verdad.
+- **Telnet:** un servidor TCP que negocia como uno real.
+- **Puerto serie:** una pareja de pseudoterminales. Solo en Linux, porque macOS no deja fijar la velocidad de una.
+
 | Crate | Contenido |
 |---|---|
 | `tunel-core` | Modelos, bóveda cifrada, temas guardados, importación de `~/.ssh/config`, núcleo de la sincronización |

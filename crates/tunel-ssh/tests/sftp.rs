@@ -21,8 +21,14 @@ async fn lists_folders_first_and_skips_dot_entries() {
     let home = sftp.home().await.unwrap();
     assert_eq!(home, "/");
     let entries = sftp.list(&home).await.unwrap();
-    let names: Vec<_> = entries.iter().map(|e| (e.name.as_str(), e.is_dir)).collect();
-    assert_eq!(names, [("z-carpeta", true), ("a.txt", false), ("b.txt", false)]);
+    let names: Vec<_> = entries
+        .iter()
+        .map(|e| (e.name.as_str(), e.is_dir))
+        .collect();
+    assert_eq!(
+        names,
+        [("z-carpeta", true), ("a.txt", false), ("b.txt", false)]
+    );
     assert_eq!(entries[1].size, 2);
 }
 
@@ -43,8 +49,14 @@ async fn uploads_and_downloads_a_file_larger_than_one_chunk() {
         .unwrap();
     assert_eq!(sent, content.len() as u64);
     assert_eq!(seen.last(), Some(&sent));
-    assert!(seen.windows(2).all(|w| w[0] < w[1]), "el progreso solo avanza");
-    assert_eq!(std::fs::read(server.root.path().join("subido.bin")).unwrap(), content);
+    assert!(
+        seen.windows(2).all(|w| w[0] < w[1]),
+        "el progreso solo avanza"
+    );
+    assert_eq!(
+        std::fs::read(server.root.path().join("subido.bin")).unwrap(),
+        content
+    );
 
     let target = local.path().join("bajado.bin");
     let received = sftp.download("/subido.bin", &target, |_| {}).await.unwrap();
@@ -61,7 +73,9 @@ async fn creates_renames_and_removes_files_and_folders() {
     sftp.mkdir("/nueva").await.unwrap();
     assert!(root.join("nueva").is_dir());
     std::fs::write(root.join("nueva/nota.txt"), "hola").unwrap();
-    sftp.rename("/nueva/nota.txt", "/nueva/renombrada.txt").await.unwrap();
+    sftp.rename("/nueva/nota.txt", "/nueva/renombrada.txt")
+        .await
+        .unwrap();
     assert!(root.join("nueva/renombrada.txt").is_file());
     assert!(!root.join("nueva/nota.txt").exists());
 

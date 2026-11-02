@@ -20,7 +20,13 @@ async fn connect(cols: u16, rows: u16) -> (TcpStream, SessionIo) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (io, backend) = session_pair();
-    tokio::spawn(tunel_term::telnet::run("127.0.0.1", port, cols, rows, backend));
+    tokio::spawn(tunel_term::telnet::run(
+        "127.0.0.1",
+        port,
+        cols,
+        rows,
+        backend,
+    ));
     let (server, _) = tokio::time::timeout(TIMEOUT, listener.accept())
         .await
         .expect("el cliente no se conectó")
@@ -61,7 +67,13 @@ async fn output_until(io: &mut SessionIo, expected: &[u8]) -> Vec<u8> {
 }
 
 fn naws(cols: u16, rows: u16) -> Vec<u8> {
-    [&[IAC, SB, NAWS][..], &cols.to_be_bytes(), &rows.to_be_bytes(), &[IAC, SE]].concat()
+    [
+        &[IAC, SB, NAWS][..],
+        &cols.to_be_bytes(),
+        &rows.to_be_bytes(),
+        &[IAC, SE],
+    ]
+    .concat()
 }
 
 #[tokio::test]
@@ -76,12 +88,20 @@ async fn negotiates_echo_terminal_type_and_window_size() {
     assert!(replies.windows(3).any(|w| w == [IAC, WILL, TTYPE]));
 
     // El servidor pide el tipo de terminal.
-    server.write_all(&[IAC, SB, TTYPE, 1, IAC, SE]).await.unwrap();
+    server
+        .write_all(&[IAC, SB, TTYPE, 1, IAC, SE])
+        .await
+        .unwrap();
     let ttype = [&[IAC, SB, TTYPE, 0][..], b"XTERM-256COLOR", &[IAC, SE]].concat();
     read_until(&mut server, &ttype).await;
 
     // Al cambiar el tamaño de la ventana se avisa.
-    io.input.send(SessionInput::Resize { cols: 120, rows: 40 }).unwrap();
+    io.input
+        .send(SessionInput::Resize {
+            cols: 120,
+            rows: 40,
+        })
+        .unwrap();
     read_until(&mut server, &naws(120, 40)).await;
 
     // Las órdenes no llegan a la pantalla; el texto sí.
@@ -108,7 +128,9 @@ async fn escapes_iac_and_bare_carriage_returns_in_both_directions() {
 async fn the_session_ends_when_the_server_closes() {
     let (server, mut io) = connect(80, 24).await;
     drop(server);
-    let end = tokio::time::timeout(TIMEOUT, io.output.recv()).await.unwrap();
+    let end = tokio::time::timeout(TIMEOUT, io.output.recv())
+        .await
+        .unwrap();
     assert!(
         matches!(end, Some(SessionOutput::Closed { exit_status: None })),
         "{end:?}"
@@ -120,7 +142,10 @@ async fn closing_the_tab_closes_the_connection() {
     let (mut server, io) = connect(80, 24).await;
     io.input.send(SessionInput::Close).unwrap();
     let mut buf = [0u8; 16];
-    let n = tokio::time::timeout(TIMEOUT, server.read(&mut buf)).await.unwrap().unwrap();
+    let n = tokio::time::timeout(TIMEOUT, server.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(n, 0, "el cliente debía cerrar la conexión");
 }
 

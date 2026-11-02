@@ -18,7 +18,9 @@ async fn the_server_is_started_over_ssh_and_its_port_and_key_are_read() {
     let server = support::start(answering(command.clone(), &output)).await;
     let conn = support::connect(server.port).await;
 
-    let mosh = mosh::start_server(&conn, "localhost", None, PORTS).await.unwrap();
+    let mosh = mosh::start_server(&conn, "localhost", None, PORTS)
+        .await
+        .unwrap();
     assert_eq!((mosh.port, mosh.key.as_str()), (60001, KEY));
     // `localhost` se resuelve a una IP: mosh-client no resuelve nombres.
     assert!(mosh.ip == "127.0.0.1" || mosh.ip == "::1", "{}", mosh.ip);
@@ -28,8 +30,11 @@ async fn the_server_is_started_over_ssh_and_its_port_and_key_are_read() {
 #[tokio::test]
 async fn a_custom_server_command_is_used_as_is() {
     let command = mosh::server_command(Some("/opt/mosh/bin/mosh-server"), PORTS);
-    let server =
-        support::start(answering(command.clone(), &format!("MOSH CONNECT 60002 {KEY}\n"))).await;
+    let server = support::start(answering(
+        command.clone(),
+        &format!("MOSH CONNECT 60002 {KEY}\n"),
+    ))
+    .await;
     let conn = support::connect(server.port).await;
 
     let mosh = mosh::start_server(&conn, "127.0.0.1", Some("/opt/mosh/bin/mosh-server"), PORTS)
