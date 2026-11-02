@@ -195,6 +195,11 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                     import_ssh_config(app);
                 }
             });
+            setting_row(ui, "Máquinas de la nube", "AWS, Azure y DigitalOcean, con la sesión de aws, az o doctl", |ui| {
+                if ui::secondary_button(ui, "Importar de la nube…").clicked() {
+                    super::cloud_import::open(app);
+                }
+            });
         });
         card(ui, icons::FILE_TEXT, "Registro de sesiones", |ui| log_controls(app, ui));
         card(ui, icons::LOCK, "Seguridad", |ui| {

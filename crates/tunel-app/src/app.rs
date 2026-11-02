@@ -162,6 +162,8 @@ pub struct TunelApp {
     pub forward_errors: HashMap<ForwardId, String>,
     pub password_change: crate::views::settings::PasswordChange,
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
+    /// Importación de máquinas de la nube en curso.
+    pub cloud_import: Option<crate::views::cloud_import::CloudImport>,
     /// Pestaña a la que se está cambiando el nombre.
     pub tab_rename: Option<crate::tabs::TabRename>,
     /// Snippet con variables esperando sus valores.
@@ -365,6 +367,7 @@ impl TunelApp {
             forward_errors: HashMap::new(),
             password_change: Default::default(),
             quick_connect: None,
+            cloud_import: None,
             tab_rename: None,
             snippet_prompt: None,
             snippet_values: HashMap::new(),
@@ -646,6 +649,7 @@ impl TunelApp {
                     self.notify(crate::editor::installed_message(&host, &result))
                 }
                 AppEvent::Notice(message) => self.notify(message),
+                AppEvent::Cloud(event) => views::cloud_import::on_event(self, event),
                 AppEvent::RecordingsLoaded { team, result } => {
                     views::recordings::on_loaded(self, team, result)
                 }
@@ -854,6 +858,7 @@ impl eframe::App for TunelApp {
         crate::editor::show(self, &ctx);
         crate::prompts::show(self, &ctx);
         crate::quick_connect::show(self, &ctx);
+        crate::views::cloud_import::show(self, &ctx);
         crate::tabs::rename_dialog(self, &ctx);
         views::snippets::prompt_dialog(self, &ctx);
         crate::chrome::notices(self, &ctx);

@@ -7,6 +7,7 @@ mod app;
 mod audit;
 mod broadcast;
 mod chrome;
+mod cloud;
 mod editor;
 mod engine;
 mod fonts;

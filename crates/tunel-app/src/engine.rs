@@ -82,6 +82,7 @@ pub enum AppEvent {
     },
     /// Un aviso de una tarea en segundo plano.
     Notice(String),
+    Cloud(crate::views::cloud_import::CloudEvent),
     RecordingsLoaded {
         team: String,
         result: Result<Vec<tunel_core::sync::protocol::RecordingSummary>, String>,
@@ -483,8 +484,8 @@ impl Engine {
         });
     }
 
-    /// Lanza una tarea de grabaciones y entrega su resultado como evento.
-    pub fn recordings_task(&self, task: impl Future<Output = AppEvent> + Send + 'static) {
+    /// Lanza una tarea y entrega su resultado como evento.
+    pub fn background(&self, task: impl Future<Output = AppEvent> + Send + 'static) {
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();
         self.spawn(async move {
