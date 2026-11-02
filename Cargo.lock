@@ -6156,7 +6156,7 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tunel-app"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6186,7 +6186,7 @@ dependencies = [
 
 [[package]]
 name = "tunel-core"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -6209,7 +6209,7 @@ dependencies = [
 
 [[package]]
 name = "tunel-server"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -6239,7 +6239,7 @@ dependencies = [
 
 [[package]]
 name = "tunel-ssh"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "ctap-hid-fido2",
@@ -6258,7 +6258,7 @@ dependencies = [
 
 [[package]]
 name = "tunel-sync"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -6280,7 +6280,7 @@ dependencies = [
 
 [[package]]
 name = "tunel-term"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "alacritty_terminal",
  "plist",

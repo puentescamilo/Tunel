@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 1 de noviembre de 2026, con Túnel 0.9.0.
+Actualizada el 2 de noviembre de 2026, con Túnel 0.10.0.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -21,9 +21,9 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 2a | Actualización automática con paquetes verificados | 0.9.0 | ✅ |
 | 3a | Registro de auditoría de los Teams | 0.9.0 | ✅ |
 | 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | ✅ |
-| 6a | Importar máquinas de AWS, Azure y DigitalOcean | 0.10.0 | hecha, sin publicar |
-| 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | hecha, sin publicar |
-| 6c | Contenedores Docker de un host SSH | 0.10.0 | en curso |
+| 6a | Importar máquinas de AWS, Azure y DigitalOcean | 0.10.0 | ✅ |
+| 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | ✅ |
+| 6c | Contenedores Docker de un host SSH | 0.10.0 | ✅ |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
