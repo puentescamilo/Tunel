@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 2 de noviembre de 2026, con Túnel 0.10.1.
+Actualizada el 2 de noviembre de 2026, con Túnel 0.11.0.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -24,7 +24,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 6a | Importar máquinas de AWS, Azure y DigitalOcean | 0.10.0 | ✅ |
 | 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | ✅ |
 | 6c | Contenedores Docker de un host SSH | 0.10.0 | ✅ |
-| 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | en curso |
+| 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | ✅ |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
