@@ -99,7 +99,7 @@ fn validate_password(password: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn decode<const N: usize>(text: &str) -> Result<[u8; N], StoreError> {
+pub(crate) fn decode<const N: usize>(text: &str) -> Result<[u8; N], StoreError> {
     let bytes = B64.decode(text).map_err(|_| StoreError::Corrupt)?;
     bytes.try_into().map_err(|_| StoreError::Corrupt)
 }
@@ -113,7 +113,7 @@ fn lock_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn side_path(path: &Path, suffix: &str) -> PathBuf {
+pub(crate) fn side_path(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path
         .file_name()
         .map(|n| n.to_os_string())
@@ -175,7 +175,17 @@ impl UnlockedVault {
     }
 
     pub fn unlock(path: impl Into<PathBuf>, password: &str) -> Result<Self, StoreError> {
-        let path = path.into();
+        Self::unlock_with(path.into(), |salt, kdf| {
+            Ok(MasterKey::derive(password.as_bytes(), salt, kdf)?)
+        })
+    }
+
+    /// Abre la bóveda con la clave que da `key` a partir de su sal y parámetros: la que
+    /// se deriva de la contraseña o la guardada para el desbloqueo biométrico.
+    pub(crate) fn unlock_with(
+        path: PathBuf,
+        key: impl FnOnce(&[u8; SALT_LEN], KdfParams) -> Result<MasterKey, StoreError>,
+    ) -> Result<Self, StoreError> {
         let lock = acquire_lock(&path)?;
         let raw = std::fs::read(&path)?;
         let file: VaultFile = serde_json::from_slice(&raw).map_err(|_| StoreError::Corrupt)?;
@@ -190,7 +200,7 @@ impl UnlockedVault {
         let ciphertext = B64
             .decode(&file.ciphertext)
             .map_err(|_| StoreError::Corrupt)?;
-        let key = MasterKey::derive(password.as_bytes(), &salt, file.kdf)?;
+        let key = key(&salt, file.kdf)?;
         let plaintext = crypto::open(&key, &Sealed { nonce, ciphertext }, AAD)?;
         let data = serde_json::from_slice(&plaintext).map_err(|_| StoreError::Corrupt)?;
         Ok(Self {
@@ -201,6 +211,10 @@ impl UnlockedVault {
             kdf: file.kdf,
             data,
         })
+    }
+
+    pub(crate) fn key(&self) -> &MasterKey {
+        &self.key
     }
 
     pub fn path(&self) -> &Path {
@@ -239,6 +253,8 @@ impl UnlockedVault {
         write_sealed(&self.path, &self.data, &key, &salt, self.kdf)?;
         self.key = key;
         self.salt = salt;
+        // El desbloqueo biométrico guarda la clave anterior: deja de servir.
+        let _ = crate::biometric::forget(&self.path);
         // Las pestañas no son importantes: si no se pueden volver a cifrar, se pierden.
         let _ = match &workspace {
             Some(workspace) => self.save_workspace(workspace),
@@ -355,7 +371,7 @@ fn write_sealed(
 
 /// Escribe en un archivo temporal privado, lo sincroniza a disco y lo renombra,
 /// para que un corte de luz no deje la bóveda vacía o a medias.
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let dir = path
         .parent()
         .filter(|d| !d.as_os_str().is_empty())

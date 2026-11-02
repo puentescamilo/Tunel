@@ -231,19 +231,50 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                     // Con una cuenta de proveedor, la clave del servidor se cambia antes.
                     Ok(password) if crate::sync::oauth::rewrap_before_change(app, password.clone()) => {}
                     Ok(password) => {
-                        let result = app.vault.as_mut().map(|v| v.change_password(&password).map_err(|e| e.to_string())).unwrap_or(Ok(()));
+                        let result = app.vault.as_mut().map(|v| crate::biometric::change_password(v, &password).map_err(|e| e.to_string())).unwrap_or(Ok(false));
                         app.notify(match result {
-                            Ok(()) => "Contraseña maestra cambiada".to_string(),
+                            Ok(false) => "Contraseña maestra cambiada".to_string(),
+                            Ok(true) => format!("Contraseña maestra cambiada. {} se desactivó: vuelve a activarlo si quieres", crate::biometric::name()),
                             Err(e) => e,
                         });
                     }
                 }
+            }
+            if crate::biometric::available() {
+                ui.add_space(8.0);
+                biometric_row(app, ui);
             }
             if let Some(vault) = &app.vault {
                 ui.add_space(6.0);
                 ui.label(RichText::new(format!("Bóveda: {}", vault.path().display())).size(12.0).color(p.muted));
             }
         });
+    });
+}
+
+/// Activar o quitar el desbloqueo con Touch ID o Windows Hello.
+fn biometric_row(app: &mut TunelApp, ui: &mut egui::Ui) {
+    let Some(path) = app.vault.as_ref().map(|v| v.path().to_path_buf()) else {
+        return;
+    };
+    let name = crate::biometric::name();
+    let enabled = tunel_core::biometric::is_enabled(&path);
+    let help = if enabled {
+        "Activado en este equipo. Se desactiva al cambiar la contraseña maestra.".to_string()
+    } else {
+        format!("Abre la bóveda con {name} en lugar de la contraseña maestra, solo en este equipo.")
+    };
+    setting_row(ui, &format!("Desbloquear con {name}"), &help, |ui| {
+        if app.biometric_setup.is_some() {
+            ui.spinner();
+        } else if enabled {
+            if ui::secondary_button(ui, "Desactivar").clicked() {
+                crate::biometric::disable(&path);
+                app.notify(format!("{name} desactivado"));
+            }
+        } else if ui::secondary_button(ui, "Activar").clicked() {
+            crate::biometric::start_setup(app, ui.ctx());
+        }
     });
 }
 

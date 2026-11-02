@@ -1,5 +1,7 @@
-//! Pantalla para crear o desbloquear la bóveda con la contraseña maestra.
+//! Pantalla para crear o desbloquear la bóveda con la contraseña maestra, o con Touch ID o
+//! Windows Hello si están activados.
 
+use crate::biometric::{self, Pending, Unlocked};
 use crate::ui::{self, icons};
 use egui::{CornerRadius, RichText, Vec2};
 use std::path::PathBuf;
@@ -13,6 +15,9 @@ pub struct LockScreen {
     password: String,
     confirm: String,
     error: Option<String>,
+    biometric: Option<Pending<Unlocked>>,
+    /// Al abrir Túnel se pide la huella sin esperar al botón, una sola vez.
+    auto_biometric: bool,
 }
 
 impl LockScreen {
@@ -22,6 +27,8 @@ impl LockScreen {
             password: String::new(),
             confirm: String::new(),
             error: None,
+            biometric: None,
+            auto_biometric: true,
         }
     }
 
@@ -71,10 +78,47 @@ impl LockScreen {
         }
     }
 
+    fn biometric_ready(&self) -> bool {
+        biometric::available() && tunel_core::biometric::is_enabled(&self.path)
+    }
+
+    fn start_biometric(&mut self, ctx: &egui::Context) {
+        let path = self.path.clone();
+        self.error = None;
+        self.biometric = Some(biometric::run(ctx, move || biometric::unlock(path)));
+    }
+
+    /// La bóveda, si el desbloqueo biométrico en curso terminó bien.
+    fn biometric_result(&mut self) -> Option<UnlockedVault> {
+        let result = self.biometric.as_ref()?.take()?;
+        self.biometric = None;
+        match result? {
+            Unlocked::Opened(vault) => {
+                self.clear();
+                self.error = None;
+                Some(*vault)
+            }
+            Unlocked::Cancelled => None,
+            Unlocked::Failed(e) => {
+                self.error = Some(e);
+                None
+            }
+        }
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<UnlockedVault> {
+        if let Some(vault) = self.biometric_result() {
+            return Some(vault);
+        }
         let creating = !UnlockedVault::exists(&self.path);
+        let biometric_ready = !creating && self.biometric_ready();
+        if biometric_ready && self.auto_biometric {
+            self.auto_biometric = false;
+            self.start_biometric(ui.ctx());
+        }
         let p = ui::pal(ui);
         let mut opened = None;
+        let mut use_biometric = false;
         let frame = egui::Frame::central_panel(ui.style()).fill(p.bg);
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             let top = (ui.available_height() * 0.18).max(24.0);
@@ -129,11 +173,27 @@ impl LockScreen {
                         // Argon2id tarda ~0,5 s; se acepta la breve pausa en el hilo de la interfaz.
                         opened = self.try_open(creating);
                     }
+                    if biometric_ready {
+                        ui.add_space(8.0);
+                        let waiting = self.biometric.is_some();
+                        let label = if waiting {
+                            format!("Esperando a {}…", biometric::name())
+                        } else {
+                            format!("Usar {}", biometric::name())
+                        };
+                        let button = egui::Button::new(label)
+                            .corner_radius(CornerRadius::same(8))
+                            .min_size(Vec2::new(ui.available_width(), 34.0));
+                        use_biometric = ui.add_enabled(!waiting, button).clicked();
+                    }
                 });
                 ui.add_space(14.0);
                 ui.label(RichText::new(self.path.display().to_string()).size(11.0).color(p.muted));
             });
         });
+        if use_biometric {
+            self.start_biometric(ui.ctx());
+        }
         opened
     }
 }

@@ -170,6 +170,8 @@ pub struct TunelApp {
     pub forwards: HashMap<ForwardId, ActiveForward>,
     pub forward_errors: HashMap<ForwardId, String>,
     pub password_change: crate::views::settings::PasswordChange,
+    /// Activación del desbloqueo biométrico, mientras el sistema pide la huella o el PIN.
+    pub biometric_setup: Option<crate::biometric::Setup>,
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     /// Importación de máquinas de la nube en curso.
     pub cloud_import: Option<crate::views::cloud_import::CloudImport>,
@@ -193,6 +195,7 @@ pub struct TunelApp {
 impl TunelApp {
     pub fn new(cc: &eframe::CreationContext<'_>, vault_path: PathBuf) -> anyhow::Result<Self> {
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+        crate::biometric::probe(&cc.egui_ctx);
         let mut app = Self::build(cc, vault_path)?;
         #[cfg(debug_assertions)]
         app.apply_dev_overrides(&cc.egui_ctx);
@@ -377,6 +380,7 @@ impl TunelApp {
             forwards: HashMap::new(),
             forward_errors: HashMap::new(),
             password_change: Default::default(),
+            biometric_setup: None,
             quick_connect: None,
             cloud_import: None,
             containers: Default::default(),
@@ -854,6 +858,7 @@ impl eframe::App for TunelApp {
         }
         self.process_background();
         crate::workspace::tick(self);
+        crate::biometric::tick(self);
         crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
         let wait = match self.active.and_then(|i| self.tabs.get(i)) {

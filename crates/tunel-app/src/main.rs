@@ -5,6 +5,7 @@
 
 mod app;
 mod audit;
+mod biometric;
 mod broadcast;
 mod chrome;
 mod cloud;
