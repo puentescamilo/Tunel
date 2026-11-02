@@ -645,6 +645,11 @@ impl TunelApp {
                 update.version
             ));
         }
+        match self.updates.install.collect() {
+            Some(Ok(path)) => crate::chrome::open_installer(self, &path),
+            Some(Err(error)) => self.notify(format!("No se pudo actualizar Túnel: {error}")),
+            None => {}
+        }
         for tab in &mut self.tabs {
             if let Tab::Terminal(session) = tab {
                 session.pump();

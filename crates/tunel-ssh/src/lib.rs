@@ -3,6 +3,7 @@
 pub mod authorized_keys;
 pub mod client;
 pub mod fido;
+pub mod file_signature;
 pub mod forward;
 pub mod key_audit;
 pub mod keygen;

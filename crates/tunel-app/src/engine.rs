@@ -736,6 +736,20 @@ impl Engine {
         rx
     }
 
+    /// Descarga y comprueba el instalador de una versión nueva.
+    pub fn download_update(
+        &self,
+        installer: crate::updates::install::Installer,
+    ) -> tokio::sync::oneshot::Receiver<Result<std::path::PathBuf, String>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn(async move {
+            let _ = tx.send(crate::updates::install::download(installer).await);
+            ctx.request_repaint();
+        });
+        rx
+    }
+
     pub fn stop_forward(&self, active: ActiveForward) {
         self.runtime.spawn(async move { active.stop().await });
     }
