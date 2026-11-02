@@ -299,8 +299,18 @@ nombre de otro. Una entrada con la firma de otra persona aparece marcada. Al ren
 clave del Team, la anterior queda guardada con la nueva, así se sigue leyendo lo de antes.
 
 Lo escribe la app de cada persona: sin conexión, las entradas esperan y se suben al
-sincronizar. El servidor sí podría borrar entradas o no entregarlas, y guarda las 20.000
-más recientes de cada Team. Hace falta `tunel-server` 0.9.0 o posterior.
+sincronizar. Avisa también de una entrada que solo puede hacer un admin firmada por quien no
+lo es, y de una cuya fecha no cuadra con su llegada al servidor.
+
+- El servidor guarda hasta 10.000 entradas de cada cuenta en cada Team. Para hacer sitio
+  solo borra las de esa misma cuenta con más de 90 días; si no puede, rechaza las nuevas.
+  Así nadie puede llenar el registro para borrar lo que hicieron los demás ni lo suyo
+  reciente.
+- El servidor sí podría borrar entradas o no entregarlas.
+- Que solo lo lean los admins lo decide el servidor: cualquier miembro tiene la clave del
+  Team, así que con la base de datos del servidor podría descifrarlo.
+- Hace falta `tunel-server` 0.9.0 o posterior; con uno anterior las entradas esperan en la
+  cola de cada equipo (como mucho 1.000).
 
 ### Sesiones compartidas
 

@@ -17,9 +17,23 @@ use tunel_core::sync::protocol::{
 
 /// Una entrada cifrada: la firmada ocupa como mucho 4 KiB, más JSON y base64.
 const MAX_AUDIT_CIPHERTEXT: usize = 8 * 1024;
-const MAX_PREVIOUS_KEY_CIPHERTEXT: usize = 256;
-/// Entradas que se conservan por Team; al pasarse, se borran las más viejas.
-pub const MAX_AUDIT_PER_TEAM: i64 = 20_000;
+pub(crate) const MAX_PREVIOUS_KEY_CIPHERTEXT: usize = 256;
+
+/// Cuánto guarda el servidor del registro. Cada cuenta tiene su cupo en cada Team y solo
+/// se borran sus propias entradas, y solo las viejas: así nadie puede llenar el registro
+/// para que desaparezca lo que hicieron los demás, ni lo que hizo él hace poco.
+#[derive(Debug, Clone, Copy)]
+pub struct AuditLimits {
+    /// Entradas de una cuenta en un Team.
+    pub per_author: i64,
+    /// Segundos durante los que una entrada no se borra para hacer sitio.
+    pub min_age: i64,
+}
+
+pub const AUDIT_LIMITS: AuditLimits = AuditLimits {
+    per_author: 10_000,
+    min_age: 90 * 24 * 60 * 60,
+};
 const DEFAULT_PAGE: usize = 200;
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -41,7 +55,7 @@ async fn append(
     }
     state
         .db
-        .append_audit(team, session.account, upload, now(), MAX_AUDIT_PER_TEAM)
+        .append_audit(team, session.account, upload, now(), AUDIT_LIMITS)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -77,13 +91,44 @@ pub(crate) fn insert_previous_key(
     epoch: u64,
     blob: &SealedBlob,
 ) -> Result<(), DbError> {
-    if blob.ciphertext.len() > MAX_PREVIOUS_KEY_CIPHERTEXT {
-        return Err(DbError::BadVersion);
-    }
     tx.execute(
-        "INSERT OR REPLACE INTO team_previous_keys (team_id, epoch, blob) VALUES (?1, ?2, ?3)",
+        "INSERT INTO team_previous_keys (team_id, epoch, blob) VALUES (?1, ?2, ?3)",
         params![team, epoch as i64, serde_json::to_string(blob)?],
     )?;
+    Ok(())
+}
+
+/// Hace sitio para `incoming` entradas de `author` borrando sus entradas más viejas que
+/// `limits.min_age`. Si no basta, la cuenta ha llegado a su cupo.
+fn make_room(
+    tx: &Transaction<'_>,
+    team: &str,
+    author: &str,
+    incoming: i64,
+    now: i64,
+    limits: AuditLimits,
+) -> Result<(), DbError> {
+    let count = |tx: &Transaction<'_>| -> Result<i64, DbError> {
+        Ok(tx.query_row(
+            "SELECT COUNT(*) FROM team_audit WHERE team_id = ?1 AND author = ?2",
+            params![team, author],
+            |row| row.get(0),
+        )?)
+    };
+    let excess = count(tx)? + incoming - limits.per_author;
+    if excess <= 0 {
+        return Ok(());
+    }
+    tx.execute(
+        "DELETE FROM team_audit WHERE id IN (
+             SELECT id FROM team_audit
+             WHERE team_id = ?1 AND author = ?2 AND received_at < ?3
+             ORDER BY id LIMIT ?4)",
+        params![team, author, now - limits.min_age, excess],
+    )?;
+    if count(tx)? + incoming > limits.per_author {
+        return Err(DbError::Limit("entradas del registro de actividad"));
+    }
     Ok(())
 }
 
@@ -94,7 +139,7 @@ impl Db {
         account: i64,
         upload: AuditUpload,
         received_at: i64,
-        keep: i64,
+        limits: AuditLimits,
     ) -> Result<(), DbError> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
@@ -112,6 +157,14 @@ impl Db {
                 params![account],
                 |row| row.get(0),
             )?;
+            make_room(
+                &tx,
+                &team,
+                &author,
+                upload.entries.len() as i64,
+                received_at,
+                limits,
+            )?;
             for entry in &upload.entries {
                 tx.execute(
                     "INSERT INTO team_audit (team_id, epoch, author, received_at, blob)
@@ -125,12 +178,6 @@ impl Db {
                     ],
                 )?;
             }
-            tx.execute(
-                "DELETE FROM team_audit WHERE team_id = ?1 AND id <= (
-                     SELECT id FROM team_audit WHERE team_id = ?1
-                     ORDER BY id DESC LIMIT 1 OFFSET ?2)",
-                params![team, keep],
-            )?;
             tx.commit()?;
             Ok(())
         })
@@ -241,19 +288,40 @@ mod tests {
         }
     }
 
+    const LIMITS: AuditLimits = AuditLimits {
+        per_author: 4,
+        min_age: 100,
+    };
+
+    async fn add_account(db: &Db, email: &'static str) -> i64 {
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO accounts (email, kdf, salt, auth_salt, auth_hash, auth_kdf,
+                     vault_key, created_at)
+                 VALUES (?1, '', '', x'', x'', '', '', 0)",
+                params![email],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })
+        .await
+        .unwrap()
+    }
+
+    fn texts(page: &AuditPage) -> Vec<&str> {
+        page.entries
+            .iter()
+            .map(|e| e.blob.ciphertext.as_str())
+            .collect()
+    }
+
     #[tokio::test]
-    async fn entries_are_paged_newest_first_and_the_oldest_are_trimmed() {
+    async fn entries_are_paged_newest_first() {
         let (db, ana) = db_with_team(0).await;
-        db.append_audit(TEAM.into(), ana, upload(0, 0..5), 10, 4)
+        db.append_audit(TEAM.into(), ana, upload(0, 0..4), 10, LIMITS)
             .await
             .unwrap();
         let page = db.audit_page(TEAM.into(), u64::MAX >> 1, 3).await.unwrap();
-        let texts: Vec<_> = page
-            .entries
-            .iter()
-            .map(|e| e.blob.ciphertext.as_str())
-            .collect();
-        assert_eq!(texts, ["04", "03", "02"]);
+        assert_eq!(texts(&page), ["03", "02", "01"]);
         assert!(page.more);
         assert_eq!(page.entries[0].author, "ana@ejemplo.com");
         assert_eq!(page.entries[0].received_at, 10);
@@ -261,24 +329,46 @@ mod tests {
             .audit_page(TEAM.into(), page.entries[2].id, 3)
             .await
             .unwrap();
-        let texts: Vec<_> = rest
-            .entries
-            .iter()
-            .map(|e| e.blob.ciphertext.as_str())
-            .collect();
-        assert_eq!(texts, ["01"], "la más vieja se borró");
+        assert_eq!(texts(&rest), ["00"]);
         assert!(!rest.more);
+    }
+
+    #[tokio::test]
+    async fn a_full_quota_only_makes_room_with_the_authors_old_entries() {
+        let (db, ana) = db_with_team(0).await;
+        let eva = add_account(&db, "eva@ejemplo.com").await;
+        db.append_audit(TEAM.into(), ana, upload(0, 0..2), 0, LIMITS)
+            .await
+            .unwrap();
+        db.append_audit(TEAM.into(), eva, upload(0, 10..14), 0, LIMITS)
+            .await
+            .unwrap();
+        // Recientes: Eva no puede hacer sitio, y menos borrando lo de Ana.
+        assert!(matches!(
+            db.append_audit(TEAM.into(), eva, upload(0, 20..21), 50, LIMITS)
+                .await,
+            Err(DbError::Limit(_))
+        ));
+        // Ya viejas: se borran las suyas más antiguas.
+        db.append_audit(TEAM.into(), eva, upload(0, 20..22), 200, LIMITS)
+            .await
+            .unwrap();
+        let page = db
+            .audit_page(TEAM.into(), u64::MAX >> 1, 100)
+            .await
+            .unwrap();
+        assert_eq!(texts(&page), ["21", "20", "13", "12", "01", "00"]);
     }
 
     #[tokio::test]
     async fn entries_with_an_old_key_are_refused() {
         let (db, ana) = db_with_team(2).await;
         assert!(matches!(
-            db.append_audit(TEAM.into(), ana, upload(1, 0..1), 0, 10)
+            db.append_audit(TEAM.into(), ana, upload(1, 0..1), 0, LIMITS)
                 .await,
             Err(DbError::Conflict)
         ));
-        db.append_audit(TEAM.into(), ana, upload(2, 0..1), 0, 10)
+        db.append_audit(TEAM.into(), ana, upload(2, 0..1), 0, LIMITS)
             .await
             .unwrap();
     }

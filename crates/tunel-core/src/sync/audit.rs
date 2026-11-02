@@ -33,7 +33,7 @@ const MAX_NAME: usize = 200;
 pub enum AuditAction {
     /// Abrió una sesión con un host del Team.
     Connected { host: String },
-    /// Mostró o copió la contraseña de un elemento del Team.
+    /// Mostró la contraseña guardada de un elemento del Team.
     SecretViewed { item: String },
     /// Cambió la contraseña o la clave privada de un elemento del Team.
     SecretChanged { item: String },
@@ -50,6 +50,41 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
+    /// La misma acción con los nombres limpios, para mostrar lo que escribió otra app.
+    pub fn cleaned(self) -> Self {
+        match self {
+            Self::Connected { host } => Self::Connected {
+                host: clean_name(&host),
+            },
+            Self::SecretViewed { item } => Self::SecretViewed {
+                item: clean_name(&item),
+            },
+            Self::SecretChanged { item } => Self::SecretChanged {
+                item: clean_name(&item),
+            },
+            Self::MemberInvited { email, role } => Self::MemberInvited {
+                email: clean_name(&email),
+                role,
+            },
+            Self::MemberRemoved { email } => Self::MemberRemoved {
+                email: clean_name(&email),
+            },
+            Self::RoleChanged { email, role } => Self::RoleChanged {
+                email: clean_name(&email),
+                role,
+            },
+            Self::Joined | Self::Left => self,
+        }
+    }
+
+    /// Solo la puede hacer un admin.
+    pub fn needs_admin(&self) -> bool {
+        matches!(
+            self,
+            Self::MemberInvited { .. } | Self::MemberRemoved { .. } | Self::RoleChanged { .. }
+        )
+    }
+
     /// Texto para la lista, sin quién lo hizo.
     pub fn describe(&self) -> String {
         let role = |role: &TeamRole| match role {
@@ -71,12 +106,17 @@ impl AuditAction {
     }
 }
 
-/// Recorta un nombre para el registro, sin caracteres de control.
+/// Recorta un nombre para el registro, sin caracteres de control ni los que cambian el
+/// sentido del texto, con los que se podría disfrazar una entrada.
 pub fn clean_name(name: &str) -> String {
     name.chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !is_bidi_control(*c))
         .take(MAX_NAME)
         .collect()
+}
+
+fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// Una entrada del registro.
@@ -310,6 +350,20 @@ mod tests {
             "invitó a eva@ejemplo.com como admin"
         );
         assert_eq!(clean_name("web\n\u{1b}[31m"), "web[31m");
+        assert_eq!(clean_name("ana\u{202E}moc.olpmeje"), "anamoc.olpmeje");
+        assert_eq!(
+            AuditAction::RoleChanged {
+                email: "e\u{2066}va".into(),
+                role: TeamRole::Admin
+            }
+            .cleaned(),
+            AuditAction::RoleChanged {
+                email: "eva".into(),
+                role: TeamRole::Admin
+            }
+        );
+        assert!(AuditAction::MemberRemoved { email: "x".into() }.needs_admin());
+        assert!(!AuditAction::Left.needs_admin());
         assert_eq!(clean_name(&"x".repeat(500)).len(), MAX_NAME);
     }
 

@@ -4,18 +4,20 @@
 use crate::SyncError;
 use crate::session::{Session, call};
 use std::collections::BTreeMap;
-use tunel_core::sync::audit::{AuditAction, SignedAuditEvent, open_previous_key};
+use tunel_core::sync::audit::{AuditAction, SignedAuditEvent, clean_name, open_previous_key};
 use tunel_core::sync::local::normalize_email;
 use tunel_core::sync::protocol::{AuditPage, AuditUpload, MAX_AUDIT_UPLOAD, PreviousKey};
 use tunel_core::sync::{PublicKey, SyncLocal, TeamLocal, VaultKey};
 
-/// Sube las entradas de la cola de `team`. Devuelve los identificadores de las que ya no
-/// hay que subir: las aceptadas y las que nunca se podrán subir.
-pub(crate) async fn flush(
-    session: &mut Session,
-    local: &SyncLocal,
-    team: &TeamLocal,
-) -> Result<Vec<String>, SyncError> {
+/// Lo que salió de una subida: los identificadores de lo que ya está en el servidor y,
+/// si algo falló, el error; lo que falta sigue en la cola.
+pub(crate) struct Flushed {
+    pub sent: Vec<String>,
+    pub error: Option<SyncError>,
+}
+
+/// Sube las entradas de la cola de `team`, de cien en cien.
+pub(crate) async fn flush(session: &mut Session, local: &SyncLocal, team: &TeamLocal) -> Flushed {
     let pending: Vec<(String, &SignedAuditEvent)> = local
         .audit_queue
         .iter()
@@ -24,24 +26,32 @@ pub(crate) async fn flush(
         .collect();
     let mut sent = Vec::new();
     for chunk in pending.chunks(MAX_AUDIT_UPLOAD) {
-        let upload = AuditUpload {
-            epoch: team.epoch,
-            entries: chunk
-                .iter()
-                .map(|(_, event)| event.seal(&team.key, &team.id, team.epoch))
-                .collect::<Result<_, _>>()?,
-        };
-        match call!(session, |api, token| api
-            .add_audit(token, &team.id, &upload))
-        {
-            // Un servidor anterior al registro no tiene la ruta: no se guardarán nunca.
-            Ok(()) | Err(SyncError::NotFound(_)) => {
-                sent.extend(chunk.iter().map(|(id, _)| id.clone()));
-            }
-            Err(e) => return Err(e),
+        if let Err(error) = upload(session, team, chunk).await {
+            // Un servidor anterior al registro no lo admite: la cola espera, con su tope.
+            return Flushed {
+                sent,
+                error: Some(error),
+            };
         }
+        sent.extend(chunk.iter().map(|(id, _)| id.clone()));
     }
-    Ok(sent)
+    Flushed { sent, error: None }
+}
+
+async fn upload(
+    session: &mut Session,
+    team: &TeamLocal,
+    chunk: &[(String, &SignedAuditEvent)],
+) -> Result<(), SyncError> {
+    let upload = AuditUpload {
+        epoch: team.epoch,
+        entries: chunk
+            .iter()
+            .map(|(_, event)| event.seal(&team.key, &team.id, team.epoch))
+            .collect::<Result<_, _>>()?,
+    };
+    call!(session, |api, token| api
+        .add_audit(token, &team.id, &upload))
 }
 
 /// Anota `action` en el registro de `team` y la sube ya, sin esperar a la siguiente
@@ -58,16 +68,12 @@ pub async fn record_now(
     let (Ok(mut session), Some(team)) = (Session::new(&queued), queued.team(team).cloned()) else {
         return (queued, Vec::new());
     };
-    match flush(&mut session, &queued, &team).await {
-        Ok(sent) => {
-            let next = crate::teams::finish(session, queued.without_audit(&sent));
-            (next, sent)
-        }
-        Err(e) => {
-            tracing::info!(error = %e, "el registro de auditoría se subirá más tarde");
-            (queued, Vec::new())
-        }
+    let Flushed { sent, error } = flush(&mut session, &queued, &team).await;
+    if let Some(e) = error {
+        tracing::info!(error = %e, "el registro de auditoría se subirá más tarde");
     }
+    let next = crate::teams::finish(session, queued.without_audit(&sent));
+    (next, sent)
 }
 
 /// Cuánto se puede fiar una entrada.
@@ -79,6 +85,8 @@ pub enum Trust {
     Unknown,
     /// La firma no es de esa persona, o la subió otra cuenta.
     Forged,
+    /// Firmada por esa persona, pero es algo que solo hace un admin y ahora no lo es.
+    NotAdmin,
     /// Está cifrada con una clave del Team que este equipo no tiene.
     Unreadable,
 }
@@ -86,6 +94,8 @@ pub enum Trust {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditEntry {
     pub id: u64,
+    /// El del evento, igual en todas sus copias; `None` si no se pudo descifrar.
+    pub event_id: Option<String>,
     /// Milisegundos desde 1970: los de quien la hizo o, si no se pudo leer, los del
     /// servidor.
     pub at: u64,
@@ -93,6 +103,19 @@ pub struct AuditEntry {
     /// `None` si no se pudo descifrar.
     pub action: Option<AuditAction>,
     pub trust: Trust,
+    /// La fecha que puso quien la hizo y la de llegada al servidor no cuadran.
+    pub clock_skew: bool,
+}
+
+/// Diferencia entre la fecha de una entrada y su llegada al servidor a partir de la cual se
+/// avisa: una entrada puede esperar en la cola sin conexión, pero no tanto ni al revés.
+const MAX_QUEUE_DELAY_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+const MAX_CLOCK_AHEAD_MS: u64 = 10 * 60 * 1000;
+
+fn skewed(at: u64, received_at: u64) -> bool {
+    let received = received_at.saturating_mul(1000);
+    at > received.saturating_add(MAX_CLOCK_AHEAD_MS)
+        || received.saturating_sub(at) > MAX_QUEUE_DELAY_MS
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,36 +166,61 @@ fn open_page(local: &SyncLocal, team: &TeamLocal, page: &AuditPage) -> AuditLog 
         .map(|record| {
             let unreadable = AuditEntry {
                 id: record.id,
+                event_id: None,
                 at: record.received_at.saturating_mul(1000),
                 actor: record.author.clone(),
                 action: None,
                 trust: Trust::Unreadable,
+                clock_skew: false,
             };
             let Some(opened) = keys.get(&record.epoch).and_then(|key| {
                 SignedAuditEvent::open(&record.blob, key, &team.id, record.epoch).ok()
             }) else {
                 return unreadable;
             };
-            let actor = normalize_email(&opened.event.actor);
+            let actor = clean_name(&normalize_email(&opened.event.actor));
+            let action = opened.event.action.clone().cleaned();
+            let not_admin = action.needs_admin()
+                && team
+                    .roster
+                    .as_ref()
+                    .is_some_and(|r| r.admin_key(&actor).is_none());
             let trust = match signer_key(local, team, &actor) {
                 _ if actor != normalize_email(&record.author) => Trust::Forged,
-                Some(key) if opened.signed_by(&key) => Trust::Verified,
-                Some(_) => Trust::Forged,
+                Some(key) if !opened.signed_by(&key) => Trust::Forged,
+                Some(_) if not_admin => Trust::NotAdmin,
+                Some(_) => Trust::Verified,
                 None => Trust::Unknown,
             };
             AuditEntry {
                 id: record.id,
+                event_id: Some(opened.event.id.clone()),
                 at: opened.event.at,
                 actor,
-                action: Some(opened.event.action),
+                action: Some(action),
                 trust,
+                clock_skew: skewed(opened.event.at, record.received_at),
             }
         })
         .collect();
+    let entries = without_repeats(entries);
     AuditLog {
         entries,
         more: page.more,
     }
+}
+
+/// Quita las copias repetidas de un mismo evento (reintentos o reenvíos del servidor) y
+/// deja la que llegó primero, la más vieja: la página va de lo más nuevo a lo más viejo.
+pub fn without_repeats(entries: Vec<AuditEntry>) -> Vec<AuditEntry> {
+    let mut seen = std::collections::HashSet::new();
+    let mut kept: Vec<AuditEntry> = entries
+        .into_iter()
+        .rev()
+        .filter(|e| e.event_id.as_ref().is_none_or(|id| seen.insert(id.clone())))
+        .collect();
+    kept.reverse();
+    kept
 }
 
 /// Una página del registro de `team`, de lo más nuevo a lo más viejo, anterior a la
@@ -296,6 +344,76 @@ mod tests {
             log.entries[0].action,
             Some(AuditAction::Connected { host: "web".into() })
         );
+    }
+
+    #[test]
+    fn repeated_copies_of_an_event_are_shown_once() {
+        let ana = AccountKeypair::generate();
+        let key = VaultKey::generate();
+        let copy = record(1, 0, &key, "ana@ejemplo.com", &ana);
+        let page = AuditPage {
+            entries: vec![
+                AuditRecord {
+                    id: 9,
+                    ..copy.clone()
+                },
+                copy,
+            ],
+            previous_keys: Vec::new(),
+            more: false,
+        };
+        let local = local_with(&[("ana@ejemplo.com", ana.public())]);
+        let log = open_page(&local, &team(0, key), &page);
+        let ids: Vec<u64> = log.entries.iter().map(|e| e.id).collect();
+        assert_eq!(ids, [1], "se queda la que llegó primero");
+    }
+
+    #[test]
+    fn admin_actions_by_a_member_and_odd_dates_are_flagged() {
+        use tunel_core::sync::{Roster, RosterMember};
+        let ana = AccountKeypair::generate();
+        let key = VaultKey::generate();
+        let event = AuditEvent {
+            id: "e1".into(),
+            team: TEAM.into(),
+            actor: "ana@ejemplo.com".into(),
+            at: 1_700_000_000_000,
+            action: AuditAction::MemberRemoved {
+                email: "bob@ejemplo.com".into(),
+            },
+        };
+        let page = AuditPage {
+            entries: vec![AuditRecord {
+                id: 1,
+                epoch: 0,
+                author: "ana@ejemplo.com".into(),
+                // Llega un mes después de su fecha.
+                received_at: 1_700_000_000 + 30 * 24 * 3600,
+                blob: SignedAuditEvent::sign(&event, &ana)
+                    .unwrap()
+                    .seal(&key, TEAM, 0)
+                    .unwrap(),
+            }],
+            previous_keys: Vec::new(),
+            more: false,
+        };
+        let mut roster = Roster::default();
+        roster.members.insert(
+            "ana@ejemplo.com".into(),
+            RosterMember {
+                key: ana.public(),
+                role: TeamRole::Member,
+            },
+        );
+        let team = TeamLocal {
+            roster: Some(roster),
+            ..team(0, key)
+        };
+        let log = open_page(&local_with(&[]), &team, &page);
+        assert_eq!(log.entries[0].trust, Trust::NotAdmin);
+        assert!(log.entries[0].clock_skew);
+        assert!(!skewed(1_000_000, 1_000));
+        assert!(skewed(1_000_000 + MAX_CLOCK_AHEAD_MS + 1, 1_000));
     }
 
     #[test]

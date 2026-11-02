@@ -280,11 +280,10 @@ async fn flush_audit(session: &mut Session, local: &SyncLocal) -> Vec<String> {
         .filter_map(|q| q.event.id())
         .collect();
     for team in &local.teams {
-        match crate::audit::flush(session, local, team).await {
-            Ok(ids) => sent.extend(ids),
-            Err(e) => {
-                tracing::info!(team = %team.id, error = %e, "registro de auditoría pendiente")
-            }
+        let flushed = crate::audit::flush(session, local, team).await;
+        sent.extend(flushed.sent);
+        if let Some(e) = flushed.error {
+            tracing::info!(team = %team.id, error = %e, "registro de auditoría pendiente");
         }
     }
     sent

@@ -5,7 +5,7 @@ use crate::ui::{self, icons};
 use chrono::{Local, TimeZone};
 use egui::RichText;
 use tunel_core::sync::TeamLocal;
-use tunel_sync::audit::{AuditEntry, AuditLog, Trust};
+use tunel_sync::audit::{AuditEntry, AuditLog, Trust, without_repeats};
 
 /// El registro de un Team tal como se ha ido cargando.
 pub struct AuditView {
@@ -38,6 +38,8 @@ impl AuditView {
                 let known: Vec<u64> = self.entries.iter().map(|e| e.id).collect();
                 self.entries
                     .extend(log.entries.into_iter().filter(|e| !known.contains(&e.id)));
+                // Una copia repetida puede estar en otra página.
+                self.entries = without_repeats(std::mem::take(&mut self.entries));
                 self.more = log.more;
                 self.error = None;
             }
@@ -73,18 +75,23 @@ fn when(millis: u64) -> String {
         .map_or_else(|| "—".into(), |t| t.format("%d/%m/%Y %H:%M").to_string())
 }
 
-/// Lo que se muestra de una entrada y si hay que avisar de algo.
-fn describe(entry: &AuditEntry) -> (String, Option<&'static str>) {
+/// Lo que se muestra de una entrada y de qué hay que avisar.
+fn describe(entry: &AuditEntry) -> (String, Vec<&'static str>) {
     let action = entry.action.as_ref().map_or_else(
         || "(cifrada con una clave que este equipo no tiene)".into(),
         |a| a.describe(),
     );
-    let warning = match entry.trust {
+    let trust = match entry.trust {
         Trust::Verified | Trust::Unreadable => None,
         Trust::Unknown => Some("sin comprobar: no se conoce la clave de esa cuenta"),
         Trust::Forged => Some("firma no válida: puede ser falsa"),
+        Trust::NotAdmin => Some("esa cuenta no es admin del Team"),
     };
-    (format!("{} {action}", entry.actor), warning)
+    let clock = entry
+        .clock_skew
+        .then_some("la fecha no cuadra con la de llegada al servidor");
+    let warnings = trust.into_iter().chain(clock).collect();
+    (format!("{} {action}", entry.actor), warnings)
 }
 
 pub fn section(app: &mut TunelApp, ui: &mut egui::Ui, team: &TeamLocal) {
@@ -120,7 +127,7 @@ pub fn section(app: &mut TunelApp, ui: &mut egui::Ui, team: &TeamLocal) {
         .max_height(260.0)
         .show(ui, |ui| {
             for entry in &view.entries {
-                let (text, warning) = describe(entry);
+                let (text, warnings) = describe(entry);
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(when(entry.at))
@@ -129,7 +136,7 @@ pub fn section(app: &mut TunelApp, ui: &mut egui::Ui, team: &TeamLocal) {
                             .color(p.muted),
                     );
                     ui.label(text);
-                    if let Some(warning) = warning {
+                    for warning in warnings {
                         ui.label(
                             RichText::new(format!("{} {warning}", icons::WARNING))
                                 .size(12.0)
@@ -161,10 +168,12 @@ mod tests {
     fn entry(id: u64, trust: Trust) -> AuditEntry {
         AuditEntry {
             id,
+            event_id: Some(format!("e{id}")),
             at: 0,
             actor: "ana@ejemplo.com".into(),
             action: Some(AuditAction::Connected { host: "web".into() }),
             trust,
+            clock_skew: false,
         }
     }
 
@@ -194,9 +203,14 @@ mod tests {
     fn doubtful_entries_carry_a_warning() {
         let (text, warning) = describe(&entry(1, Trust::Verified));
         assert_eq!(text, "ana@ejemplo.com se conectó a «web»");
-        assert_eq!(warning, None);
-        assert!(describe(&entry(1, Trust::Forged)).1.is_some());
-        assert!(describe(&entry(1, Trust::Unknown)).1.is_some());
+        assert!(warning.is_empty());
+        assert_eq!(describe(&entry(1, Trust::Forged)).1.len(), 1);
+        assert_eq!(describe(&entry(1, Trust::NotAdmin)).1.len(), 1);
+        let skewed = AuditEntry {
+            clock_skew: true,
+            ..entry(1, Trust::Unknown)
+        };
+        assert_eq!(describe(&skewed).1.len(), 2);
         let unreadable = AuditEntry {
             action: None,
             ..entry(1, Trust::Unreadable)

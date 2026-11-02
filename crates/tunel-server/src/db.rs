@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS team_audit (
     blob TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS team_audit_by_team ON team_audit (team_id, id);
+CREATE INDEX IF NOT EXISTS team_audit_by_author ON team_audit (team_id, author, id);
 -- La clave de la época anterior cifrada con la de `epoch`, para leer el registro viejo.
 CREATE TABLE IF NOT EXISTS team_previous_keys (
     team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,

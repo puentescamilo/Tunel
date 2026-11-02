@@ -506,7 +506,10 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
 fn record_revealed(app: &mut TunelApp, ctx: &egui::Context, data: &VaultData) {
     for field in crate::ui::take_revealed(ctx) {
         let identity = match (field.as_str(), app.editor.as_ref()) {
-            ("identidad", Some(Editor::Identity(i))) => data.identity(i.id),
+            // Solo si lo que se ve es la guardada, no una que se está escribiendo.
+            ("identidad", Some(Editor::Identity(i))) => data
+                .identity(i.id)
+                .filter(|saved| saved.password == i.password),
             ("host-identidad", Some(Editor::Host(form))) => effective_identity(form, data),
             _ => None,
         };
