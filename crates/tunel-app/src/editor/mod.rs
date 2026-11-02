@@ -10,6 +10,7 @@ pub use install_key::installed_message;
 use install_key::{InstallKeyForm, install_key_form};
 use keygen::{KeyGenForm, keygen_form};
 use tunel_core::*;
+use zeroize::{Zeroize, Zeroizing};
 
 const MODAL_WIDTH: f32 = 520.0;
 
@@ -119,6 +120,7 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
         if ui.button("Importar archivo…").clicked()
             && let Some(Ok(text)) = pick_text_file("Clave privada")
         {
+            key.private_key.zeroize();
             key.private_key = text;
             key.public_key = None;
         }
@@ -134,13 +136,15 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
     if edited {
         key.public_key = None;
     }
-    let mut passphrase = key.passphrase.clone().unwrap_or_default();
+    // Se copia en cada fotograma: la copia se borra al soltarse.
+    let mut passphrase = Zeroizing::new(key.passphrase.clone().unwrap_or_default());
     ui.label("Frase de paso (si la clave está cifrada)");
     if ui
-        .add(egui::TextEdit::singleline(&mut passphrase).password(true))
+        .add(egui::TextEdit::singleline(&mut *passphrase).password(true))
         .changed()
     {
-        key.passphrase = Some(passphrase).filter(|p| !p.is_empty());
+        key.passphrase.zeroize();
+        key.passphrase = Some(std::mem::take(&mut *passphrase)).filter(|p| !p.is_empty());
         key.public_key = None;
     }
     ui.horizontal(|ui| {

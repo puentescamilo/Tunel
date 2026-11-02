@@ -42,6 +42,12 @@ pub fn restrict(path: &Path) -> io::Result<()> {
     {
         return Err(io::Error::last_os_error());
     }
+    // Sin lista, Windows daría acceso a todos: mejor fallar.
+    if present == 0 || dacl.is_null() {
+        return Err(io::Error::other(
+            "el descriptor de seguridad no trae lista de permisos",
+        ));
+    }
     let path = wide(path.as_os_str());
     // SAFETY: `path` termina en cero y `dacl` sigue vivo durante la llamada.
     let status = unsafe {

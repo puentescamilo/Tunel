@@ -709,6 +709,11 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
   Cada copia se borra de la memoria al soltarse, también las que hace la interfaz para editar
   o sincronizar, y lo escrito en los formularios de host y de clave nueva al cerrarlos.
 
+**Pendiente:**
+- Quedan sin borrar algunos búferes intermedios: el que usa `serde_json` al leer una clave
+  privada de la bóveda, y los que suelta un campo de texto al crecer mientras escribes. Solo
+  importan si alguien consigue un volcado de la memoria de Túnel.
+
 ## Estado y hoja de ruta
 
 La hoja de ruta detallada, con el orden de las próximas entregas, está en

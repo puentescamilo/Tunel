@@ -115,6 +115,23 @@ fn lock_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
+/// Una bóveda de una versión anterior pudo quedar, con sus archivos laterales, con los permisos
+/// de su carpeta: se corrigen al abrirla.
+fn restrict_existing(vault: &Path) {
+    let side = [SYNC_FILE.0, WORKSPACE_FILE.0, crate::biometric::FILE];
+    let paths = [vault.to_path_buf(), lock_path(vault)]
+        .into_iter()
+        .chain(side.map(|s| side_path(vault, s)));
+    for path in paths.filter(|p| p.exists()) {
+        if let Err(e) = restrict_permissions(&path) {
+            eprintln!(
+                "aviso: no se pudieron restringir los permisos de {}: {e}",
+                path.display()
+            );
+        }
+    }
+}
+
 pub(crate) fn side_path(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path
         .file_name()
@@ -205,13 +222,7 @@ impl UnlockedVault {
         let key = key(&salt, file.kdf)?;
         let plaintext = crypto::open(&key, &Sealed { nonce, ciphertext }, AAD)?;
         let data = serde_json::from_slice(&plaintext).map_err(|_| StoreError::Corrupt)?;
-        // Una bóveda de una versión anterior pudo quedar con los permisos de su carpeta.
-        if let Err(e) = restrict_permissions(&path) {
-            eprintln!(
-                "aviso: no se pudieron restringir los permisos de {}: {e}",
-                path.display()
-            );
-        }
+        restrict_existing(&path);
         Ok(Self {
             path,
             _lock: lock,
@@ -335,8 +346,7 @@ impl UnlockedVault {
         (suffix, aad): (&str, &[u8]),
         value: &T,
     ) -> Result<(), StoreError> {
-        let plaintext =
-            zeroize::Zeroizing::new(serde_json::to_vec(value).map_err(|_| StoreError::Corrupt)?);
+        let plaintext = crate::crypto::secret_json(value).map_err(|_| StoreError::Corrupt)?;
         let sealed = crypto::seal(&self.key, &plaintext, aad)?;
         let file = SideFile {
             version: FORMAT_VERSION,
@@ -367,8 +377,7 @@ fn write_sealed(
     kdf: KdfParams,
 ) -> Result<(), StoreError> {
     {
-        let plaintext =
-            zeroize::Zeroizing::new(serde_json::to_vec(data).map_err(|_| StoreError::Corrupt)?);
+        let plaintext = crate::crypto::secret_json(data).map_err(|_| StoreError::Corrupt)?;
         let sealed = crypto::seal(key, &plaintext, AAD)?;
         let file = VaultFile {
             version: FORMAT_VERSION,
@@ -419,9 +428,17 @@ fn restrict_permissions(path: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
+/// En un volumen sin permisos (FAT32, exFAT, algunas carpetas de red) no se puede: se avisa y
+/// se guarda igual, como antes.
 #[cfg(windows)]
 fn restrict_permissions(path: &Path) -> std::io::Result<()> {
-    crate::windows_acl::restrict(path)
+    if let Err(e) = crate::windows_acl::restrict(path) {
+        eprintln!(
+            "aviso: no se pudieron restringir los permisos de {}: {e}",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -634,9 +651,12 @@ mod tests {
         // Una bóveda anterior, con los permisos heredados, se corrige al abrirla.
         let inherited = dir.path().join("otra.json");
         std::fs::write(&inherited, std::fs::read(vault_path(&dir)).unwrap()).unwrap();
+        let side = side_path(&inherited, ".pestanas");
+        std::fs::write(&side, b"{}").unwrap();
         assert_ne!(dacl_of(&inherited), private_sddl().unwrap());
         UnlockedVault::unlock(&inherited, PW).unwrap();
         assert_eq!(dacl_of(&inherited), private_sddl().unwrap());
+        assert_eq!(dacl_of(&side), private_sddl().unwrap());
     }
 
     fn rewrite_header(path: &std::path::Path, edit: impl FnOnce(&mut serde_json::Value)) {
