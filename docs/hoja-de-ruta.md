@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 1 de noviembre de 2026, con Túnel 0.8.0 publicado.
+Actualizada el 1 de noviembre de 2026, con Túnel 0.9.0.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -18,9 +18,9 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 5a | Generar claves SSH en el llavero | 0.8.0 | ✅ |
 | 5b | Instalar una clave pública en un host | 0.8.0 | ✅ |
 | 5c | Avisar de claves débiles | 0.8.0 | ✅ |
-| 2a | Actualización automática con paquetes verificados | 0.8.1 | hecha, sin publicar |
-| 3a | Registro de auditoría de los Teams | 0.9.0 | hecha, sin publicar |
-| 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | en curso |
+| 2a | Actualización automática con paquetes verificados | 0.9.0 | ✅ |
+| 3a | Registro de auditoría de los Teams | 0.9.0 | ✅ |
+| 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | ✅ |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -54,8 +54,8 @@ y del servidor.
 **2a. Actualización automática.** Túnel descarga el instalador de su sistema, comprueba su
 firma Ed25519 con una clave pública incluida en la app y lo abre. La clave privada solo la
 tiene quien publica; sin ella, nadie puede colar un instalador aunque controle la descarga.
-La firma va sobre `SHA256SUMS.txt` (`scripts/firmar-version.sh`); la 0.8.1 es la primera que
-la comprueba, así que el paso de la 0.8.0 a la 0.8.1 todavía se hace a mano.
+La firma va sobre `SHA256SUMS.txt` (`scripts/firmar-version.sh`); la 0.9.0 es la primera que
+la comprueba, así que el paso de la 0.8.0 a la 0.9.0 todavía se hace a mano.
 
 **2b. Paquetes firmados.** Quitar los avisos de «aplicación no firmada»:
 
