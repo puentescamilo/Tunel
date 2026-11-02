@@ -39,6 +39,7 @@ mod platform {
 #[derive(Debug)]
 pub enum Error {
     /// El usuario cerró el aviso: no hay nada que decirle.
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     Cancelled,
     Failed(String),
 }
