@@ -569,6 +569,7 @@ async fn interactive_shell_round_trip_and_exit_status() {
         agent_forwarding: false,
         x11_display: None,
         startup_script: None,
+        command: None,
     };
     let shell = tokio::spawn(async move { run_shell(&conn, options, backend).await });
 
@@ -773,6 +774,7 @@ async fn shell_output_until(f: &Fixture, x11_display: Option<String>, needle: &s
         agent_forwarding: false,
         x11_display,
         startup_script: None,
+        command: None,
     };
     tokio::spawn(async move { run_shell(&conn, options, backend).await });
     let mut received = Vec::new();
@@ -948,4 +950,37 @@ async fn security_key_without_pin_answer_fails_clearly() {
     let (conn, _) = connect_with_security_key(&f, None).await;
     let err = conn.err().expect("no debería conectar sin PIN");
     assert!(err.to_string().contains("PIN"), "{err}");
+}
+
+#[tokio::test]
+async fn a_command_runs_in_place_of_the_shell_with_a_terminal() {
+    let port = start_server().await;
+    let f = fixture(port, password_identity());
+    let (tx, _answers) = auto_answer(None);
+    let conn = connect(&f, tx).await.unwrap();
+    let (mut session, backend) = session_pair();
+    let options = ShellOptions {
+        cols: 80,
+        rows: 24,
+        env: Default::default(),
+        agent_forwarding: false,
+        x11_display: None,
+        startup_script: Some("no debe enviarse".into()),
+        command: Some("docker exec -it 3f2a sh".into()),
+    };
+    tokio::spawn(async move { run_shell(&conn, options, backend).await });
+    let mut received = Vec::new();
+    let closed = tokio::time::timeout(TIMEOUT, async {
+        loop {
+            match session.output.recv().await {
+                Some(SessionOutput::Data(d)) => received.extend(d),
+                Some(SessionOutput::Closed { .. }) | None => break,
+                Some(_) => {}
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "la orden termina y cierra la sesión");
+    let text = String::from_utf8_lossy(&received);
+    assert_eq!(text, "eco:docker exec -it 3f2a sh");
 }

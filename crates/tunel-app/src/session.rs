@@ -50,6 +50,9 @@ pub struct TerminalSession {
     /// Ejecuta este programa del equipo en vez de la shell (la de un contenedor, por
     /// ejemplo): reconectar lo vuelve a ejecutar.
     pub program: Option<tunel_term::local::CommandSpec>,
+    /// Ejecuta esta orden en el servidor en vez de la shell (`docker exec`, por ejemplo):
+    /// reconectar la vuelve a ejecutar.
+    pub remote_command: Option<String>,
 }
 
 impl TerminalSession {
@@ -79,6 +82,7 @@ impl TerminalSession {
             recorder: None,
             playback: None,
             program: None,
+            remote_command: None,
         }
     }
 

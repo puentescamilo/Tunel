@@ -31,6 +31,11 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   cada contexto de `kubectl`, con un botón para abrir una shell en una pestaña (bash si la
   imagen lo tiene; si no, sh). En un pod con varios contenedores se elige cuál. Usa tus
   herramientas y tu `~/.kube/config` tal cual, también con Docker Desktop en Windows.
+- **Docker en tus servidores**: en el menú de un host SSH, **Contenedores Docker** lista los
+  contenedores en marcha del servidor y abre una shell en ellos por la misma conexión
+  (`docker exec -it` con terminal). Tu usuario debe poder usar Docker allí (grupo `docker`).
+  En un host de un Team cuenta como una conexión: queda en el registro y, si el Team graba,
+  se graba.
 - **Conexión rápida** (`⌘K` / `Ctrl+K`): busca un host guardado o escribe
   `usuario@servidor:puerto` (también `ssh usuario@servidor -p 2222`) para conectar sin guardarlo.
 
@@ -714,7 +719,7 @@ La hoja de ruta detallada, con el orden de las próximas entregas, está en
 | Autocompletado de comandos, desbloqueo biométrico | ⏳ fase 2 |
 | Importar de AWS, Azure y DigitalOcean | ✅ |
 | Shell en contenedores Docker y pods de Kubernetes de este equipo | ✅ |
-| Contenedores Docker de un host SSH | ⏳ |
+| Contenedores Docker de un host SSH | ✅ |
 | Sincronización entre equipos (servidor propio, cifrado de extremo a extremo) | ✅ |
 | Teams: hosts compartidos entre cuentas | ✅ |
 | Sesiones compartidas | ✅ |

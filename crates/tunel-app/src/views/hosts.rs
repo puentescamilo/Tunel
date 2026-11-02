@@ -16,6 +16,7 @@ const GAP: f32 = 12.0;
 enum Action {
     Connect(HostId),
     Sftp(HostId),
+    Containers(HostId),
     Edit(Host),
     Duplicate(Host),
     Delete(HostId),
@@ -95,6 +96,13 @@ fn host_menu(ui: &mut egui::Ui, host: &Host, actions: &mut Vec<Action>) {
             .clicked()
     {
         actions.push(Action::Sftp(host.id));
+    }
+    if host.protocol() == Protocol::Ssh
+        && ui
+            .button(ui::with_icon(icons::COLUMNS, "Contenedores Docker"))
+            .clicked()
+    {
+        actions.push(Action::Containers(host.id));
     }
     ui.separator();
     if ui.button(ui::with_icon(icons::PENCIL, "Editar")).clicked() {
@@ -563,6 +571,11 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         match action {
             Action::Connect(id) => app.open_host(id),
             Action::Sftp(id) => app.open_sftp(id),
+            Action::Containers(id) => {
+                app.section = crate::app::Section::Containers;
+                app.active = None;
+                super::containers::load_remote(app, id);
+            }
             Action::Edit(host) => app.editor = Some(Editor::host(host)),
             // Un host nuevo dentro de un grupo compartido se comparte con el mismo Team.
             Action::NewHost => {

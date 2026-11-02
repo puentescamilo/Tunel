@@ -22,8 +22,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 3a | Registro de auditoría de los Teams | 0.9.0 | ✅ |
 | 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | ✅ |
 | 6a | Importar máquinas de AWS, Azure y DigitalOcean | 0.10.0 | hecha, sin publicar |
-| 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | en curso |
-| 6c | Contenedores Docker de un host SSH | 0.10.0 | — |
+| 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | hecha, sin publicar |
+| 6c | Contenedores Docker de un host SSH | 0.10.0 | en curso |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor

@@ -61,6 +61,43 @@ pub fn docker_shell_args(id: &str) -> Vec<String> {
         .to_vec()
 }
 
+/// Lo que se ejecuta en un servidor por SSH para listar sus contenedores. Los errores
+/// salen por la misma salida, para poder mostrarlos.
+pub const DOCKER_PS_REMOTE: &str = "docker ps --no-trunc --format '{{json .}}' 2>&1";
+
+/// Un identificador de contenedor tal como lo da `docker ps --no-trunc`: solo hexadecimal,
+/// así se puede poner en una orden del servidor sin comillas.
+fn is_container_id(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// La orden que abre una shell en el contenedor `id` de un servidor por SSH; `None` si
+/// el identificador no es uno de Docker.
+pub fn docker_remote_shell(id: &str) -> Option<String> {
+    is_container_id(id).then(|| format!("docker exec -it {id} sh -c '{SHELL}'"))
+}
+
+/// Qué decir cuando `docker ps` falla en un servidor, según lo que respondió.
+pub fn docker_remote_error(output: &str, status: Option<u32>) -> String {
+    let output = output.trim();
+    if status == Some(127) || output.contains("command not found") {
+        "Docker no está instalado en ese servidor".into()
+    } else if output.contains("permission denied") {
+        "tu usuario no puede usar Docker en ese servidor: añádelo al grupo docker \
+         (sudo usermod -aG docker $USER) y vuelve a entrar"
+            .into()
+    } else {
+        let first: String = output
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(300)
+            .collect();
+        format!("docker falló en el servidor: {first}")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pod {
     pub namespace: String,
@@ -177,6 +214,27 @@ mod tests {
         assert!(parse_docker_ps("").unwrap().is_empty());
         assert!(parse_docker_ps("Cannot connect to the Docker daemon").is_err());
         assert_eq!(docker_shell_args("3f2a")[..3], ["exec", "-it", "3f2a"]);
+    }
+
+    #[test]
+    fn remote_commands_only_take_real_container_ids() {
+        let id = "3f2a9c01".repeat(8);
+        let command = docker_remote_shell(&id).unwrap();
+        assert!(command.starts_with(&format!("docker exec -it {id} sh -c '")));
+        assert!(!SHELL.contains('\''), "va entre comillas simples");
+        assert_eq!(docker_remote_shell("web; rm -rf /"), None);
+        assert_eq!(docker_remote_shell(""), None);
+        assert!(
+            docker_remote_error("bash: docker: command not found", Some(127))
+                .contains("no está instalado")
+        );
+        assert!(
+            docker_remote_error(
+                "permission denied while trying to connect to the Docker daemon socket",
+                Some(1)
+            )
+            .contains("grupo docker")
+        );
     }
 
     #[test]

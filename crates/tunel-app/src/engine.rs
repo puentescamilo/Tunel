@@ -221,14 +221,19 @@ impl Engine {
         })
     }
 
+    /// Una sesión con `host`. Con `command`, ejecuta esa orden en el servidor en lugar de
+    /// la shell (solo por SSH).
     pub fn open_host(
         &mut self,
         vault: &VaultData,
         host_id: HostId,
-        cols: u16,
-        rows: u16,
+        (cols, rows): (u16, u16),
+        command: Option<String>,
     ) -> anyhow::Result<TerminalSession> {
         let host = vault.host(host_id).context("host no encontrado")?.clone();
+        if command.is_some() && host.protocol() != Protocol::Ssh {
+            anyhow::bail!("solo se puede por SSH");
+        }
         let (io, backend) = session_pair();
         let scrollback = vault.settings.scrollback_lines;
         let title = host.display_name().to_string();
@@ -242,6 +247,7 @@ impl Engine {
                     agent_forwarding: host.agent_forwarding,
                     x11_display: host.x11_forwarding.then(tunel_ssh::x11::default_display),
                     startup_script: vault.startup_snippet(&host).map(|s| s.script.clone()),
+                    command,
                 };
                 let output = backend.output.clone();
                 self.spawn(async move {
@@ -323,6 +329,28 @@ impl Engine {
             scrollback,
             self.wake_on_output(io),
         ))
+    }
+
+    /// Los contenedores en marcha de un servidor, por SSH.
+    pub fn remote_containers(&self, vault: &VaultData, host: HostId) -> anyhow::Result<()> {
+        use tunel_core::containers;
+        let connect = self.connect_task(vault, host)?;
+        self.background(async move {
+            let result = async {
+                let conn = connect.await.map_err(|e| format!("{e:#}"))?;
+                let output = conn.exec(containers::DOCKER_PS_REMOTE).await;
+                conn.disconnect().await;
+                let (bytes, status) = output.map_err(|e| e.to_string())?;
+                let text = String::from_utf8_lossy(&bytes);
+                if status != Some(0) {
+                    return Err(containers::docker_remote_error(&text, status));
+                }
+                containers::parse_docker_ps(&text).map_err(|e| e.to_string())
+            }
+            .await;
+            AppEvent::Containers(crate::views::containers::ContainersEvent::Remote { host, result })
+        });
+        Ok(())
     }
 
     /// Una terminal de este equipo que ejecuta `spec` en vez de la shell.
