@@ -260,9 +260,11 @@ fn biometric_row(app: &mut TunelApp, ui: &mut egui::Ui) {
     let name = crate::biometric::name();
     let enabled = tunel_core::biometric::is_enabled(&path);
     let help = if enabled {
-        "Activado en este equipo. Se desactiva al cambiar la contraseña maestra.".to_string()
+        "Activado en este equipo. La primera vez de cada día se pide la contraseña maestra, y se desactiva al cambiarla.".to_string()
     } else {
-        format!("Abre la bóveda con {name} en lugar de la contraseña maestra, solo en este equipo.")
+        format!(
+            "Abre la bóveda con {name}, solo en este equipo. La primera vez de cada día se sigue pidiendo la contraseña maestra, para que no la olvides."
+        )
     };
     setting_row(ui, &format!("Desbloquear con {name}"), &help, |ui| {
         if app.biometric_setup.is_some() {

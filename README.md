@@ -14,8 +14,8 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   La contraseña maestra nueva tiene al menos 12 caracteres, con mayúsculas, minúsculas, números
   y algún carácter especial.
 - **Touch ID y Windows Hello**: en **Ajustes → Seguridad** se activa el desbloqueo con la huella,
-  la cara o el PIN de Windows Hello, solo en ese equipo. La contraseña maestra sigue sirviendo,
-  y al cambiarla hay que volver a activarlo.
+  la cara o el PIN de Windows Hello, solo en ese equipo. La primera vez de cada día se pide la
+  contraseña maestra, para no olvidarla; al cambiarla hay que volver a activarlo.
 - **Hosts y grupos anidados**: los hosts heredan usuario y puerto de su grupo. Etiquetas,
   filtro por etiquetas, búsqueda por nombre, dirección o etiqueta, y duplicar host.
 - **Llavero**: identidades (usuario + contraseña, clave o agente SSH) y claves privadas
@@ -698,7 +698,9 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
   con otra que solo da el sistema tras la huella o el PIN. En macOS esa clave está en el llavero
   (sin firma de Apple, macOS puede pedir la contraseña de la sesión para dejar que una versión
   nueva de Túnel la lea); en Windows sale de firmar un reto con una clave de Windows Hello y no
-  se guarda en ningún sitio.
+  se guarda en ningún sitio. El archivo guarda también el último día en que se entró con la
+  contraseña maestra, con una etiqueta hecha con la clave de la bóveda: cambiar la fecha a mano
+  no evita que se pida.
 - El texto pegado se limpia de caracteres de control, así que no puede inyectar teclas.
 - La contraseña guardada solo se envía cuando el servidor la pide; los códigos 2FA los escribe el usuario.
 - Contraseñas, frases de paso y claves privadas no aparecen en los registros de depuración,

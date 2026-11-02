@@ -62,6 +62,8 @@ impl LockScreen {
         };
         match result {
             Ok(vault) => {
+                // Si no se puede anotar, mañana se volverá a pedir la contraseña: no pasa nada.
+                let _ = vault.record_password_unlock(biometric::today());
                 self.clear();
                 self.error = None;
                 Some(vault)
@@ -78,8 +80,14 @@ impl LockScreen {
         }
     }
 
-    fn biometric_ready(&self) -> bool {
+    fn biometric_enabled(&self) -> bool {
         biometric::available() && tunel_core::biometric::is_enabled(&self.path)
+    }
+
+    /// La huella solo sirve si hoy ya se entró con la contraseña maestra, para no olvidarla.
+    fn biometric_ready(&self) -> bool {
+        self.biometric_enabled()
+            && tunel_core::biometric::password_entered_on(&self.path, biometric::today())
     }
 
     fn start_biometric(&mut self, ctx: &egui::Context) {
@@ -115,7 +123,8 @@ impl LockScreen {
             return Some(vault);
         }
         let creating = !UnlockedVault::exists(&self.path);
-        let biometric_ready = !creating && self.biometric_ready();
+        let biometric_enabled = !creating && self.biometric_enabled();
+        let biometric_ready = biometric_enabled && self.biometric_ready();
         if biometric_ready && self.auto_biometric {
             self.auto_biometric = false;
             self.start_biometric(ui.ctx());
@@ -193,6 +202,13 @@ impl LockScreen {
                             .corner_radius(CornerRadius::same(8))
                             .min_size(Vec2::new(ui.available_width(), 34.0));
                         use_biometric = ui.add_enabled(!waiting, button).clicked();
+                    } else if biometric_enabled {
+                        ui.add_space(8.0);
+                        let note = format!(
+                            "La primera vez de cada día se entra con la contraseña maestra. Después podrás usar {}.",
+                            biometric::name()
+                        );
+                        ui.label(RichText::new(note).size(12.0).color(p.muted));
                     }
                 });
                 ui.add_space(14.0);

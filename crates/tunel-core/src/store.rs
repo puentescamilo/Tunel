@@ -35,6 +35,8 @@ pub enum StoreError {
     AlreadyExists(PathBuf),
     #[error("la bóveda ya está abierta en otra ventana de Túnel")]
     Locked,
+    #[error("la primera vez de cada día se entra con la contraseña maestra")]
+    PasswordRequired,
 }
 
 /// Un archivo cifrado junto a la bóveda: la configuración de sincronización o las

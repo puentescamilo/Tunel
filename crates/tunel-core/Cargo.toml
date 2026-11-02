@@ -28,4 +28,6 @@ tokio = { workspace = true, features = ["sync"] }
 tempfile.workspace = true
 # Comprime las grabaciones de sesiones; ya lo trae russh.
 flate2 = "1"
+# Solo la fecha del día, para pedir la contraseña maestra cada día antes de usar la huella.
+chrono = { version = "0.4", default-features = false }
 

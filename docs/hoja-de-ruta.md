@@ -114,8 +114,9 @@ que ya tenga el usuario: Túnel no guarda credenciales de la nube.
 - **7a. Desbloqueo biométrico:** en **Ajustes → Seguridad**, activar Touch ID (macOS) o
   Windows Hello. La clave de la bóveda se guarda en `<bóveda>.biometria`, cifrada con una clave
   que solo da el sistema tras la huella o el PIN: en macOS está en el llavero; en Windows sale
-  de la firma de una clave de Windows Hello, así que no hay nada secreto en el disco. Se
-  desactiva al cambiar la contraseña maestra. En Linux no hay un mecanismo común, así que no
+  de la firma de una clave de Windows Hello, así que no hay nada secreto en el disco. La
+  primera vez de cada día se pide la contraseña maestra, para no olvidarla, como hace macOS.
+  Se desactiva al cambiar la contraseña maestra. En Linux no hay un mecanismo común, así que no
   se ofrece.
 
 ## Pendiente de fases anteriores

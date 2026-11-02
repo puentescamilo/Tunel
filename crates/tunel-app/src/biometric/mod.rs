@@ -5,6 +5,7 @@
 //! con [`run`].
 
 use crate::app::TunelApp;
+use chrono::NaiveDate;
 use std::sync::OnceLock;
 use std::sync::mpsc;
 use tunel_core::biometric::{self as core, Enrollment, WrappingKey};
@@ -47,6 +48,11 @@ pub enum Error {
 /// «Touch ID» o «Windows Hello».
 pub fn name() -> &'static str {
     platform::NAME
+}
+
+/// El día de hoy en la hora local: la contraseña maestra se pide la primera vez de cada día.
+pub fn today() -> NaiveDate {
+    chrono::Local::now().date_naive()
 }
 
 static AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -99,6 +105,11 @@ pub enum Unlocked {
 
 /// Pide la huella o el PIN y abre la bóveda de `path`. Bloquea: va en [`run`].
 pub fn unlock(path: std::path::PathBuf) -> Unlocked {
+    let today = today();
+    // Se mira antes de pedir la huella, para no pedirla en balde.
+    if !core::password_entered_on(&path, today) {
+        return Unlocked::Failed(StoreError::PasswordRequired.to_string());
+    }
     let enrollment = match core::enrollment(&path) {
         Ok(Some(enrollment)) => enrollment,
         Ok(None) => return Unlocked::Failed("el desbloqueo biométrico no está activado".into()),
@@ -109,7 +120,7 @@ pub fn unlock(path: std::path::PathBuf) -> Unlocked {
         Err(Error::Cancelled) => return Unlocked::Cancelled,
         Err(Error::Failed(e)) => return Unlocked::Failed(e),
     };
-    match UnlockedVault::unlock_biometric(&path, &wrapping) {
+    match UnlockedVault::unlock_biometric(&path, &wrapping, today) {
         Ok(vault) => Unlocked::Opened(Box::new(vault)),
         // No se quita solo: un fallo pasajero del sistema no debe desactivarlo sin preguntar.
         Err(StoreError::Crypto(_)) => Unlocked::Failed(format!(
@@ -169,7 +180,7 @@ pub fn tick(app: &mut TunelApp) {
                 return;
             };
             let previous = core::enrollment(vault.path()).ok().flatten();
-            match vault.enable_biometric(&enrollment, &wrapping) {
+            match vault.enable_biometric(&enrollment, &wrapping, today()) {
                 Ok(()) => {
                     if let Some(previous) = previous.filter(|p| p != &enrollment) {
                         platform::forget(&previous);
