@@ -61,9 +61,11 @@ pub fn docker_shell_args(id: &str) -> Vec<String> {
         .to_vec()
 }
 
-/// Lo que se ejecuta en un servidor por SSH para listar sus contenedores. Los errores
-/// salen por la misma salida, para poder mostrarlos.
-pub const DOCKER_PS_REMOTE: &str = "docker ps --no-trunc --format '{{json .}}' 2>&1";
+/// Lo que se ejecuta en un servidor por SSH para listar sus contenedores. Pide solo los
+/// campos que se usan (con `{{json .}}` las etiquetas de compose ocupan más de 1 KB por
+/// contenedor) y los errores salen por la misma salida, para poder mostrarlos.
+pub const DOCKER_PS_REMOTE: &str = "docker ps --no-trunc --format \
+    '{\"ID\":{{json .ID}},\"Names\":{{json .Names}},\"Image\":{{json .Image}},\"Status\":{{json .Status}}}' 2>&1";
 
 /// Un identificador de contenedor tal como lo da `docker ps --no-trunc`: solo hexadecimal,
 /// así se puede poner en una orden del servidor sin comillas.
@@ -214,6 +216,24 @@ mod tests {
         assert!(parse_docker_ps("").unwrap().is_empty());
         assert!(parse_docker_ps("Cannot connect to the Docker daemon").is_err());
         assert_eq!(docker_shell_args("3f2a")[..3], ["exec", "-it", "3f2a"]);
+    }
+
+    #[test]
+    fn the_remote_listing_asks_only_for_the_fields_it_reads() {
+        // Lo que escribe `docker ps` con la plantilla de DOCKER_PS_REMOTE.
+        let template = DOCKER_PS_REMOTE
+            .split('\'')
+            .nth(1)
+            .expect("plantilla entre comillas simples");
+        let line = template
+            .replace("{{json .ID}}", r#""13c488e9b6ed""#)
+            .replace("{{json .Names}}", r#""db-1""#)
+            .replace("{{json .Image}}", r#""postgres:16""#)
+            .replace("{{json .Status}}", r#""Up 6 days (healthy)""#);
+        let containers = parse_docker_ps(&line).unwrap();
+        assert_eq!(containers[0].id, "13c488e9b6ed");
+        assert_eq!(containers[0].status, "Up 6 days (healthy)");
+        assert!(DOCKER_PS_REMOTE.contains("--format '{"));
     }
 
     #[test]

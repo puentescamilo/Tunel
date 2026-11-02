@@ -110,7 +110,8 @@ pub async fn run_shell(
                     }
                 }
                 Some(ChannelMsg::ExitStatus { exit_status: code }) => exit_status = Some(code),
-                Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                // El estado llega después del EOF: se sigue leyendo hasta el cierre.
+                Some(ChannelMsg::Close) | None => break,
                 Some(_) => {}
             },
         }
