@@ -363,7 +363,8 @@ impl SshConnection {
                     }
                 }
                 russh::ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
-                russh::ChannelMsg::Eof | russh::ChannelMsg::Close => break,
+                // OpenSSH manda el estado después del EOF: se sigue leyendo hasta el cierre.
+                russh::ChannelMsg::Close => break,
                 _ => {}
             }
         }

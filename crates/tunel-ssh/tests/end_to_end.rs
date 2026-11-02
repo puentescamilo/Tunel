@@ -227,8 +227,8 @@ impl server::Handler for TestServer {
         }
         let text = String::from_utf8_lossy(data);
         if text.contains("exit") {
-            session.exit_status_request(channel, 7)?;
             session.eof(channel)?;
+            session.exit_status_request(channel, 7)?;
             session.close(channel)?;
         } else {
             session.data(channel, text.to_uppercase().into_bytes())?;
@@ -248,8 +248,9 @@ impl server::Handler for TestServer {
             return Ok(());
         }
         session.data(channel, [b"eco:", command].concat())?;
-        session.exit_status_request(channel, 0)?;
+        // Como OpenSSH: el estado llega después del EOF.
         session.eof(channel)?;
+        session.exit_status_request(channel, 0)?;
         session.close(channel)?;
         Ok(())
     }
@@ -265,8 +266,8 @@ impl server::Handler for TestServer {
         };
         let (output, status) = run_sh(self.home.path(), &script);
         session.data(channel, output)?;
-        session.exit_status_request(channel, status)?;
         session.eof(channel)?;
+        session.exit_status_request(channel, status)?;
         session.close(channel)?;
         Ok(())
     }
