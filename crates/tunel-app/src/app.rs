@@ -468,11 +468,13 @@ impl TunelApp {
             .engine
             .open_host(data, host, DEFAULT_COLS, DEFAULT_ROWS)?;
         crate::audit::connected(self, data, host);
-        if let Some((recorder, upload)) =
-            crate::recording::start(self, data, host, (DEFAULT_COLS, DEFAULT_ROWS))
-        {
-            session.recorder = Some(recorder);
-            self.engine.upload_recording(upload);
+        match crate::recording::start(self, data, host, (DEFAULT_COLS, DEFAULT_ROWS)) {
+            Ok(Some((recorder, upload))) => {
+                session.recorder = Some(recorder);
+                self.engine.upload_recording(upload);
+            }
+            Ok(None) => {}
+            Err(message) => self.notify(message),
         }
         Ok(session)
     }
@@ -726,7 +728,7 @@ impl TunelApp {
                 if session.live.is_some() {
                     live_action = views::live::bar(ui, session);
                 }
-                if let Some(recorder) = &session.recorder {
+                if let Some(recorder) = session.recorder.as_ref().filter(|r| r.active()) {
                     views::recordings::banner(ui, &recorder.team_name);
                 }
                 if session.playback.is_some() {

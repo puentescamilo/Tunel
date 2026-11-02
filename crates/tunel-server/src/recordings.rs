@@ -14,15 +14,19 @@ use tunel_core::sync::protocol::{RecordingChunk, RecordingDownload, RecordingSum
 
 /// Un trozo cifrado: la app los corta a 512 KiB de eventos sin comprimir.
 const MAX_CHUNK_CIPHERTEXT: usize = 2 * 1024 * 1024;
-const MAX_LISTED: i64 = 500;
+const MAX_LISTED: i64 = 5_000;
 
 /// Cuánto ocupan las grabaciones como mucho.
 #[derive(Debug, Clone, Copy)]
 pub struct RecordingLimits {
     /// Bytes cifrados de una grabación; al llegar, la app deja de grabar esa sesión.
     pub per_recording: u64,
-    /// Bytes cifrados de todas las grabaciones de un Team.
+    /// Bytes cifrados de todas las grabaciones de un Team. Una cuenta no puede ocupar más
+    /// de la mitad: así nadie llena el espacio para que no se grabe a los demás.
     pub per_team: u64,
+    /// Grabaciones de una cuenta en un Team; con tantas, la lista de los admins no se
+    /// queda sin sitio para las de los demás.
+    pub per_author: u64,
     /// Segundos que se guardan desde el último trozo.
     pub retention: i64,
 }
@@ -32,6 +36,7 @@ impl Default for RecordingLimits {
         Self {
             per_recording: 64 * 1024 * 1024,
             per_team: 2 * 1024 * 1024 * 1024,
+            per_author: 1_000,
             retention: 90 * 24 * 60 * 60,
         }
     }
@@ -150,8 +155,8 @@ impl Db {
                 params![team],
                 |row| row.get(0),
             )?;
-            // Un trozo con una clave posterior a la del Team no lo podría leer nadie.
-            if chunk.epoch > epoch as u64 {
+            // Con la clave actual: una anterior la tiene también quien salió del Team.
+            if chunk.epoch != epoch as u64 {
                 return Err(DbError::Conflict);
             }
             let author: String = tx.query_row(
@@ -170,6 +175,14 @@ impl Db {
                 .optional()?;
             let (bytes, chunks) = match existing {
                 None if chunk.seq == 0 => {
+                    let count: i64 = tx.query_row(
+                        "SELECT COUNT(*) FROM team_recordings WHERE team_id = ?1 AND author = ?2",
+                        params![team, author],
+                        |row| row.get(0),
+                    )?;
+                    if count as u64 >= limits.per_author {
+                        return Err(DbError::Limit("grabaciones de esta cuenta"));
+                    }
                     tx.execute(
                         "INSERT INTO team_recordings (team_id, id, author, started_at, updated_at)
                          VALUES (?1, ?2, ?3, ?4, ?4)",
@@ -216,6 +229,15 @@ impl Db {
             )?;
             if (team_bytes + size) as u64 > limits.per_team {
                 return Err(DbError::QuotaExceeded);
+            }
+            let author_bytes: i64 = tx.query_row(
+                "SELECT COALESCE(SUM(bytes), 0) FROM team_recordings
+                 WHERE team_id = ?1 AND author = ?2",
+                params![team, author],
+                |row| row.get(0),
+            )?;
+            if (author_bytes + size) as u64 > limits.per_team / 2 {
+                return Err(DbError::Limit("espacio de grabaciones de esta cuenta"));
             }
             tx.execute(
                 "INSERT INTO team_recording_chunks (team_id, recording_id, seq, epoch, blob)
@@ -322,7 +344,8 @@ mod tests {
     const REC: &str = "0f8b2c1e-1111-4222-8333-944455556666";
     const LIMITS: RecordingLimits = RecordingLimits {
         per_recording: 150,
-        per_team: 250,
+        per_team: 440,
+        per_author: 3,
         retention: 1000,
     };
 
@@ -416,26 +439,63 @@ mod tests {
 
     #[tokio::test]
     async fn size_limits_and_retention_apply() {
-        let (db, ana, _) = db().await;
+        let (db, ana, eva) = db().await;
         let big = "x".repeat(60);
-        append(&db, ana, REC, chunk(0, &big, false)).await.unwrap();
-        // Esta grabación pasaría de 150 bytes.
-        assert!(matches!(
-            append(&db, ana, REC, chunk(1, &big, false)).await,
-            Err(DbError::Limit(_))
-        ));
-        let other = "0f8b2c1e-1111-4222-8333-944455550000";
-        append(&db, ana, other, chunk(0, &big, false))
+        let ids: Vec<String> = (0..4)
+            .map(|i| format!("0f8b2c1e-1111-4222-8333-94445555000{i}"))
+            .collect();
+        append(&db, ana, &ids[0], chunk(0, &big, false))
             .await
             .unwrap();
-        // Y el Team, de 250.
-        let third = "0f8b2c1e-1111-4222-8333-944455551111";
+        // Esta grabación pasaría de 150 bytes.
         assert!(matches!(
-            append(&db, ana, third, chunk(0, &big, false)).await,
+            append(&db, ana, &ids[0], chunk(1, &big, false)).await,
+            Err(DbError::Limit(_))
+        ));
+        append(&db, ana, &ids[1], chunk(0, &big, false))
+            .await
+            .unwrap();
+        // Ana ya ocupa casi la mitad de los 440 del Team.
+        assert!(matches!(
+            append(&db, ana, &ids[2], chunk(0, &big, false)).await,
+            Err(DbError::Limit(_))
+        ));
+        append(&db, eva, &ids[2], chunk(0, &big, false))
+            .await
+            .unwrap();
+        append(&db, eva, &ids[3], chunk(0, &big, false))
+            .await
+            .unwrap();
+        // Y el Team, de 440.
+        let fifth = "0f8b2c1e-1111-4222-8333-944455559999";
+        assert!(matches!(
+            append(&db, eva, fifth, chunk(0, "y", false)).await,
             Err(DbError::QuotaExceeded)
         ));
         assert_eq!(db.purge_recordings(500, 1000).await.unwrap(), 0);
-        assert_eq!(db.purge_recordings(2000, 1000).await.unwrap(), 2);
+        assert_eq!(db.purge_recordings(2000, 1000).await.unwrap(), 4);
         assert!(db.recordings(TEAM.into()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_account_has_a_cap_on_recordings_and_must_use_the_current_key() {
+        let (db, ana, _) = db().await;
+        for i in 0..3 {
+            let id = format!("0f8b2c1e-1111-4222-8333-94445555100{i}");
+            append(&db, ana, &id, chunk(0, "a", false)).await.unwrap();
+        }
+        let id = "0f8b2c1e-1111-4222-8333-944455551009";
+        assert!(matches!(
+            append(&db, ana, id, chunk(0, "a", false)).await,
+            Err(DbError::Limit(_))
+        ));
+        let old_key = RecordingChunk {
+            epoch: 2,
+            ..chunk(0, "a", false)
+        };
+        assert!(matches!(
+            append(&db, ana, REC, old_key).await,
+            Err(DbError::Conflict)
+        ));
     }
 }

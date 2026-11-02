@@ -41,7 +41,8 @@ pub fn banner(ui: &mut egui::Ui, team_name: &str) {
                 );
                 ui.label(
                     RichText::new(format!(
-                        "Esta sesión se graba para el Team «{team_name}»: sus admins podrán verla"
+                        "Esta sesión se graba para el Team «{team_name}»: sus admins verán todo lo que aparezca \
+                         en pantalla"
                     ))
                     .size(12.0),
                 );
@@ -52,7 +53,9 @@ pub fn banner(ui: &mut egui::Ui, team_name: &str) {
 fn trust_warning(trust: Trust) -> Option<&'static str> {
     match trust {
         Trust::Verified | Trust::Unreadable => None,
-        Trust::Unknown => Some("no se conoce la clave de quien la grabó para comprobarla"),
+        Trust::Unknown => Some(
+            "no se conoce la clave de quien la grabó: cualquier miembro del Team podría haberla hecho",
+        ),
         Trust::Forged | Trust::NotAdmin => Some("la firma no es de quien dice haberla grabado"),
     }
 }

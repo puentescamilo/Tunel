@@ -4,6 +4,7 @@
 use crate::SyncError;
 use crate::audit::{Trust, keys_by_epoch, signer_key};
 use crate::session::{Session, call};
+use tunel_core::sync::audit::clean_name;
 use tunel_core::sync::local::normalize_email;
 use tunel_core::sync::protocol::{RecordingChunk, RecordingDownload, RecordingSummary};
 use tunel_core::sync::recording::{
@@ -27,7 +28,9 @@ pub struct Uploader {
     team: TeamLocal,
     id: String,
     writer: ChunkWriter,
-    pending: Option<SignedChunk>,
+    /// El trozo hecho que falta por subir, ya cifrado: un reintento manda exactamente lo
+    /// mismo, y el servidor lo reconoce si ya le había llegado.
+    pending: Option<(SignedChunk, RecordingChunk)>,
 }
 
 impl Uploader {
@@ -46,7 +49,7 @@ impl Uploader {
             .ok_or_else(|| SyncError::NotFound(team.into()))?;
         let pair = local.keypair.clone().ok_or(SyncError::NoKeypair)?;
         let header = RecordingHeader {
-            host: tunel_core::sync::audit::clean_name(host),
+            host: clean_name(host),
             actor: normalize_email(&local.email),
             started_at,
             cols,
@@ -67,26 +70,47 @@ impl Uploader {
         self.pending.is_some()
     }
 
+    /// Adopta la clave nueva del Team si `local` la trae, para que lo que se grabe desde
+    /// ahora no vaya con la que tiene quien salió.
+    pub fn refresh(&mut self, local: &SyncLocal) -> Result<(), SyncError> {
+        let Some(team) = local
+            .team(&self.team.id)
+            .filter(|t| t.epoch > self.team.epoch)
+        else {
+            return Ok(());
+        };
+        self.team = team.clone();
+        if let Some((signed, _)) = self.pending.take() {
+            self.pending = Some(self.sealed(signed)?);
+        }
+        Ok(())
+    }
+
+    fn sealed(&self, signed: SignedChunk) -> Result<(SignedChunk, RecordingChunk), SyncError> {
+        let upload = RecordingChunk {
+            seq: signed.seq,
+            epoch: self.team.epoch,
+            last: signed.last,
+            blob: signed.seal(&self.team.key, self.team.epoch)?,
+        };
+        Ok((signed, upload))
+    }
+
     /// Sube el trozo pendiente, si lo hay, y luego uno nuevo con `events`. Si falla, el
     /// trozo queda pendiente y `events` ya va en él: no hay que volver a pasarlos.
     pub async fn send(&mut self, events: &[RecordingEvent], last: bool) -> Result<(), SyncError> {
         self.retry().await?;
-        self.pending = Some(self.writer.next(events, last, &self.pair)?);
+        let signed = self.writer.next(events, last, &self.pair)?;
+        self.pending = Some(self.sealed(signed)?);
         self.retry().await
     }
 
     /// Vuelve a intentar el trozo pendiente.
     pub async fn retry(&mut self) -> Result<(), SyncError> {
-        let Some(chunk) = self.pending.clone() else {
+        let Some((_, upload)) = &self.pending else {
             return Ok(());
         };
-        let upload = RecordingChunk {
-            seq: chunk.seq,
-            epoch: self.team.epoch,
-            last: chunk.last,
-            blob: chunk.seal(&self.team.key, self.team.epoch)?,
-        };
-        let (team, id) = (&self.team.id, &self.id);
+        let (team, id, upload) = (&self.team.id, &self.id, upload.clone());
         call!(&mut self.session, |api, token| api
             .add_recording_chunk(token, team, id, &upload))?;
         self.pending = None;
@@ -119,6 +143,19 @@ pub struct Recording {
     pub problem: Option<String>,
 }
 
+/// Lo que se abre de una grabación como mucho, en bytes de salida más un poco por evento:
+/// una grabación hecha a propósito para no caber en memoria se corta aquí.
+const MAX_OPENED_BYTES: usize = 256 * 1024 * 1024;
+const EVENT_OVERHEAD: usize = 32;
+
+fn event_size(event: &RecordingEvent) -> usize {
+    EVENT_OVERHEAD
+        + match event {
+            RecordingEvent::Output { data, .. } => data.len(),
+            RecordingEvent::Resize { .. } => 0,
+        }
+}
+
 fn assemble(
     local: &SyncLocal,
     team: &TeamLocal,
@@ -136,8 +173,11 @@ fn assemble(
     };
     let mut previous: Option<OpenedChunk> = None;
     let mut signer = None;
+    let mut opened_bytes = 0;
     for (index, chunk) in download.chunks.iter().enumerate() {
-        let opened = if chunk.seq != index as u64 {
+        let opened = if recording.complete {
+            Err("hay trozos después del último")
+        } else if chunk.seq != index as u64 {
             Err("faltan trozos de la grabación")
         } else if let Some(key) = keys.get(&chunk.epoch) {
             OpenedChunk::open(&chunk.blob, key, &team.id, id, chunk.seq, chunk.epoch)
@@ -145,7 +185,7 @@ fn assemble(
         } else {
             Err("un trozo está cifrado con una clave que este equipo no tiene")
         };
-        let opened = match opened {
+        let mut opened = match opened {
             Ok(o) if o.follows(previous.as_ref()) => o,
             Ok(_) => {
                 recording.problem = Some("los trozos no siguen el orden en que se grabaron".into());
@@ -157,19 +197,28 @@ fn assemble(
             }
         };
         if let Some(header) = &opened.header {
-            let actor = normalize_email(&header.actor);
+            let actor = clean_name(&normalize_email(&header.actor));
             signer = signer_key(local, team, &actor);
             recording.trust = match signer {
                 _ if actor != normalize_email(author) => Trust::Forged,
                 Some(_) => Trust::Verified,
                 None => Trust::Unknown,
             };
-            recording.header = Some(header.clone());
+            recording.header = Some(RecordingHeader {
+                host: clean_name(&header.host),
+                actor,
+                ..header.clone()
+            });
         }
         if signer.is_some_and(|key| !opened.signed_by(&key)) {
             recording.trust = Trust::Forged;
         }
-        recording.events.extend(opened.events.iter().cloned());
+        opened_bytes += opened.events.iter().map(event_size).sum::<usize>();
+        if opened_bytes > MAX_OPENED_BYTES {
+            recording.problem = Some("es demasiado grande para abrirla entera".into());
+            break;
+        }
+        recording.events.append(&mut opened.events);
         recording.complete = opened.last;
         previous = Some(opened);
     }
@@ -306,6 +355,34 @@ mod tests {
         let recording = open_with(swapped, key, &bob);
         assert!(!recording.complete);
         assert_eq!(recording.events.len(), 1);
+    }
+
+    #[test]
+    fn nothing_counts_after_the_last_chunk() {
+        let key = VaultKey::generate();
+        let bob = AccountKeypair::generate();
+        let mut all = chunks(&key, &bob);
+        let header = RecordingHeader {
+            host: "web".into(),
+            actor: "bob@ejemplo.com".into(),
+            started_at: 0,
+            cols: 80,
+            rows: 24,
+        };
+        // Un cuarto trozo bien encadenado tras el que decía ser el último.
+        let mut writer = ChunkWriter::new(TEAM, REC, header);
+        let signed: Vec<_> = (0..4)
+            .map(|i| writer.next(&[], i == 2, &bob).unwrap())
+            .collect();
+        all.push(RecordingChunk {
+            seq: 3,
+            epoch: 0,
+            last: false,
+            blob: signed[3].seal(&key, 0).unwrap(),
+        });
+        let recording = open_with(all, key, &bob);
+        assert!(!recording.complete);
+        assert!(recording.problem.is_some());
     }
 
     #[test]

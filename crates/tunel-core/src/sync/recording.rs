@@ -322,7 +322,7 @@ pub fn to_asciicast(header: &RecordingHeader, events: &[RecordingEvent]) -> Stri
         "width": header.cols,
         "height": header.rows,
         "timestamp": header.started_at / 1000,
-        "title": format!("{} · {}", header.host, header.actor),
+        "title": super::audit::clean_name(&format!("{} · {}", header.host, header.actor)),
     });
     let mut out = format!("{first}\n");
     for event in events {
