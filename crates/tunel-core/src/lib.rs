@@ -4,6 +4,7 @@ pub mod biometric;
 pub mod cloud;
 pub mod containers;
 pub mod crypto;
+pub mod history;
 pub mod io;
 pub mod model;
 pub mod password;

@@ -489,6 +489,8 @@ pub struct Settings {
     pub tab_border: Option<crate::theme::Rgb>,
     /// Al abrir Túnel vuelven las pestañas de la última vez.
     pub restore_tabs: bool,
+    /// Sugerir en la terminal comandos del historial y de los snippets.
+    pub autocomplete: bool,
 }
 
 impl Default for Settings {
@@ -507,6 +509,7 @@ impl Default for Settings {
             custom_fonts: Vec::new(),
             tab_border: None,
             restore_tabs: true,
+            autocomplete: true,
         }
     }
 }
