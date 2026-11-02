@@ -47,6 +47,9 @@ pub struct TerminalSession {
     pub recorder: Option<crate::recording::Recorder>,
     /// Es la reproducción de una grabación, no una sesión.
     pub playback: Option<crate::playback::Playback>,
+    /// Ejecuta este programa del equipo en vez de la shell (la de un contenedor, por
+    /// ejemplo): reconectar lo vuelve a ejecutar.
+    pub program: Option<tunel_term::local::CommandSpec>,
 }
 
 impl TerminalSession {
@@ -75,6 +78,7 @@ impl TerminalSession {
             typed: Vec::new(),
             recorder: None,
             playback: None,
+            program: None,
         }
     }
 
