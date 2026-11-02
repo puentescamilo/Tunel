@@ -111,25 +111,23 @@ pub fn unlock(path: std::path::PathBuf) -> Unlocked {
     };
     match UnlockedVault::unlock_biometric(&path, &wrapping) {
         Ok(vault) => Unlocked::Opened(Box::new(vault)),
-        // La clave guardada ya no abre la bóveda: se quita para no volver a ofrecerla.
-        Err(StoreError::Crypto(_)) => {
-            disable(&path);
-            Unlocked::Failed(format!(
-                "{} ya no abre esta bóveda. Entra con la contraseña y vuelve a activarlo en \
-                 Ajustes.",
-                name()
-            ))
-        }
+        // No se quita solo: un fallo pasajero del sistema no debe desactivarlo sin preguntar.
+        Err(StoreError::Crypto(_)) => Unlocked::Failed(format!(
+            "{} no pudo abrir esta bóveda. Entra con la contraseña; si se repite, desactívalo \
+             y vuelve a activarlo en Ajustes → Seguridad.",
+            name()
+        )),
         Err(e) => Unlocked::Failed(e.to_string()),
     }
 }
 
 /// Quita el desbloqueo biométrico de la bóveda de `path`, también lo que guarda el sistema.
-pub fn disable(path: &std::path::Path) {
+pub fn disable(path: &std::path::Path) -> Result<(), StoreError> {
+    // Un archivo ilegible no impide quitarlo: no hay secreto del sistema que se pueda nombrar.
     if let Ok(Some(enrollment)) = core::enrollment(path) {
         platform::forget(&enrollment);
     }
-    let _ = core::forget(path);
+    core::forget(path)
 }
 
 /// Cambia la contraseña maestra. La clave que guardaba el desbloqueo biométrico deja de
@@ -166,10 +164,18 @@ pub fn tick(app: &mut TunelApp) {
         Some((_, Err(Error::Failed(e)))) => format!("No se pudo activar {}: {e}", name()),
         Some((enrollment, Ok(wrapping))) => {
             let Some(vault) = app.vault.as_ref() else {
+                // Se bloqueó mientras tanto: el secreto ya no tendría quien lo usara.
+                platform::forget(&enrollment);
                 return;
             };
+            let previous = core::enrollment(vault.path()).ok().flatten();
             match vault.enable_biometric(&enrollment, &wrapping) {
-                Ok(()) => format!("{} activado: ya puedes abrir la bóveda con él", name()),
+                Ok(()) => {
+                    if let Some(previous) = previous.filter(|p| p != &enrollment) {
+                        platform::forget(&previous);
+                    }
+                    format!("{} activado: ya puedes abrir la bóveda con él", name())
+                }
                 Err(e) => {
                     platform::forget(&enrollment);
                     format!("No se pudo activar {}: {e}", name())

@@ -24,6 +24,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 6a | Importar máquinas de AWS, Azure y DigitalOcean | 0.10.0 | ✅ |
 | 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | ✅ |
 | 6c | Contenedores Docker de un host SSH | 0.10.0 | ✅ |
+| 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | en curso |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -108,11 +109,19 @@ que ya tenga el usuario: Túnel no guarda credenciales de la nube.
 - **6c. Docker en un host SSH:** lo mismo con los contenedores de un servidor, a través de la
   conexión SSH.
 
+## 7. Comodidad en el día a día
+
+- **7a. Desbloqueo biométrico:** en **Ajustes → Seguridad**, activar Touch ID (macOS) o
+  Windows Hello. La clave de la bóveda se guarda en `<bóveda>.biometria`, cifrada con una clave
+  que solo da el sistema tras la huella o el PIN: en macOS está en el llavero; en Windows sale
+  de la firma de una clave de Windows Hello, así que no hay nada secreto en el disco. Se
+  desactiva al cambiar la contraseña maestra. En Linux no hay un mecanismo común, así que no
+  se ofrece.
+
 ## Pendiente de fases anteriores
 
 | Función | Estado |
 |---|---|
-| Desbloqueo biométrico (Touch ID, Windows Hello) | fase 2 |
 | Autocompletado de comandos | fase 2 |
 | Llaves FIDO2 en Windows | pendiente |
 | Cliente Mosh propio | más adelante |

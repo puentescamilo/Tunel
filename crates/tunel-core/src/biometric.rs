@@ -5,7 +5,7 @@
 //! llavero; en Windows, lo que sale de firmar un reto con la clave de Windows Hello. Sin ese
 //! paso, el archivo no sirve para nada.
 
-use crate::crypto::{self, KEY_LEN, MasterKey, NONCE_LEN, Sealed};
+use crate::crypto::{self, KEY_LEN, MasterKey, NONCE_LEN, SALT_LEN, Sealed};
 use crate::store::{StoreError, UnlockedVault, decode, side_path, write_atomically};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -64,8 +64,16 @@ impl Enrollment {
         &self.challenge
     }
 
-    fn aad(&self) -> Vec<u8> {
-        [AAD_PREFIX, self.id.as_bytes()].concat()
+    /// Todo lo del archivo y la sal de la bóveda: si algo cambia, el sello no se abre.
+    fn aad(&self, vault_salt: &[u8; SALT_LEN]) -> Vec<u8> {
+        [
+            AAD_PREFIX,
+            &VERSION.to_be_bytes(),
+            self.id.as_bytes(),
+            &self.challenge,
+            vault_salt,
+        ]
+        .concat()
     }
 }
 
@@ -138,7 +146,8 @@ impl UnlockedVault {
         wrapping: &WrappingKey,
     ) -> Result<(), StoreError> {
         let wrapping = MasterKey::from_bytes(wrapping.clone());
-        let sealed = crypto::seal(&wrapping, self.key().as_bytes(), &enrollment.aad())?;
+        let aad = enrollment.aad(self.salt());
+        let sealed = crypto::seal(&wrapping, self.key().as_bytes(), &aad)?;
         let file = BiometricFile {
             version: VERSION,
             id: enrollment.id.clone(),
@@ -151,7 +160,8 @@ impl UnlockedVault {
     }
 
     /// Abre la bóveda con la clave guardada por [`UnlockedVault::enable_biometric`]. Si
-    /// `wrapping` no es la buena o la contraseña cambió después, da un error de cifrado.
+    /// `wrapping` no es la buena, el archivo se manipuló o la contraseña cambió después, da
+    /// un error de cifrado.
     pub fn unlock_biometric(
         path: impl Into<PathBuf>,
         wrapping: &WrappingKey,
@@ -159,13 +169,15 @@ impl UnlockedVault {
         let path = path.into();
         let (enrollment, sealed) = read(&path)?.ok_or(StoreError::Corrupt)?;
         let wrapping = MasterKey::from_bytes(wrapping.clone());
-        let opened = crypto::open(&wrapping, &sealed, &enrollment.aad())?;
-        let bytes: [u8; KEY_LEN] = opened
-            .as_slice()
-            .try_into()
-            .map_err(|_| StoreError::Corrupt)?;
-        let key = MasterKey::from_bytes(Zeroizing::new(bytes));
-        Self::unlock_with(path, |_, _| Ok(key))
+        Self::unlock_with(path, |salt, _| {
+            let opened = crypto::open(&wrapping, &sealed, &enrollment.aad(salt))?;
+            if opened.len() != KEY_LEN {
+                return Err(StoreError::Corrupt);
+            }
+            let mut key = Zeroizing::new([0u8; KEY_LEN]);
+            key.copy_from_slice(&opened);
+            Ok(MasterKey::from_bytes(key))
+        })
     }
 }
 
@@ -234,12 +246,22 @@ mod tests {
             .enable_biometric(&Enrollment::new(), &wrapping(7))
             .unwrap();
         drop(vault);
-        let edit = |id: &str| {
+        let edit_field = |field: &str, value: &str| {
             let raw = std::fs::read_to_string(file_path(&path)).unwrap();
             let mut file: serde_json::Value = serde_json::from_str(&raw).unwrap();
-            file["id"] = id.into();
+            file[field] = value.into();
             std::fs::write(file_path(&path), file.to_string()).unwrap();
         };
+        let edit = |id: &str| edit_field("id", id);
+        let original = std::fs::read(file_path(&path)).unwrap();
+        // El reto también está atado: con otro, Windows Hello firmaría lo que eligiera otro.
+        edit_field("challenge", &B64.encode([9u8; CHALLENGE_LEN]));
+        assert!(matches!(
+            UnlockedVault::unlock_biometric(&path, &wrapping(7)),
+            Err(StoreError::Crypto(_))
+        ));
+        std::fs::write(file_path(&path), &original).unwrap();
+        assert!(UnlockedVault::unlock_biometric(&path, &wrapping(7)).is_ok());
         // Otro nombre válido: el sello está atado al nombre.
         edit(&"ab".repeat(ID_LEN));
         assert!(matches!(

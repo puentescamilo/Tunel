@@ -269,8 +269,10 @@ fn biometric_row(app: &mut TunelApp, ui: &mut egui::Ui) {
             ui.spinner();
         } else if enabled {
             if ui::secondary_button(ui, "Desactivar").clicked() {
-                crate::biometric::disable(&path);
-                app.notify(format!("{name} desactivado"));
+                app.notify(match crate::biometric::disable(&path) {
+                    Ok(()) => format!("{name} desactivado"),
+                    Err(e) => format!("No se pudo desactivar {name}: {e}"),
+                });
             }
         } else if ui::secondary_button(ui, "Activar").clicked() {
             crate::biometric::start_setup(app, ui.ctx());

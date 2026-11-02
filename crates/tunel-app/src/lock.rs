@@ -92,7 +92,11 @@ impl LockScreen {
     fn biometric_result(&mut self) -> Option<UnlockedVault> {
         let result = self.biometric.as_ref()?.take()?;
         self.biometric = None;
-        match result? {
+        let Some(result) = result else {
+            self.error = Some(format!("{} falló inesperadamente", biometric::name()));
+            return None;
+        };
+        match result {
             Unlocked::Opened(vault) => {
                 self.clear();
                 self.error = None;
@@ -172,6 +176,10 @@ impl LockScreen {
                     if ui.add(button).clicked() || submit {
                         // Argon2id tarda ~0,5 s; se acepta la breve pausa en el hilo de la interfaz.
                         opened = self.try_open(creating);
+                        if opened.is_some() {
+                            // Lo que responda después la huella ya no hace falta.
+                            self.biometric = None;
+                        }
                     }
                     if biometric_ready {
                         ui.add_space(8.0);

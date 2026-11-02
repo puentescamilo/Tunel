@@ -217,6 +217,10 @@ impl UnlockedVault {
         &self.key
     }
 
+    pub(crate) fn salt(&self) -> &[u8; SALT_LEN] {
+        &self.salt
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }

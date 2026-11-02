@@ -98,12 +98,13 @@ pub fn wrapping_key(enrollment: &Enrollment, create: bool) -> Result<WrappingKey
     let mut signature = Array::<u8>::new();
     CryptographicBuffer::CopyToByteArray(&signed.Result().map_err(failed)?, &mut signature)
         .map_err(failed)?;
-    let key = Sha256::new()
+    let mut key = Zeroizing::new([0u8; 32]);
+    Sha256::new()
         .chain_update(DOMAIN)
         .chain_update(&signature[..])
-        .finalize();
+        .finalize_into(key.as_mut().into());
     signature[..].zeroize();
-    Ok(Zeroizing::new(key.into()))
+    Ok(key)
 }
 
 pub fn forget(enrollment: &Enrollment) {

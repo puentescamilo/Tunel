@@ -56,6 +56,8 @@ fn from_error(error: &NSError) -> Error {
         LAError::UserCancel,
         LAError::SystemCancel,
         LAError::AppCancel,
+        // «Introducir contraseña»: se usa la maestra, sin error que mostrar.
+        LAError::UserFallback,
     ]
     .iter()
     .any(|c| c.0 == code)
@@ -87,11 +89,14 @@ pub fn wrapping_key(enrollment: &Enrollment, create: bool) -> Result<WrappingKey
     let stored = Zeroizing::new(
         passwords::get_generic_password(SERVICE, &account(enrollment)).map_err(keychain_error)?,
     );
-    let key: [u8; KEY_LEN] = stored
-        .as_slice()
-        .try_into()
-        .map_err(|_| Error::Failed("la clave guardada en el llavero no es válida".into()))?;
-    Ok(Zeroizing::new(key))
+    if stored.len() != KEY_LEN {
+        return Err(Error::Failed(
+            "la clave guardada en el llavero no es válida".into(),
+        ));
+    }
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
+    key.copy_from_slice(&stored);
+    Ok(key)
 }
 
 pub fn forget(enrollment: &Enrollment) {
