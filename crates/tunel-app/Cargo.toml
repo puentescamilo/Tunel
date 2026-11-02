@@ -34,6 +34,23 @@ uuid.workspace = true
 # Ya la trae egui; aquí comprueba que una fuente descargada es válida antes de cargarla.
 skrifa = "0.44"
 
+# Desbloqueo biométrico: Touch ID y el llavero de macOS, Windows Hello en Windows.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
+objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "block2", "LAContext", "LAError"] }
+security-framework = "3.7"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Security_Credentials",
+    "Security_Cryptography",
+    "Storage_Streams",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [dev-dependencies]
 russh.workspace = true
 tempfile.workspace = true

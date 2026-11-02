@@ -345,9 +345,16 @@ fn on_rewrapped(
     let changed = app
         .vault
         .as_mut()
-        .map(|v| v.change_password(&password).map_err(|e| e.to_string()));
+        .map(|v| crate::biometric::change_password(v, &password).map_err(|e| e.to_string()));
     app.notify(match changed {
-        Some(Ok(())) => "Contraseña maestra cambiada, también para la sincronización".to_string(),
+        Some(Ok(false)) => {
+            "Contraseña maestra cambiada, también para la sincronización".to_string()
+        }
+        Some(Ok(true)) => format!(
+            "Contraseña maestra cambiada, también para la sincronización. {} se desactivó: \
+             vuelve a activarlo si quieres",
+            crate::biometric::name()
+        ),
         Some(Err(e)) => format!(
             "La cuenta ya usa la contraseña nueva, pero no se pudo cambiar en este equipo: {e}. \
              Vuelve a intentarlo con la misma."
