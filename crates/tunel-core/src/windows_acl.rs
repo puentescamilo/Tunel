@@ -178,7 +178,10 @@ pub(crate) mod tests {
         assert_ne!(ok, 0);
         let text = Local(text.cast());
         // SAFETY: la cadena la acaba de escribir el sistema, terminada en cero.
-        unsafe { from_wide(text.0.cast()) }
+        let sddl = unsafe { from_wide(text.0.cast()) };
+        // Windows marca la lista como «heredada automáticamente» (AI) al guardarla; no da
+        // permisos a nadie.
+        sddl.replacen("D:PAI(", "D:P(", 1)
     }
 
     #[test]
