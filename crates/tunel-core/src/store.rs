@@ -205,6 +205,13 @@ impl UnlockedVault {
         let key = key(&salt, file.kdf)?;
         let plaintext = crypto::open(&key, &Sealed { nonce, ciphertext }, AAD)?;
         let data = serde_json::from_slice(&plaintext).map_err(|_| StoreError::Corrupt)?;
+        // Una bóveda de una versión anterior pudo quedar con los permisos de su carpeta.
+        if let Err(e) = restrict_permissions(&path) {
+            eprintln!(
+                "aviso: no se pudieron restringir los permisos de {}: {e}",
+                path.display()
+            );
+        }
         Ok(Self {
             path,
             _lock: lock,
@@ -412,7 +419,12 @@ fn restrict_permissions(path: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn restrict_permissions(path: &Path) -> std::io::Result<()> {
+    crate::windows_acl::restrict(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn restrict_permissions(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
@@ -608,6 +620,23 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn vault_file_is_private_to_owner_on_windows() {
+        use crate::windows_acl::{private_sddl, tests::dacl_of};
+        let dir = tempfile::tempdir().unwrap();
+        let vault = UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
+        assert_eq!(dacl_of(&vault_path(&dir)), private_sddl().unwrap());
+        drop(vault);
+
+        // Una bóveda anterior, con los permisos heredados, se corrige al abrirla.
+        let inherited = dir.path().join("otra.json");
+        std::fs::write(&inherited, std::fs::read(vault_path(&dir)).unwrap()).unwrap();
+        assert_ne!(dacl_of(&inherited), private_sddl().unwrap());
+        UnlockedVault::unlock(&inherited, PW).unwrap();
+        assert_eq!(dacl_of(&inherited), private_sddl().unwrap());
     }
 
     fn rewrite_header(path: &std::path::Path, edit: impl FnOnce(&mut serde_json::Value)) {

@@ -6,7 +6,7 @@
 //! se elige qué hacer con ellas: copiarlas al espacio de destino (la copia es nueva y lo
 //! original no cambia) o quitárselas al host para que cada cual ponga las suyas.
 
-use crate::model::{GroupId, HostId, Identity, IdentityId, KeyId, SshKey};
+use crate::model::{GroupId, HostId, IdentityId, KeyId};
 use crate::vault::VaultData;
 use std::collections::HashMap;
 
@@ -47,12 +47,10 @@ impl Copies {
             Some(key) => self.key(data, key, team),
             None => (data, None),
         };
-        let copy = Identity {
-            id: IdentityId::new(),
-            team: team.map(str::to_string),
-            key,
-            ..identity
-        };
+        let mut copy = identity.clone();
+        copy.id = IdentityId::new();
+        copy.team = team.map(str::to_string);
+        copy.key = key;
         self.identities.insert(id, copy.id);
         (data.with_identity(copy.clone()), Some(copy.id))
     }
@@ -72,11 +70,9 @@ impl Copies {
         if let Some(copy) = self.keys.get(&id) {
             return (data, Some(*copy));
         }
-        let copy = SshKey {
-            id: KeyId::new(),
-            team: team.map(str::to_string),
-            ..key
-        };
+        let mut copy = key.clone();
+        copy.id = KeyId::new();
+        copy.team = team.map(str::to_string);
         self.keys.insert(id, copy.id);
         (data.with_key(copy.clone()), Some(copy.id))
     }
@@ -212,16 +208,13 @@ pub fn credentials_elsewhere(data: &VaultData, host: HostId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Group, Host};
+    use crate::model::{Group, Host, Identity, SshKey};
 
     const TEAM: &str = "6c2b8f0e-6f4e-4d55-9a37-1e2f3a4b5c6d";
 
     fn vault() -> (VaultData, HostId, IdentityId, KeyId) {
         let key = SshKey::new("clave", "-----BEGIN OPENSSH PRIVATE KEY-----");
-        let identity = Identity {
-            key: Some(key.id),
-            ..Identity::new("deploy", "deploy")
-        };
+        let identity = Identity::new("deploy", "deploy").with_key(key.id);
         let host = Host {
             identity: Some(identity.id),
             ..Host::new("web", "10.0.0.1")

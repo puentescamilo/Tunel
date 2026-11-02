@@ -96,10 +96,10 @@ pub fn import(path: &Path) -> Result<SshKey, String> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    Ok(SshKey {
-        public_key: tunel_ssh::keygen::public_key(&text, None),
-        ..SshKey::new(name, text)
-    })
+    let public_key = tunel_ssh::keygen::public_key(&text, None);
+    let mut key = SshKey::new(name, text);
+    key.public_key = public_key;
+    Ok(key)
 }
 
 /// La sección «En este equipo»: las claves de `~/.ssh` que cualquiera que lea el archivo

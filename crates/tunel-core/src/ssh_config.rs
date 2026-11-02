@@ -281,10 +281,11 @@ pub fn import_into(
                     }
                 })
         });
-        let identity = entry.user.as_ref().map(|user| Identity {
-            key: key_id,
-            use_agent: key_id.is_none(),
-            ..Identity::new(format!("{user}@{}", entry.alias), user.clone())
+        let identity = entry.user.as_ref().map(|user| {
+            let mut identity = Identity::new(format!("{user}@{}", entry.alias), user.clone());
+            identity.key = key_id;
+            identity.use_agent = key_id.is_none();
+            identity
         });
         let host = Host {
             port: entry.port,

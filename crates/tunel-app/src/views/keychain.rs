@@ -203,11 +203,8 @@ mod tests {
 
     #[test]
     fn identity_details_lists_credentials_and_usage() {
-        let identity = Identity {
-            password: Some("x".into()),
-            use_agent: true,
-            ..Identity::new("ana", "ana")
-        };
+        let mut identity = Identity::new("ana", "ana").with_password("x");
+        identity.use_agent = true;
         let host = tunel_core::Host {
             identity: Some(identity.id),
             ..tunel_core::Host::new("h", "h")

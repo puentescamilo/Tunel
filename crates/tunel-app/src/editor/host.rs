@@ -238,14 +238,12 @@ impl HostForm {
         let mut result = data.clone();
         let mut identity = self.host.identity;
         if !self.new_username.trim().is_empty() {
-            let new_identity = Identity {
-                team: self.team.clone(),
-                password: Some(self.new_password.clone()).filter(|p| !p.is_empty()),
-                ..Identity::new(
-                    format!("{}@{}", self.new_username.trim(), self.host.display_name()),
-                    self.new_username.trim(),
-                )
-            };
+            let mut new_identity = Identity::new(
+                format!("{}@{}", self.new_username.trim(), self.host.display_name()),
+                self.new_username.trim(),
+            );
+            new_identity.team = self.team.clone();
+            new_identity.password = Some(self.new_password.clone()).filter(|p| !p.is_empty());
             identity = Some(new_identity.id);
             result = result.with_identity(new_identity);
         }

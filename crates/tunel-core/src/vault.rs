@@ -248,10 +248,9 @@ impl VaultData {
                 .iter()
                 .map(|i| {
                     if i.key == Some(id) {
-                        Identity {
-                            key: None,
-                            ..i.clone()
-                        }
+                        let mut unlinked = i.clone();
+                        unlinked.key = None;
+                        unlinked
                     } else {
                         i.clone()
                     }
@@ -261,25 +260,9 @@ impl VaultData {
         }
     }
 
-    /// Sobrescribe en memoria contraseñas y claves antes de soltarlas (al bloquear la bóveda).
-    ///
-    /// Solo alcanza a esta copia: las que la interfaz haya clonado se liberan sin borrar.
+    /// Suelta contraseñas y claves al bloquear la bóveda. Cada una se borra de la memoria al
+    /// soltarse, también las copias que haya hecho la interfaz.
     pub fn wipe_secrets(&mut self) {
-        use zeroize::Zeroize;
-        for identity in &mut self.identities {
-            identity.password.zeroize();
-        }
-        for key in &mut self.keys {
-            key.private_key.zeroize();
-            key.passphrase.zeroize();
-        }
-        for host in &mut self.hosts {
-            if let Some(ProxyConfig::Socks5 { password, .. } | ProxyConfig::Http { password, .. }) =
-                host.proxy.as_mut()
-            {
-                password.zeroize();
-            }
-        }
         self.identities.clear();
         self.keys.clear();
         self.hosts.clear();
@@ -691,10 +674,7 @@ mod tests {
 
     /// La bóveda de quien recibe un host de un Team que apunta a sus cosas personales.
     fn team_host_pointing_at_personal_items() -> (VaultData, HostId, ForwardId) {
-        let identity = Identity {
-            password: Some("personal".into()),
-            ..Identity::new("mía", "ana")
-        };
+        let identity = Identity::new("mía", "ana").with_password("personal");
         let group = Group {
             identity: Some(identity.id),
             ..Group::new("personal")
@@ -737,10 +717,7 @@ mod tests {
 
         // En el mismo Team sí.
         let shared = data
-            .with_identity(Identity {
-                team: Some(TEAM.into()),
-                ..data.identities[0].clone()
-            })
+            .with_identity(data.identities[0].with_team(TEAM))
             .with_snippet(Snippet {
                 team: Some(TEAM.into()),
                 ..data.snippets[0].clone()
@@ -893,14 +870,8 @@ mod tests {
 
     #[test]
     fn wipe_secrets_clears_passwords_and_keys() {
-        let identity = Identity {
-            password: Some("pw".into()),
-            ..Identity::new("a", "ana")
-        };
-        let key = SshKey {
-            passphrase: Some("frase".into()),
-            ..SshKey::new("k", "PRIVADA")
-        };
+        let identity = Identity::new("a", "ana").with_password("pw");
+        let key = SshKey::new("k", "PRIVADA").with_passphrase("frase");
         let mut vault = VaultData::default().with_identity(identity).with_key(key);
         vault.wipe_secrets();
         assert!(vault.identities.is_empty() && vault.keys.is_empty());

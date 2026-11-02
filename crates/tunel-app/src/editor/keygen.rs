@@ -82,11 +82,12 @@ impl KeyGenForm {
         };
         self.pending = None;
         match result {
-            Ok(generated) => Some(SshKey {
-                public_key: Some(generated.public_key),
-                passphrase: Some(self.passphrase.clone()).filter(|p| !p.is_empty()),
-                ..SshKey::new(self.label.trim(), generated.private_key)
-            }),
+            Ok(generated) => {
+                let mut key = SshKey::new(self.label.trim(), generated.private_key);
+                key.public_key = Some(generated.public_key);
+                key.passphrase = Some(self.passphrase.clone()).filter(|p| !p.is_empty());
+                Some(key)
+            }
             Err(e) => {
                 self.error = Some(e);
                 None
@@ -171,7 +172,12 @@ mod tests {
         let key = wait(&mut form).expect("clave generada");
         assert_eq!(key.label, "servidor");
         assert_eq!(key.passphrase.as_deref(), Some("frase"));
-        assert!(key.public_key.unwrap().starts_with("ssh-ed25519 "));
+        assert!(
+            key.public_key
+                .as_deref()
+                .unwrap()
+                .starts_with("ssh-ed25519 ")
+        );
         assert!(key.private_key.contains("OPENSSH PRIVATE KEY"));
         assert!(key.team.is_none());
     }
