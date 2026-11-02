@@ -185,6 +185,12 @@ pub struct TunelApp {
     pub snippet_values: HashMap<String, String>,
     /// Pestañas guardadas por última vez; `None` si no se guardan.
     pub saved_workspace: Option<tunel_core::workspace::Workspace>,
+    /// Comandos ejecutados en este equipo, para el autocompletado.
+    pub history: tunel_core::history::CommandHistory,
+    /// Desde cuándo hay comandos sin guardar.
+    pub history_changed: Option<Instant>,
+    /// Ya se avisó de que no se pudo guardar el historial.
+    pub history_failed: bool,
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
@@ -218,6 +224,7 @@ impl TunelApp {
         }
         crate::sync::on_unlock(self);
         crate::workspace::restore(self);
+        crate::autocomplete::load(self);
         // `TUNEL_DEV_SERVER=<url>` deja escrita la dirección del servidor en Ajustes.
         if let Ok(server) = std::env::var("TUNEL_DEV_SERVER") {
             self.sync.form.server = server;
@@ -388,6 +395,9 @@ impl TunelApp {
             snippet_prompt: None,
             snippet_values: HashMap::new(),
             saved_workspace: None,
+            history: Default::default(),
+            history_changed: None,
+            history_failed: false,
             notices: Vec::new(),
             sync: Default::default(),
             updates: Default::default(),
@@ -456,6 +466,8 @@ impl TunelApp {
         self.sync = Default::default();
         self.live = Default::default();
         self.saved_workspace = None;
+        crate::autocomplete::save(self);
+        self.history = Default::default();
         self.snippet_prompt = None;
         self.snippet_values.clear();
         self.vault = None;
@@ -755,6 +767,7 @@ impl TunelApp {
             .collect();
         let mut stop_broadcast = false;
         let mut typed = Vec::new();
+        let mut commands = Vec::new();
         match &mut self.tabs[index] {
             Tab::Terminal(session) => {
                 tab_key = session.key;
@@ -780,7 +793,16 @@ impl TunelApp {
                         None => {}
                     }
                 }
-                crate::terminal_view::show(ui, session, &theme, &settings);
+                let source = self
+                    .vault
+                    .as_ref()
+                    .filter(|_| settings.autocomplete)
+                    .map(|vault| crate::autocomplete::Source {
+                        history: &self.history,
+                        snippets: &vault.data.snippets,
+                        host,
+                    });
+                commands = crate::terminal_view::show(ui, session, &theme, &settings, source);
                 typed = session.take_typed();
             }
             Tab::Sftp(_) => views::sftp::show(self, ui, index),
@@ -792,6 +814,7 @@ impl TunelApp {
         if !typed.is_empty() {
             crate::broadcast::forward(&self.tabs, tab_key, &typed);
         }
+        crate::autocomplete::record(self, host, &commands);
         if stop_broadcast {
             crate::broadcast::stop(self);
         }
@@ -845,6 +868,10 @@ fn status_message(status: &SessionStatus) -> Option<String> {
 }
 
 impl eframe::App for TunelApp {
+    fn on_exit(&mut self) {
+        crate::autocomplete::save(self);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.vault.is_none() {
@@ -852,6 +879,7 @@ impl eframe::App for TunelApp {
                 self.vault = Some(vault);
                 crate::sync::on_unlock(self);
                 crate::workspace::restore(self);
+                crate::autocomplete::load(self);
                 self.apply_theme(&ctx);
             }
             return;
@@ -859,6 +887,7 @@ impl eframe::App for TunelApp {
         self.process_background();
         crate::workspace::tick(self);
         crate::biometric::tick(self);
+        crate::autocomplete::tick(self);
         crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
         let wait = match self.active.and_then(|i| self.tabs.get(i)) {

@@ -25,6 +25,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 6b | Shell en contenedores Docker y pods de Kubernetes de este equipo | 0.10.0 | ✅ |
 | 6c | Contenedores Docker de un host SSH | 0.10.0 | ✅ |
 | 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | ✅ |
+| 7b | Autocompletado de comandos en la terminal | 0.12.0 | en curso |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -118,12 +119,17 @@ que ya tenga el usuario: Túnel no guarda credenciales de la nube.
   primera vez de cada día se pide la contraseña maestra, para no olvidarla, como hace macOS.
   Se desactiva al cambiar la contraseña maestra. En Linux no hay un mecanismo común, así que no
   se ofrece.
+- **7b. Autocompletado de comandos:** sugerencia en gris tras el cursor, como en fish, que se
+  acepta con →. Sale del historial de ese host, de los snippets de una línea sin variables y del
+  historial de otros hosts, por ese orden. Túnel sigue lo tecleado desde el último Enter y solo
+  lo cuenta si el servidor lo repite en pantalla: no guarda lo que se escribe sin eco, deja de
+  seguir la línea con flechas, Tab o Ctrl+R hasta el siguiente Enter, y no interviene a pantalla
+  completa. El historial (`<bóveda>.historial`, 1000 comandos) va cifrado y no se sincroniza.
 
 ## Pendiente de fases anteriores
 
 | Función | Estado |
 |---|---|
-| Autocompletado de comandos | fase 2 |
 | Llaves FIDO2 en Windows | pendiente |
 | Cliente Mosh propio | más adelante |
 | Borrar de la memoria las copias temporales de la bóveda en la interfaz | ✅ |

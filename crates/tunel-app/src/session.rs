@@ -53,6 +53,10 @@ pub struct TerminalSession {
     /// Ejecuta esta orden en el servidor en vez de la shell (`docker exec`, por ejemplo):
     /// reconectar la vuelve a ejecutar.
     pub remote_command: Option<String>,
+    /// Lo que se está escribiendo, para el autocompletado.
+    pub line: crate::autocomplete::LineTracker,
+    /// Lo que falta del comando sugerido, si se está mostrando.
+    pub suggestion: Option<crate::autocomplete::Suggestion>,
 }
 
 impl TerminalSession {
@@ -83,6 +87,8 @@ impl TerminalSession {
             playback: None,
             program: None,
             remote_command: None,
+            line: crate::autocomplete::LineTracker::new(),
+            suggestion: None,
         }
     }
 

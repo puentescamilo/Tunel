@@ -100,6 +100,15 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   si una regla escucha fuera de `localhost`.
 - **SFTP de doble panel**: navegar, subir, descargar, renombrar, borrar y crear carpetas.
 - **Snippets**: comandos guardados que se envían a la terminal activa o a todas a la vez.
+- **Autocompletado de comandos**: mientras escribes, Túnel sugiere en gris cómo seguir con lo
+  que ya ejecutaste en ese host, tus snippets y lo ejecutado en otros hosts; **→** la acepta y
+  **Tab** sigue siendo el de la shell. Solo cuenta lo que el servidor muestra en pantalla, así
+  que una contraseña escrita sin eco no se guarda, y no interviene en vim, less o top. El
+  historial va cifrado junto a la bóveda, solo en ese equipo; lo que empieza por un espacio no
+  se recuerda, y en **Ajustes → Terminal** se desactiva o se borra. Viene activado. Ojo: también
+  se recuerda lo que escribes en programas que repiten lo tecleado sin pantalla completa, como
+  `mysql`, `psql`, `python` o un `ssh` a otro servidor, y las contraseñas que pases como
+  argumento (`mysql -pclave`); empiézalos por un espacio si no quieres que se guarden.
 
 ![Túneles](docs/screenshots/tuneles.png)
 
@@ -731,7 +740,7 @@ La hoja de ruta detallada, con el orden de las próximas entregas, está en
 | Llaves FIDO2 (`sk-*`) | ✅ macOS y Linux · ⏳ Windows |
 | Cliente Mosh propio | ⏳ más adelante |
 | Desbloqueo con Touch ID o Windows Hello | ✅ |
-| Autocompletado de comandos | ⏳ fase 2 |
+| Autocompletado de comandos | ✅ |
 | Importar de AWS, Azure y DigitalOcean | ✅ |
 | Shell en contenedores Docker y pods de Kubernetes de este equipo | ✅ |
 | Contenedores Docker de un host SSH | ✅ |

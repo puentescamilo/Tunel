@@ -1,5 +1,6 @@
 //! Widget de terminal: dibuja la pantalla del emulador y traduce teclado, ratón y portapapeles.
 
+use crate::autocomplete::{Edit, Source};
 use crate::session::TerminalSession;
 use egui::{Align2, Color32, CornerRadius, EventFilter, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use tunel_term::keys::{self, Key, Modifiers};
@@ -85,14 +86,64 @@ fn is_app_shortcut(m: &egui::Modifiers) -> bool {
     m.command && !m.ctrl || (cfg!(not(target_os = "macos")) && m.ctrl && m.shift)
 }
 
-fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) {
+/// Cómo cambia la línea que se está escribiendo con una tecla.
+fn line_edit(key: egui::Key, m: &egui::Modifiers) -> Edit<'static> {
+    let plain = !m.ctrl && !m.alt && !m.shift;
+    match key {
+        egui::Key::Enter if plain => Edit::Enter,
+        egui::Key::Backspace if plain => Edit::Backspace,
+        egui::Key::C | egui::Key::U if m.ctrl && !m.alt => Edit::Clear,
+        _ => Edit::Other,
+    }
+}
+
+/// Envía lo que teclea el usuario y devuelve los comandos que ejecutó con Enter.
+fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
     let modes = session.emulator.input_modes();
     let events = ui.input(|i| i.events.clone());
     let mut output = Vec::new();
+    let mut commands = Vec::new();
+    // Solo se sigue lo que se escribe en una terminal propia y viva: no al mirar la sesión
+    // de otra persona, ni en una grabación o una sesión cerrada.
+    let own = session.can_broadcast() && session.playback.is_none();
+    if !own {
+        session.line = crate::autocomplete::LineTracker::new();
+        session.suggestion = None;
+    }
     for event in events {
+        // → acepta la sugerencia solo si sigue siendo la de lo que hay escrito.
+        let accepted = match &event {
+            egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.is_none() => session
+                .suggestion
+                .take()
+                .filter(|s| session.line.typed() == Some(s.typed.as_str())),
+            _ => None,
+        };
+        if let Some(suggestion) = accepted {
+            session.line.edit(Edit::Text(&suggestion.rest));
+            output.extend(suggestion.rest.into_bytes());
+            continue;
+        }
+        if matches!(
+            event,
+            egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Key { pressed: true, .. }
+        ) {
+            session.suggestion = None;
+        }
         match event {
-            egui::Event::Text(text) => output.extend(text.into_bytes()),
-            egui::Event::Paste(text) => output.extend(keys::encode_paste(&text, modes)),
+            egui::Event::Text(text) => {
+                session.line.edit(Edit::Text(&text));
+                output.extend(text.into_bytes());
+            }
+            egui::Event::Paste(text) => {
+                session.line.edit(Edit::Paste(&text));
+                output.extend(keys::encode_paste(&text, modes));
+            }
             egui::Event::Copy | egui::Event::Cut => {
                 if let Some(text) = session.emulator.selection_text() {
                     ui.ctx().copy_text(text);
@@ -112,6 +163,7 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) {
                 if matches!(mapped, Key::Char(_)) && !modifiers.ctrl {
                     continue;
                 }
+                commands.extend(session.line.edit(line_edit(key, &modifiers)));
                 let mods = Modifiers {
                     shift: modifiers.shift,
                     ctrl: modifiers.ctrl,
@@ -127,8 +179,10 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) {
     if !output.is_empty() {
         session.emulator.scroll_to_bottom();
         session.emulator.clear_selection();
+        session.suggestion = None;
         session.send_typed(output);
     }
+    if own { commands } else { Vec::new() }
 }
 
 fn cell_at(rect: Rect, m: CellMetrics, pos: Pos2, screen: &Screen) -> (usize, usize) {
@@ -236,6 +290,37 @@ fn paint(
 
 /// Grosor de la barra y del subrayado del cursor, en puntos.
 const CURSOR_LINE: f32 = 2.0;
+
+/// El resto del comando sugerido, tenue, a partir del cursor (cabe en la fila: ver
+/// [`Source::suggest`]).
+#[allow(clippy::too_many_arguments)]
+fn paint_suggestion(
+    painter: &egui::Painter,
+    rect: Rect,
+    m: CellMetrics,
+    font: &FontId,
+    screen: &Screen,
+    theme: &Theme,
+    row: usize,
+    col: usize,
+    rest: &str,
+) {
+    let fg = tunel_term::palette::rgb(theme.foreground);
+    let bg = screen.background;
+    let mix = |a: u8, b: u8| ((u16::from(a) * 9 + u16::from(b) * 11) / 20) as u8;
+    let color = Color32::from_rgb(mix(fg.r, bg.r), mix(fg.g, bg.g), mix(fg.b, bg.b));
+    let origin = rect.min + Vec2::splat(PADDING);
+    painter.text(
+        Pos2::new(
+            origin.x + col as f32 * m.width,
+            origin.y + row as f32 * m.height,
+        ),
+        Align2::LEFT_TOP,
+        rest,
+        font.clone(),
+        color,
+    );
+}
 
 #[allow(clippy::too_many_arguments)]
 fn paint_cursor(
@@ -350,12 +435,15 @@ fn clipboard_banner(ui: &mut egui::Ui, session: &mut TerminalSession) {
 }
 
 /// Muestra la terminal ocupando el espacio disponible.
+/// Dibuja la terminal y atiende el teclado. Con `source`, sugiere cómo seguir el comando;
+/// devuelve los comandos que se ejecutaron, para el historial.
 pub fn show(
     ui: &mut egui::Ui,
     session: &mut TerminalSession,
     theme: &Theme,
     settings: &tunel_core::Settings,
-) {
+    source: Option<Source>,
+) -> Vec<String> {
     let copy_on_select = settings.copy_on_select;
     session.emulator.set_cursor_style(settings.cursor_style);
     let font = FontId::monospace(settings.font_size);
@@ -382,8 +470,12 @@ pub fn show(
                 },
             )
         });
-        handle_input(ui, session);
     }
+    let commands = if focused {
+        handle_input(ui, session)
+    } else {
+        Vec::new()
+    };
 
     let screen = session.emulator.screen(theme);
     if response.hovered() {
@@ -412,6 +504,25 @@ pub fn show(
     }
     let screen = session.emulator.screen(theme);
     paint(ui.painter(), rect, m, &font, &screen, focused);
+    session
+        .line
+        .observe(&screen, session.emulator.input_modes().alt_screen);
+    session.suggestion = source
+        .filter(|_| focused && !screen.scrolled_back && session.can_broadcast())
+        .and_then(|source| source.suggest(session.line.typed()?, &screen));
+    if let (Some(suggestion), Some((row, col))) = (&session.suggestion, screen.cursor) {
+        paint_suggestion(
+            ui.painter(),
+            rect,
+            m,
+            &font,
+            &screen,
+            theme,
+            row,
+            col,
+            &suggestion.rest,
+        );
+    }
     if screen.scrolled_back {
         ui.painter().text(
             rect.right_top() + Vec2::new(-PADDING, PADDING),
@@ -421,6 +532,7 @@ pub fn show(
             c32(tunel_term::palette::rgb(theme.cursor)),
         );
     }
+    commands
 }
 
 #[cfg(test)]
@@ -457,5 +569,28 @@ mod tests {
         assert_eq!(map_key(egui::Key::C), Some(Key::Char('c')));
         assert_eq!(map_key(egui::Key::ArrowUp), Some(Key::Up));
         assert_eq!(map_key(egui::Key::F12), Some(Key::F(12)));
+    }
+
+    #[test]
+    fn only_enter_backspace_and_clearing_keys_keep_track_of_the_line() {
+        let none = egui::Modifiers::NONE;
+        let ctrl = egui::Modifiers::CTRL;
+        assert_eq!(line_edit(egui::Key::Enter, &none), Edit::Enter);
+        assert_eq!(line_edit(egui::Key::Backspace, &none), Edit::Backspace);
+        assert_eq!(line_edit(egui::Key::C, &ctrl), Edit::Clear);
+        assert_eq!(line_edit(egui::Key::U, &ctrl), Edit::Clear);
+        for key in [
+            egui::Key::Tab,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowLeft,
+            egui::Key::Home,
+        ] {
+            assert_eq!(line_edit(key, &none), Edit::Other);
+        }
+        assert_eq!(line_edit(egui::Key::A, &ctrl), Edit::Other);
+        assert_eq!(
+            line_edit(egui::Key::Backspace, &egui::Modifiers::ALT),
+            Edit::Other
+        );
     }
 }

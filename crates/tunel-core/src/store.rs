@@ -1,6 +1,7 @@
 //! Persistencia de la bóveda en un único archivo JSON cifrado.
 
 use crate::crypto::{self, CryptoError, KdfParams, MasterKey, NONCE_LEN, SALT_LEN, Sealed};
+use crate::history::CommandHistory;
 use crate::sync::SyncLocal;
 use crate::vault::VaultData;
 use crate::workspace::Workspace;
@@ -14,9 +15,11 @@ const FORMAT_VERSION: u32 = 1;
 const AAD: &[u8] = b"tunel-vault-v1";
 const SYNC_AAD: &[u8] = b"tunel-sync-local-v1";
 const WORKSPACE_AAD: &[u8] = b"tunel-workspace-v1";
+const HISTORY_AAD: &[u8] = b"tunel-history-v1";
 /// Archivos cifrados junto a la bóveda, solo de este equipo: sufijo y datos asociados.
 const SYNC_FILE: (&str, &[u8]) = (".sync", SYNC_AAD);
 const WORKSPACE_FILE: (&str, &[u8]) = (".pestanas", WORKSPACE_AAD);
+const HISTORY_FILE: (&str, &[u8]) = (".historial", HISTORY_AAD);
 pub const MIN_PASSWORD_LEN: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
@@ -118,7 +121,12 @@ fn lock_path(path: &Path) -> PathBuf {
 /// Una bóveda de una versión anterior pudo quedar, con sus archivos laterales, con los permisos
 /// de su carpeta: se corrigen al abrirla.
 fn restrict_existing(vault: &Path) {
-    let side = [SYNC_FILE.0, WORKSPACE_FILE.0, crate::biometric::FILE];
+    let side = [
+        SYNC_FILE.0,
+        WORKSPACE_FILE.0,
+        HISTORY_FILE.0,
+        crate::biometric::FILE,
+    ];
     let paths = [vault.to_path_buf(), lock_path(vault)]
         .into_iter()
         .chain(side.map(|s| side_path(vault, s)));
@@ -272,6 +280,7 @@ impl UnlockedVault {
             None
         });
         let workspace = self.load_workspace().unwrap_or(None);
+        let history = self.load_history().unwrap_or(None);
         // Guardar primero con la clave nueva; solo si funciona se adopta en memoria, y desde
         // ese momento, para que memoria y disco usen siempre la misma clave.
         write_sealed(&self.path, &self.data, &key, &salt, self.kdf)?;
@@ -284,6 +293,13 @@ impl UnlockedVault {
             Some(workspace) => self.save_workspace(workspace),
             None => self.delete_workspace(),
         };
+        // El historial tampoco, pero se avisa: el anterior queda cifrado con la otra clave.
+        if let Err(e) = match &history {
+            Some(history) => self.save_history(history),
+            None => self.delete_history(),
+        } {
+            eprintln!("aviso: no se pudo volver a cifrar el historial de comandos: {e}");
+        }
         match &sync {
             Some(sync) => self.save_sync(sync),
             None => self.delete_sync(),
@@ -315,6 +331,19 @@ impl UnlockedVault {
 
     pub fn delete_workspace(&self) -> Result<(), StoreError> {
         self.delete_side(WORKSPACE_FILE)
+    }
+
+    /// Comandos ejecutados en este equipo, para el autocompletado.
+    pub fn load_history(&self) -> Result<Option<CommandHistory>, StoreError> {
+        self.read_side(HISTORY_FILE)
+    }
+
+    pub fn save_history(&self, history: &CommandHistory) -> Result<(), StoreError> {
+        self.write_side(HISTORY_FILE, history)
+    }
+
+    pub fn delete_history(&self) -> Result<(), StoreError> {
+        self.delete_side(HISTORY_FILE)
     }
 
     fn read_side<T: serde::de::DeserializeOwned>(
@@ -598,10 +627,17 @@ mod tests {
         assert!(vault.load_sync().is_err());
         vault.delete_sync().unwrap();
 
+        let history = CommandHistory::default().record(None, "cat /etc/secreto");
+        vault.save_history(&history).unwrap();
+        let raw = std::fs::read_to_string(side_path(&vault_path(&dir), ".historial")).unwrap();
+        assert!(!raw.contains("secreto"));
         vault.change_password("nueva-contraseña").unwrap();
         drop(vault);
         let vault = UnlockedVault::unlock(vault_path(&dir), "nueva-contraseña").unwrap();
         assert_eq!(vault.load_workspace().unwrap(), Some(workspace));
+        assert_eq!(vault.load_history().unwrap(), Some(history));
+        vault.delete_history().unwrap();
+        assert!(vault.load_history().unwrap().is_none());
         vault.delete_workspace().unwrap();
         assert!(vault.load_workspace().unwrap().is_none());
     }

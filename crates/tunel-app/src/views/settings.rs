@@ -97,6 +97,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         return;
     };
     let mut settings = data.settings.clone();
+    let mut clear_history = false;
     let mut import_theme = false;
     ui::page_header(
         ui,
@@ -178,7 +179,26 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             setting_row(ui, "Copiar al seleccionar", "Copia el texto al portapapeles en cuanto lo seleccionas", |ui| {
                 ui::toggle(ui, &mut settings.copy_on_select);
             });
+            setting_row(ui, "Autocompletar comandos", "Sugiere en gris los comandos que ya ejecutaste y tus snippets; → la acepta. Lo que empieza por un espacio no se recuerda", |ui| {
+                ui::toggle(ui, &mut settings.autocomplete);
+            });
+            let commands = app.history.entries().len();
+            let help = match commands {
+                0 => "Vacío. Se guarda cifrado y solo en este equipo".to_string(),
+                1 => "1 comando, cifrado y solo en este equipo".to_string(),
+                n => format!("{n} comandos, cifrados y solo en este equipo"),
+            };
+            setting_row(ui, "Historial de comandos", &help, |ui| {
+                clear_history = ui.add_enabled(commands > 0, egui::Button::new("Borrar")).clicked();
+            });
         });
+        if clear_history {
+            let message = match crate::autocomplete::clear(app) {
+                Ok(()) => "Historial de comandos borrado".to_string(),
+                Err(e) => format!("No se pudo borrar el historial: {e}"),
+            };
+            app.notify(message);
+        }
         if settings != data.settings {
             let theme_changed = settings.theme != data.settings.theme || settings.ui_theme != data.settings.ui_theme;
             app.commit(data.with_settings(settings.clone()));
