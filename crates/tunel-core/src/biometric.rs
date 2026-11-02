@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
-const FILE: &str = ".biometria";
+pub(crate) const FILE: &str = ".biometria";
 const VERSION: u32 = 1;
 const AAD_PREFIX: &[u8] = b"tunel-biometria-v1:";
 const DAY_AAD_PREFIX: &[u8] = b"tunel-biometria-dia-v1:";

@@ -31,3 +31,12 @@ flate2 = "1"
 # Solo la fecha del día, para pedir la contraseña maestra cada día antes de usar la huella.
 chrono = { version = "0.4", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+# Permisos del archivo de la bóveda: solo el usuario actual.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+] }
+

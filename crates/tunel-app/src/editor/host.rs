@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use tunel_core::share;
 use tunel_core::vault::can_use;
 use tunel_core::*;
+use zeroize::Zeroize;
 
 /// Parsea un puerto; vacío significa "por defecto".
 pub fn parse_port(text: &str) -> Result<Option<u16>, String> {
@@ -102,6 +103,14 @@ pub struct HostForm {
     /// Al cambiar de espacio, copiar sus credenciales o quitárselas.
     copy_credentials: bool,
     pub(super) error: Option<String>,
+}
+
+/// Las contraseñas escritas no se quedan en memoria al cerrar el formulario.
+impl Drop for HostForm {
+    fn drop(&mut self) {
+        self.proxy_password.zeroize();
+        self.new_password.zeroize();
+    }
 }
 
 impl HostForm {
@@ -238,14 +247,12 @@ impl HostForm {
         let mut result = data.clone();
         let mut identity = self.host.identity;
         if !self.new_username.trim().is_empty() {
-            let new_identity = Identity {
-                team: self.team.clone(),
-                password: Some(self.new_password.clone()).filter(|p| !p.is_empty()),
-                ..Identity::new(
-                    format!("{}@{}", self.new_username.trim(), self.host.display_name()),
-                    self.new_username.trim(),
-                )
-            };
+            let mut new_identity = Identity::new(
+                format!("{}@{}", self.new_username.trim(), self.host.display_name()),
+                self.new_username.trim(),
+            );
+            new_identity.team = self.team.clone();
+            new_identity.password = Some(self.new_password.clone()).filter(|p| !p.is_empty());
             identity = Some(new_identity.id);
             result = result.with_identity(new_identity);
         }

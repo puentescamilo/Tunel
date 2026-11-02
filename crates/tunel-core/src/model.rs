@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 macro_rules! id_type {
     ($name:ident) => {
@@ -191,10 +192,31 @@ impl Identity {
     pub fn new(label: impl Into<String>, username: impl Into<String>) -> Self {
         Self {
             id: IdentityId::new(),
+            team: None,
             label: label.into(),
             username: username.into(),
-            ..Self::default()
+            password: None,
+            key: None,
+            use_agent: false,
         }
+    }
+
+    pub fn with_password(&self, password: impl Into<String>) -> Self {
+        let mut copy = self.clone();
+        copy.password = Some(password.into());
+        copy
+    }
+
+    pub fn with_key(&self, key: KeyId) -> Self {
+        let mut copy = self.clone();
+        copy.key = Some(key);
+        copy
+    }
+
+    pub fn with_team(&self, team: impl Into<String>) -> Self {
+        let mut copy = self.clone();
+        copy.team = Some(team.into());
+        copy
     }
 }
 
@@ -217,10 +239,25 @@ impl SshKey {
     pub fn new(label: impl Into<String>, private_key: impl Into<String>) -> Self {
         Self {
             id: KeyId::new(),
+            team: None,
             label: label.into(),
             private_key: private_key.into(),
-            ..Self::default()
+            public_key: None,
+            passphrase: None,
+            certificate: None,
         }
+    }
+
+    pub fn with_passphrase(&self, passphrase: impl Into<String>) -> Self {
+        let mut copy = self.clone();
+        copy.passphrase = Some(passphrase.into());
+        copy
+    }
+
+    pub fn with_team(&self, team: impl Into<String>) -> Self {
+        let mut copy = self.clone();
+        copy.team = Some(team.into());
+        copy
     }
 }
 
@@ -229,6 +266,54 @@ const REDACTED: &str = "«oculto»";
 fn redact<T>(value: &Option<T>) -> Option<&'static str> {
     value.as_ref().map(|_| REDACTED)
 }
+
+// Contraseñas y claves privadas se borran de la memoria al soltar cada copia, también las que
+// hace la interfaz al clonar la bóveda para editarla o sincronizarla.
+
+impl Zeroize for ProxyConfig {
+    fn zeroize(&mut self) {
+        match self {
+            ProxyConfig::Socks5 { password, .. } | ProxyConfig::Http { password, .. } => {
+                password.zeroize()
+            }
+        }
+    }
+}
+
+impl Zeroize for Identity {
+    fn zeroize(&mut self) {
+        self.password.zeroize();
+    }
+}
+
+impl Zeroize for SshKey {
+    fn zeroize(&mut self) {
+        self.private_key.zeroize();
+        self.passphrase.zeroize();
+    }
+}
+
+impl Drop for ProxyConfig {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl Drop for Identity {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl Drop for SshKey {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for ProxyConfig {}
+impl ZeroizeOnDrop for Identity {}
+impl ZeroizeOnDrop for SshKey {}
 
 impl std::fmt::Debug for ProxyConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -430,6 +515,39 @@ impl Default for Settings {
 mod tests {
     use super::*;
 
+    fn wipes_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+
+    #[test]
+    fn every_copy_of_a_secret_wipes_itself_when_dropped() {
+        wipes_on_drop::<Identity>();
+        wipes_on_drop::<SshKey>();
+        wipes_on_drop::<ProxyConfig>();
+
+        let mut identity = Identity::new("root", "root").with_password("pw-secreta");
+        identity.zeroize();
+        assert_eq!(
+            (identity.password.as_deref(), identity.username.as_str()),
+            (None, "root")
+        );
+
+        let mut key =
+            SshKey::new("k", "-----BEGIN OPENSSH PRIVATE KEY-----").with_passphrase("frase");
+        key.zeroize();
+        assert_eq!(
+            (key.private_key.as_str(), key.passphrase.as_deref()),
+            ("", None)
+        );
+
+        let mut proxy = ProxyConfig::Http {
+            host: "proxy".into(),
+            port: 8080,
+            username: Some("ana".into()),
+            password: Some("pw".into()),
+        };
+        proxy.zeroize();
+        assert!(matches!(proxy, ProxyConfig::Http { password: None, .. }));
+    }
+
     #[test]
     fn settings_from_older_vaults_get_new_defaults() {
         let old = r#"{"font_size":16.0,"theme":"tunel-claro","scrollback_lines":500,"copy_on_select":true,"keepalive_seconds":10}"#;
@@ -516,14 +634,8 @@ mod tests {
 
     #[test]
     fn debug_output_hides_secrets() {
-        let identity = Identity {
-            password: Some("pw-secreta".into()),
-            ..Identity::new("a", "ana")
-        };
-        let key = SshKey {
-            passphrase: Some("frase".into()),
-            ..SshKey::new("k", "-----BEGIN CLAVE-----")
-        };
+        let identity = Identity::new("a", "ana").with_password("pw-secreta");
+        let key = SshKey::new("k", "-----BEGIN CLAVE-----").with_passphrase("frase");
         let proxy = ProxyConfig::Socks5 {
             host: "p".into(),
             port: 1,

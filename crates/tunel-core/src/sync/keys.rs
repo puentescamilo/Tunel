@@ -224,10 +224,13 @@ impl std::fmt::Debug for RecordEnvelope {
 }
 
 /// Rellena con espacios hasta un múltiplo de `PADDING_BLOCK`; JSON los admite al final.
-fn pad(mut plain: Zeroizing<Vec<u8>>) -> Zeroizing<Vec<u8>> {
-    let padded = plain.len().div_ceil(PADDING_BLOCK).max(1) * PADDING_BLOCK;
-    plain.resize(padded, b' ');
-    plain
+fn pad(plain: Zeroizing<Vec<u8>>) -> Zeroizing<Vec<u8>> {
+    let padded_len = plain.len().div_ceil(PADDING_BLOCK).max(1) * PADDING_BLOCK;
+    // Un búfer nuevo del tamaño justo: hacer crecer `plain` dejaría una copia sin borrar.
+    let mut padded = Zeroizing::new(Vec::with_capacity(padded_len));
+    padded.extend_from_slice(&plain);
+    padded.resize(padded_len, b' ');
+    padded
 }
 
 impl VaultKey {
@@ -295,9 +298,8 @@ impl VaultKey {
 
     pub fn seal_record(&self, envelope: &RecordEnvelope) -> Result<SealedRecord, SyncCryptoError> {
         let id = self.record_id(&envelope.key);
-        let plain = pad(Zeroizing::new(
-            serde_json::to_vec(envelope).map_err(|_| SyncCryptoError::Corrupt)?,
-        ));
+        let plain =
+            pad(crate::crypto::secret_json(envelope).map_err(|_| SyncCryptoError::Corrupt)?);
         let sealed = crypto::seal(&self.0, &plain, &Self::record_aad(&id))?;
         Ok(SealedRecord {
             id,

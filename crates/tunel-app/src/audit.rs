@@ -78,10 +78,7 @@ mod tests {
     const TEAM: &str = "infra";
 
     fn shared(identity: Identity) -> Identity {
-        Identity {
-            team: Some(TEAM.into()),
-            ..identity
-        }
+        identity.with_team(TEAM)
     }
 
     fn changed(item: &str) -> (String, AuditAction) {
@@ -95,25 +92,16 @@ mod tests {
     fn a_new_password_on_a_team_identity_is_recorded() {
         let root = shared(Identity::new("root", "root"));
         let old = VaultData::default().with_identity(root.clone());
-        let new = VaultData::default().with_identity(Identity {
-            password: Some("nueva".into()),
-            ..root.clone()
-        });
+        let new = VaultData::default().with_identity(root.with_password("nueva"));
         assert_eq!(secret_changes(&old, &new), vec![changed("root")]);
         assert!(secret_changes(&new, &new).is_empty());
     }
 
     #[test]
     fn personal_items_and_moves_into_a_team_are_not_recorded() {
-        let personal = Identity {
-            password: Some("x".into()),
-            ..Identity::new("mía", "ana")
-        };
+        let personal = Identity::new("mía", "ana").with_password("x");
         let old = VaultData::default().with_identity(personal.clone());
-        let renamed = VaultData::default().with_identity(Identity {
-            password: Some("y".into()),
-            ..personal.clone()
-        });
+        let renamed = VaultData::default().with_identity(personal.with_password("y"));
         assert!(secret_changes(&old, &renamed).is_empty());
         let moved = VaultData::default().with_identity(shared(personal));
         assert!(secret_changes(&old, &moved).is_empty());
@@ -121,19 +109,13 @@ mod tests {
 
     #[test]
     fn a_new_team_key_or_a_changed_passphrase_is_recorded() {
-        let key = SshKey {
-            team: Some(TEAM.into()),
-            ..SshKey::new("deploy", "-----BEGIN OPENSSH PRIVATE KEY-----")
-        };
+        let key = SshKey::new("deploy", "-----BEGIN OPENSSH PRIVATE KEY-----").with_team(TEAM);
         let added = VaultData::default().with_key(key.clone());
         assert_eq!(
             secret_changes(&VaultData::default(), &added),
             vec![changed("deploy")]
         );
-        let passphrase = VaultData::default().with_key(SshKey {
-            passphrase: Some("frase".into()),
-            ..key
-        });
+        let passphrase = VaultData::default().with_key(key.with_passphrase("frase"));
         assert_eq!(secret_changes(&added, &passphrase), vec![changed("deploy")]);
     }
 }

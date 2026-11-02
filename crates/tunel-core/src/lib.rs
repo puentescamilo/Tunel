@@ -14,6 +14,8 @@ pub mod sync;
 pub mod template;
 pub mod theme;
 pub mod vault;
+#[cfg(windows)]
+mod windows_acl;
 pub mod workspace;
 
 pub use model::*;

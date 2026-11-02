@@ -137,9 +137,42 @@ pub fn open(
         .map_err(|_| CryptoError::Decryption)
 }
 
+/// `value` en JSON, en un búfer que se borra al soltarse. Primero se mide, para reservar lo
+/// justo: si el búfer creciera, las versiones anteriores se soltarían sin borrar.
+pub fn secret_json<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<Zeroizing<Vec<u8>>, serde_json::Error> {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, value)?;
+    let mut json = Zeroizing::new(Vec::with_capacity(count.0));
+    serde_json::to_writer(&mut *json, value)?;
+    Ok(json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_json_never_grows_its_buffer() {
+        let value = vec!["clave privada".repeat(100); 50];
+        let json = secret_json(&value).unwrap();
+        assert_eq!(
+            json.as_slice(),
+            serde_json::to_vec(&value).unwrap().as_slice()
+        );
+        assert_eq!(json.capacity(), json.len());
+    }
 
     fn key(password: &str, salt: &[u8]) -> MasterKey {
         MasterKey::derive(password.as_bytes(), salt, KdfParams::FAST_FOR_TESTS).unwrap()

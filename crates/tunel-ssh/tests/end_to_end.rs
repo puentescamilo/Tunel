@@ -418,10 +418,7 @@ async fn connect(
 }
 
 fn password_identity() -> Identity {
-    Identity {
-        password: Some(PASSWORD.into()),
-        ..Identity::new("ana", USER)
-    }
+    Identity::new("ana", USER).with_password(PASSWORD)
 }
 
 #[tokio::test]
@@ -514,14 +511,8 @@ async fn changed_host_key_is_reported_as_mismatch_and_can_be_rejected() {
 #[tokio::test]
 async fn encrypted_private_key_authenticates() {
     let port = start_server().await;
-    let key = SshKey {
-        passphrase: Some(CLIENT_PASSPHRASE.into()),
-        ..SshKey::new("cliente", CLIENT_KEY)
-    };
-    let identity = Identity {
-        key: Some(key.id),
-        ..Identity::new("ana", USER)
-    };
+    let key = SshKey::new("cliente", CLIENT_KEY).with_passphrase(CLIENT_PASSPHRASE);
+    let identity = Identity::new("ana", USER).with_key(key.id);
     let f = fixture(port, identity);
     let f = Fixture {
         vault: f.vault.with_key(key),
@@ -546,10 +537,7 @@ async fn keyboard_interactive_prompts_the_user() {
 #[tokio::test]
 async fn wrong_password_fails_authentication() {
     let port = start_server().await;
-    let identity = Identity {
-        password: Some("mala".into()),
-        ..Identity::new("ana", USER)
-    };
+    let identity = Identity::new("ana", USER).with_password("mala");
     let f = fixture(port, identity);
     let (tx, _answers) = auto_answer(None);
     let err = connect(&f, tx).await.err().expect("debía fallar");
@@ -877,10 +865,7 @@ fn security_key_fixture(port: u16, flags: u8) -> Fixture {
         .to_openssh(russh::keys::ssh_key::LineEnding::LF)
         .unwrap();
     let key = SshKey::new("yubikey", private.to_string());
-    let identity = Identity {
-        key: Some(key.id),
-        ..Identity::new("ana", USER)
-    };
+    let identity = Identity::new("ana", USER).with_key(key.id);
     let mut f = fixture(port, identity);
     f.vault = f.vault.with_key(key);
     f

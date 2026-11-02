@@ -12,10 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = std::fs::remove_file(&path);
     let mut vault = UnlockedVault::create(path, &password, KdfParams::RECOMMENDED)?;
 
-    let deploy = Identity {
-        password: Some("demo".into()),
-        ..Identity::new("deploy", "deploy")
-    };
+    let deploy = Identity::new("deploy", "deploy").with_password("demo");
     let root = Identity::new("root", "root");
     let prod = Group {
         identity: Some(deploy.id),

@@ -134,7 +134,7 @@ pub fn seal_meta(
         key: B64.encode(meta.key.0.as_ref()),
         host: meta.host,
     };
-    let plain = Zeroizing::new(serde_json::to_vec(&wire).map_err(|_| SyncCryptoError::Corrupt)?);
+    let plain = crate::crypto::secret_json(&wire).map_err(|_| SyncCryptoError::Corrupt)?;
     team_key.seal_blob(&plain, &context.aad())
 }
 

@@ -171,7 +171,7 @@ impl SignedAuditEvent {
         team: &str,
         epoch: u64,
     ) -> Result<SealedBlob, SyncCryptoError> {
-        let plain = Zeroizing::new(serde_json::to_vec(self).map_err(|_| SyncCryptoError::Corrupt)?);
+        let plain = crate::crypto::secret_json(self).map_err(|_| SyncCryptoError::Corrupt)?;
         key.seal_blob(&plain, &aad(team, epoch))
     }
 
