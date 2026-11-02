@@ -6,7 +6,10 @@ use crate::app::TunelApp;
 use crate::engine::AppEvent;
 use crate::ui::{self, icons};
 use egui::RichText;
-use tunel_core::containers::{Container, Pod, docker_shell_args, kubectl_shell_args};
+use tunel_core::containers::{
+    Container, Pod, docker_remote_shell, docker_shell_args, kubectl_shell_args,
+};
+use tunel_core::{HostId, Protocol};
 
 pub enum ContainersEvent {
     Docker(Result<Vec<Container>, String>),
@@ -14,6 +17,11 @@ pub enum ContainersEvent {
     Pods {
         context: String,
         result: Result<Vec<Pod>, String>,
+    },
+    /// Los contenedores de un servidor, por SSH.
+    Remote {
+        host: HostId,
+        result: Result<Vec<Container>, String>,
     },
 }
 
@@ -24,6 +32,9 @@ pub struct ContainersView {
     pods: Loading<Vec<Pod>>,
     /// Filtra los pods por espacio de nombres o nombre.
     filter: String,
+    /// Servidor cuyos contenedores se miran.
+    remote_host: Option<HostId>,
+    remote: Loading<Vec<Container>>,
 }
 
 impl Default for ContainersView {
@@ -34,6 +45,8 @@ impl Default for ContainersView {
             context: None,
             pods: Loading::Idle,
             filter: String::new(),
+            remote_host: None,
+            remote: Loading::Idle,
         }
     }
 }
@@ -85,6 +98,119 @@ pub fn on_event(app: &mut TunelApp, event: ContainersEvent) {
             view.pods = ready(result);
         }
         ContainersEvent::Pods { .. } => {}
+        ContainersEvent::Remote { host, result } if view.remote_host == Some(host) => {
+            view.remote = ready(result);
+        }
+        ContainersEvent::Remote { .. } => {}
+    }
+}
+
+/// Mira los contenedores de `host`; desde la lista de hosts o desde esta vista.
+pub fn load_remote(app: &mut TunelApp, host: HostId) {
+    let Some(data) = app.data().cloned() else {
+        return;
+    };
+    app.containers.remote_host = Some(host);
+    app.containers.remote = Loading::Busy;
+    if let Err(e) = app.engine.remote_containers(&data, host) {
+        app.containers.remote = Loading::Failed(format!("{e:#}"));
+    }
+}
+
+/// Abre en una pestaña la shell del contenedor `container` del servidor `host`.
+fn open_remote_shell(app: &mut TunelApp, host: HostId, container: &Container) {
+    let Some(data) = app.data().cloned() else {
+        return;
+    };
+    let Some(command) = docker_remote_shell(&container.id) else {
+        return app.notify("Ese identificador de contenedor no es válido");
+    };
+    let server = data
+        .host(host)
+        .map(|h| h.display_name().to_string())
+        .unwrap_or_default();
+    match app.host_session(&data, host, Some(command)) {
+        Ok(mut session) => {
+            session.title = format!("🐳 {} @ {server}", container.name);
+            app.push_tab(crate::app::Tab::Terminal(Box::new(session)));
+        }
+        Err(e) => app.notify(format!("No se pudo abrir la shell: {e:#}")),
+    }
+}
+
+fn remote_section(app: &mut TunelApp, ui: &mut egui::Ui) {
+    let p = ui::pal(ui);
+    let Some(data) = app.data().cloned() else {
+        return;
+    };
+    let mut hosts: Vec<(HostId, String)> = data
+        .hosts
+        .iter()
+        .filter(|h| h.protocol() == Protocol::Ssh)
+        .map(|h| (h.id, h.display_name().to_string()))
+        .collect();
+    hosts.sort_by_key(|(_, name)| name.to_lowercase());
+    let mut chosen = None;
+    let mut reload = false;
+    ui.horizontal(|ui| {
+        ui::section_label(ui, "Docker en un servidor");
+        let current = app
+            .containers
+            .remote_host
+            .and_then(|id| hosts.iter().find(|(h, _)| *h == id))
+            .map_or("(elige un host)", |(_, name)| name.as_str());
+        egui::ComboBox::from_id_salt("docker-servidor")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for (id, name) in &hosts {
+                    if ui
+                        .selectable_label(app.containers.remote_host == Some(*id), name)
+                        .clicked()
+                    {
+                        chosen = Some(*id);
+                    }
+                }
+            });
+        if app.containers.remote_host.is_some() {
+            reload = ui::icon_button(ui, icons::REFRESH, "Volver a consultar").clicked();
+        }
+    });
+    if let Some(host) = chosen.or(app.containers.remote_host.filter(|_| reload)) {
+        load_remote(app, host);
+    }
+    let Some(host) = app.containers.remote_host else {
+        ui.label(
+            RichText::new("Elige un host SSH para ver sus contenedores, por la misma conexión.")
+                .color(p.muted),
+        );
+        return;
+    };
+    if !state_line(ui, &app.containers.remote) {
+        return;
+    }
+    let Loading::Ready(containers) = &app.containers.remote else {
+        return;
+    };
+    if containers.is_empty() {
+        ui.label(RichText::new("No hay contenedores en marcha.").color(p.muted));
+    }
+    let mut open = None;
+    for container in containers {
+        let detail = format!("{} · {}", container.image, container.status);
+        row(
+            ui,
+            ("remoto", &container.id),
+            &container.name,
+            &detail,
+            |ui| {
+                if ui::secondary_button(ui, &ui::with_icon(icons::TERMINAL, "Shell")).clicked() {
+                    open = Some(container.clone());
+                }
+            },
+        );
+    }
+    if let Some(container) = open {
+        open_remote_shell(app, host, &container);
     }
 }
 
@@ -267,7 +393,8 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
     ui::page_header(
         ui,
         "Contenedores",
-        "Contenedores de Docker y pods de Kubernetes de este equipo, con docker y kubectl.",
+        "Contenedores de Docker y pods de Kubernetes de este equipo, y los de Docker en tus \
+         servidores SSH.",
         |_| {},
     );
     egui::ScrollArea::vertical()
@@ -276,5 +403,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             docker_section(app, ui);
             ui.add_space(16.0);
             kubernetes_section(app, ui);
+            ui.add_space(16.0);
+            remote_section(app, ui);
         });
 }

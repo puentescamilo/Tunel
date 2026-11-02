@@ -18,6 +18,9 @@ pub struct ShellOptions {
     pub x11_display: Option<String>,
     /// Script que se envía nada más abrir la shell (snippet de inicio).
     pub startup_script: Option<String>,
+    /// Orden que se ejecuta en lugar de la shell, con la misma terminal (por ejemplo
+    /// `docker exec -it …`). Con ella no se envía el script de inicio.
+    pub command: Option<String>,
 }
 
 /// Abre la shell y la atiende hasta que se cierre; pensado para ejecutarse en una tarea.
@@ -68,8 +71,17 @@ pub async fn run_shell(
             &[],
         )
         .await?;
-    channel.request_shell(true).await?;
-    if let Some(script) = options.startup_script.filter(|s| !s.is_empty()) {
+    let startup = match &options.command {
+        Some(command) => {
+            channel.exec(true, command.as_str()).await?;
+            None
+        }
+        None => {
+            channel.request_shell(true).await?;
+            options.startup_script
+        }
+    };
+    if let Some(script) = startup.filter(|s| !s.is_empty()) {
         let script = if script.ends_with('\n') {
             script
         } else {

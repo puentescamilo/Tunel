@@ -105,7 +105,11 @@ impl Tab {
         use tunel_core::workspace::{SavedTab, SavedTabKind};
         let kind = match self {
             // Tampoco una shell en un contenedor: puede que ya no exista.
-            Tab::Terminal(t) if t.is_watching() || t.program.is_some() => return None,
+            Tab::Terminal(t)
+                if t.is_watching() || t.program.is_some() || t.remote_command.is_some() =>
+            {
+                return None;
+            }
             Tab::Terminal(t) => match t.host {
                 Some(host) => SavedTabKind::Host { host },
                 None => SavedTabKind::Local,
@@ -462,7 +466,7 @@ impl TunelApp {
 
     /// Abre `host` usando `data`, que puede incluir hosts temporales que no están en la bóveda.
     pub fn open_host_in(&mut self, data: &VaultData, host: HostId) {
-        match self.host_session(data, host) {
+        match self.host_session(data, host, None) {
             Ok(session) => self.push_tab(Tab::Terminal(Box::new(session))),
             Err(e) => self.notify(format!("No se pudo abrir la sesión: {e:#}")),
         }
@@ -474,10 +478,11 @@ impl TunelApp {
         &mut self,
         data: &VaultData,
         host: HostId,
+        command: Option<String>,
     ) -> anyhow::Result<TerminalSession> {
-        let mut session = self
-            .engine
-            .open_host(data, host, DEFAULT_COLS, DEFAULT_ROWS)?;
+        let size = (DEFAULT_COLS, DEFAULT_ROWS);
+        let mut session = self.engine.open_host(data, host, size, command.clone())?;
+        session.remote_command = command;
         crate::audit::connected(self, data, host);
         match crate::recording::start(self, data, host, (DEFAULT_COLS, DEFAULT_ROWS)) {
             Ok(Some((recorder, upload))) => {
@@ -532,11 +537,15 @@ impl TunelApp {
         }
         let host = session.host;
         let program = session.program.clone();
+        let command = session.remote_command.clone();
         let title = session.title.clone();
         let data = self.data()?.clone();
         let scrollback = data.settings.scrollback_lines;
         Some(match (host, program) {
-            (Some(host), _) => self.host_session(&data, host),
+            (Some(host), _) => self.host_session(&data, host, command).map(|mut s| {
+                s.title = title.clone();
+                s
+            }),
             (None, Some(spec)) => {
                 self.engine
                     .open_program(title, &spec, scrollback)
