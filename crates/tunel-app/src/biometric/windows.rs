@@ -102,7 +102,7 @@ pub fn wrapping_key(enrollment: &Enrollment, create: bool) -> Result<WrappingKey
     Sha256::new()
         .chain_update(DOMAIN)
         .chain_update(&signature[..])
-        .finalize_into(key.as_mut().into());
+        .finalize_into((&mut *key).into());
     signature[..].zeroize();
     Ok(key)
 }
