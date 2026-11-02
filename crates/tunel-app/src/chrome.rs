@@ -2,6 +2,7 @@
 
 use crate::app::{Section, TunelApp};
 use crate::ui::{self, icons};
+use crate::updates::install::InstallStatus;
 use crate::updates::{Update, UpdateStatus, current_version};
 use egui::{Align2, CornerRadius, FontId, RichText, Sense, Vec2};
 
@@ -84,7 +85,7 @@ fn rail(app: &mut TunelApp, ui: &mut egui::Ui) {
                     app.lock_vault();
                 }
                 if let Some(update) = app.updates.available().cloned() {
-                    let tooltip = format!("Versión {} disponible: descargar", update.version);
+                    let tooltip = format!("Versión {} disponible: actualizar", update.version);
                     let response = ui::rail_item(ui, icons::DOWNLOAD, &tooltip, false);
                     ui::status_dot(
                         ui,
@@ -194,13 +195,48 @@ fn update_card(app: &mut TunelApp, ui: &mut egui::Ui, update: &Update) {
                 .size(12.0)
                 .color(p.muted),
         );
+        let install = update
+            .installer
+            .is_some()
+            .then(|| app.updates.install.status.clone());
+        if let Some(InstallStatus::Failed(error)) = &install {
+            ui.label(
+                RichText::new(format!("No se pudo actualizar: {error}"))
+                    .size(12.0)
+                    .color(p.danger),
+            );
+        }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, &ui::with_icon(icons::DOWNLOAD, "Descargar"))
-                .on_hover_text("Descarga el instalador para este equipo")
-                .clicked()
-            {
-                download(app, ui.ctx(), update);
+            match &install {
+                Some(InstallStatus::Downloading) => {
+                    ui.add(egui::Spinner::new().size(14.0));
+                    ui.label(RichText::new("Descargando…").size(12.0).color(p.muted));
+                }
+                Some(InstallStatus::Ready(path)) => {
+                    if ui::primary_button(ui, &ui::with_icon(icons::DOWNLOAD, "Abrir instalador"))
+                        .on_hover_text(path.display().to_string())
+                        .clicked()
+                    {
+                        open_installer(app, path);
+                    }
+                }
+                _ => {
+                    let (label, hover) = if install.is_some() {
+                        (
+                            "Actualizar",
+                            "Descarga el instalador, comprueba su firma y lo abre",
+                        )
+                    } else {
+                        ("Descargar", "Descarga el instalador para este equipo")
+                    };
+                    if ui::primary_button(ui, &ui::with_icon(icons::DOWNLOAD, label))
+                        .on_hover_text(hover)
+                        .clicked()
+                    {
+                        download(app, ui.ctx(), update);
+                    }
+                }
             }
             if ui
                 .link(RichText::new("Novedades").size(12.0).color(p.accent))
@@ -209,13 +245,54 @@ fn update_card(app: &mut TunelApp, ui: &mut egui::Ui, update: &Update) {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(&update.notes_url));
             }
         });
+        if matches!(install, Some(InstallStatus::Failed(_)))
+            && ui
+                .link(
+                    RichText::new("Descargar en el navegador")
+                        .size(12.0)
+                        .color(p.accent),
+                )
+                .clicked()
+        {
+            open_in_browser(app, ui.ctx(), update);
+        }
     });
 }
 
-/// Abre la descarga en el navegador: el usuario ejecuta el instalador por su cuenta.
+/// Descarga y comprueba el instalador si la versión lo permite; si no, abre la descarga en
+/// el navegador.
 fn download(app: &mut TunelApp, ctx: &egui::Context, update: &Update) {
+    let Some(installer) = update.installer.clone() else {
+        return open_in_browser(app, ctx, update);
+    };
+    if let InstallStatus::Ready(path) = app.updates.install.status.clone() {
+        return open_installer(app, &path);
+    }
+    let engine = &app.engine;
+    app.updates
+        .install
+        .start(|| engine.download_update(installer));
+    app.notify(format!("Descargando Túnel {}…", update.version));
+}
+
+/// El usuario ejecuta el instalador por su cuenta.
+fn open_in_browser(app: &mut TunelApp, ctx: &egui::Context, update: &Update) {
     ctx.open_url(egui::OpenUrl::new_tab(&update.download_url));
     app.notify("Abre el instalador descargado para actualizar Túnel");
+}
+
+/// Abre el instalador ya comprobado y dice qué hacer después.
+pub fn open_installer(app: &mut TunelApp, path: &std::path::Path) {
+    match crate::updates::install::open(path) {
+        Ok(()) => app.notify(format!(
+            "Instalador comprobado: {}",
+            crate::updates::install::next_step(path)
+        )),
+        Err(e) => app.notify(format!(
+            "El instalador está en {}, pero no se pudo abrir: {e}",
+            path.display()
+        )),
+    }
 }
 
 /// Versión instalada y estado de la última comprobación; un clic vuelve a comprobar.

@@ -105,9 +105,15 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 ## Instalación
 
 Túnel muestra su versión al pie del menú lateral. Cada 12 horas pregunta a GitHub si hay
-una versión nueva y, si la hay, avisa con un botón **Descargar** que abre en el navegador el
-instalador de tu sistema. Un clic sobre la versión vuelve a comprobarlo. Túnel no instala nada
-por su cuenta: la actualización se hace abriendo el instalador descargado.
+una versión nueva y, si la hay, avisa con un botón **Actualizar**. Un clic sobre la versión
+vuelve a comprobarlo.
+
+**Actualizar** descarga el instalador de tu sistema en la carpeta Descargas, comprueba que es
+el publicado y lo abre; el resto lo haces tú, como la primera vez. La comprobación: el
+SHA-256 del instalador tiene que estar en `SHA256SUMS.txt`, y esa lista tiene que llevar la
+firma Ed25519 de quien publica Túnel, cuya clave pública va dentro de la app. Sin la clave
+privada nadie puede colar un instalador, aunque controle la descarga. Si la versión no trae
+la lista firmada, o algo no cuadra, el botón abre la descarga en el navegador.
 
 ### macOS
 
@@ -216,6 +222,21 @@ cargo packager --release -p tunel-app --formats wix,nsis
 ```
 
 cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` en `dist/`.
+
+### Firmar la versión
+
+Con los cuatro paquetes en `dist/`, en el equipo que tiene la clave privada:
+
+```bash
+./scripts/firmar-version.sh 0.8.1
+```
+
+Escribe `SHA256SUMS.txt` con los cuatro, lo firma con `ssh-keygen -Y sign` en
+`SHA256SUMS.txt.sig` y comprueba la firma con la clave pública que lleva la app. Los dos
+archivos se suben a la versión junto a los paquetes. La clave privada se lee de
+`~/.config/tunel-publicacion/firma_ed25519` o de `$TUNEL_CLAVE_FIRMA`; si se pierde, las apps
+ya instaladas no aceptarán más actualizaciones automáticas y habrá que instalar a mano la
+versión que traiga una clave nueva.
 
 ## Sincronización entre equipos
 
