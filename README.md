@@ -105,7 +105,10 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   **Tab** sigue siendo el de la shell. Solo cuenta lo que el servidor muestra en pantalla, así
   que una contraseña escrita sin eco no se guarda, y no interviene en vim, less o top. El
   historial va cifrado junto a la bóveda, solo en ese equipo; lo que empieza por un espacio no
-  se recuerda, y en **Ajustes → Terminal** se desactiva o se borra.
+  se recuerda, y en **Ajustes → Terminal** se desactiva o se borra. Viene activado. Ojo: también
+  se recuerda lo que escribes en programas que repiten lo tecleado sin pantalla completa, como
+  `mysql`, `psql`, `python` o un `ssh` a otro servidor, y las contraseñas que pases como
+  argumento (`mysql -pclave`); empiézalos por un espacio si no quieres que se guarden.
 
 ![Túneles](docs/screenshots/tuneles.png)
 

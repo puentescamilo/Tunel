@@ -10,6 +10,8 @@ name = "tunel"
 path = "src/main.rs"
 
 [dependencies]
+# Para no sugerir lo que no cabe en una celda (caracteres anchos).
+unicode-width = "0.2"
 gethostname = "1.1"
 # Fechas del registro de auditoría en la hora local.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

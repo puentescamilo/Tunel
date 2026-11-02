@@ -6,9 +6,11 @@
 //! Tab, búsqueda con Ctrl+R) anula la línea hasta el siguiente Enter.
 
 use crate::app::TunelApp;
+use std::time::{Duration, Instant};
 use tunel_core::history::CommandHistory;
 use tunel_core::{HostId, Snippet};
 use tunel_term::Screen;
+use unicode_width::UnicodeWidthChar;
 
 /// Lo que hizo el usuario, en lo que importa para seguir la línea.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,8 +77,16 @@ impl LineTracker {
             // Al salir del programa vuelve la shell con una línea vacía.
             self.reset();
         }
-        if self.known && !self.line.is_empty() && before_cursor(screen).ends_with(&self.line) {
+        if !self.known || self.line.is_empty() {
+            return;
+        }
+        let before = before_cursor(screen);
+        if before.ends_with(&self.line) {
             self.echoed = self.line.len();
+        } else if !before.ends_with(&self.line[..self.echoed]) {
+            // Lo que ya se veía desapareció: la línea cambió por otro lado (otra terminal
+            // escribió en esta, o la shell la redibujó).
+            self.known = false;
         }
     }
 
@@ -120,9 +130,24 @@ pub struct Source<'a> {
     pub host: Option<HostId>,
 }
 
+/// Lo que falta para completar `typed`, que es lo que había escrito al calcularla.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Suggestion {
+    pub typed: String,
+    pub rest: String,
+}
+
 impl Source<'_> {
-    pub fn suggest(&self, typed: &str) -> Option<String> {
-        self.history.suggest(self.host, typed, self.snippets)
+    /// Solo si cabe entera en la fila sin tapar nada: lo que se acepta con → es lo que se ve.
+    pub fn suggest(&self, typed: &str, screen: &Screen) -> Option<Suggestion> {
+        let (_, col) = screen.cursor?;
+        let rest = self.history.suggest(self.host, typed, self.snippets)?;
+        let narrow = rest.chars().all(|c| c.width() == Some(1));
+        let fits = rest.chars().count() < screen.cols.saturating_sub(col);
+        (narrow && fits && blank_after_cursor(screen)).then(|| Suggestion {
+            typed: typed.to_string(),
+            rest,
+        })
     }
 }
 
@@ -140,7 +165,11 @@ pub fn load(app: &mut TunelApp) {
         .unwrap_or_default();
 }
 
-/// Anota los comandos que se ejecutaron en `host` y guarda el historial.
+/// Cada cuánto, como mucho, se guarda el historial: cifrar y escribir en cada Enter
+/// pararía la interfaz en un disco lento.
+const SAVE_DELAY: Duration = Duration::from_secs(2);
+
+/// Anota los comandos que se ejecutaron en `host`; se guardan poco después (ver [`tick`]).
 pub fn record(app: &mut TunelApp, host: Option<HostId>, commands: &[String]) {
     if commands.is_empty() || !app.data().is_some_and(|d| d.settings.autocomplete) {
         return;
@@ -148,20 +177,43 @@ pub fn record(app: &mut TunelApp, host: Option<HostId>, commands: &[String]) {
     let history = commands
         .iter()
         .fold(app.history.clone(), |h, c| h.record(host, c));
-    if history == app.history {
+    if history != app.history {
+        app.history = history;
+        app.history_changed.get_or_insert_with(Instant::now);
+    }
+}
+
+/// En cada fotograma: guarda el historial si cambió hace un rato.
+pub fn tick(app: &mut TunelApp) {
+    if app
+        .history_changed
+        .is_some_and(|t| t.elapsed() >= SAVE_DELAY)
+    {
+        save(app);
+    }
+}
+
+/// Guarda ya lo pendiente: al bloquear la bóveda o al cerrar Túnel.
+pub fn save(app: &mut TunelApp) {
+    if app.history_changed.take().is_none() {
         return;
     }
-    if let Some(vault) = app.vault.as_ref()
-        && let Err(e) = vault.save_history(&history)
-    {
+    let Some(vault) = app.vault.as_ref() else {
+        return;
+    };
+    if let Err(e) = vault.save_history(&app.history) {
         tracing::warn!(error = %e, "no se pudo guardar el historial de comandos");
+        // Una vez por sesión: en un disco lleno se repetiría en cada comando.
+        if !std::mem::replace(&mut app.history_failed, true) {
+            app.notify(format!("No se pudo guardar el historial de comandos: {e}"));
+        }
     }
-    app.history = history;
 }
 
 /// Borra el historial de este equipo, en memoria y en disco.
 pub fn clear(app: &mut TunelApp) -> Result<(), tunel_core::StoreError> {
     app.history = CommandHistory::default();
+    app.history_changed = None;
     app.vault.as_ref().map_or(Ok(()), |v| v.delete_history())
 }
 
@@ -266,5 +318,42 @@ mod tests {
         assert!(blank_after_cursor(&screen("$ git")));
         // fish pinta su propia sugerencia y deja el cursor detrás de lo escrito.
         assert!(!blank_after_cursor(&screen("$ git status\x1b[6D")));
+    }
+
+    #[test]
+    fn a_line_changed_from_elsewhere_is_forgotten() {
+        let mut tracker = LineTracker::new();
+        typed(&mut tracker, "ab");
+        tracker.observe(&screen("$ ab"), false);
+        // Otra terminal marcada escribió y ejecutó algo en esta: ya no se ve «ab».
+        tracker.observe(&screen("$ ab\r\nhecho\r\n$ "), false);
+        typed(&mut tracker, "x");
+        tracker.observe(&screen("$ ab\r\nhecho\r\n$ x"), false);
+        assert_eq!(tracker.typed(), None);
+        assert_eq!(tracker.edit(Edit::Enter), None);
+    }
+
+    fn suggestion(history: &CommandHistory, typed: &str, screen: &Screen) -> Option<String> {
+        let source = Source {
+            history,
+            snippets: &[],
+            host: None,
+        };
+        source.suggest(typed, screen).map(|s| s.rest)
+    }
+
+    #[test]
+    fn a_suggestion_that_does_not_fit_or_has_wide_characters_is_not_offered() {
+        let history = CommandHistory::default()
+            .record(None, "echo corto")
+            .record(None, &format!("cat {}", "x".repeat(60)))
+            .record(None, "echo 日本");
+        assert_eq!(
+            suggestion(&history, "echo c", &screen("$ echo c")).as_deref(),
+            Some("orto")
+        );
+        assert_eq!(suggestion(&history, "cat", &screen("$ cat")), None);
+        // El más reciente lleva caracteres anchos: no se sugiere nada.
+        assert_eq!(suggestion(&history, "echo ", &screen("$ echo ")), None);
     }
 }

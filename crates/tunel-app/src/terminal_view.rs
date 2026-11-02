@@ -103,7 +103,38 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
     let events = ui.input(|i| i.events.clone());
     let mut output = Vec::new();
     let mut commands = Vec::new();
+    // Solo se sigue lo que se escribe en una terminal propia y viva: no al mirar la sesión
+    // de otra persona, ni en una grabación o una sesión cerrada.
+    let own = session.can_broadcast() && session.playback.is_none();
+    if !own {
+        session.line = crate::autocomplete::LineTracker::new();
+        session.suggestion = None;
+    }
     for event in events {
+        // → acepta la sugerencia solo si sigue siendo la de lo que hay escrito.
+        let accepted = match &event {
+            egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.is_none() => session
+                .suggestion
+                .take()
+                .filter(|s| session.line.typed() == Some(s.typed.as_str())),
+            _ => None,
+        };
+        if let Some(suggestion) = accepted {
+            session.line.edit(Edit::Text(&suggestion.rest));
+            output.extend(suggestion.rest.into_bytes());
+            continue;
+        }
+        if matches!(
+            event,
+            egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Key { pressed: true, .. }
+        ) {
+            session.suggestion = None;
+        }
         match event {
             egui::Event::Text(text) => {
                 session.line.edit(Edit::Text(&text));
@@ -125,15 +156,6 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
                 ..
             } => {
                 if is_app_shortcut(&modifiers) {
-                    continue;
-                }
-                // → acepta la sugerencia en lugar de mover el cursor.
-                if key == egui::Key::ArrowRight
-                    && modifiers.is_none()
-                    && let Some(rest) = session.suggestion.take()
-                {
-                    session.line.edit(Edit::Text(&rest));
-                    output.extend(rest.into_bytes());
                     continue;
                 }
                 let Some(mapped) = map_key(key) else { continue };
@@ -160,7 +182,7 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
         session.suggestion = None;
         session.send_typed(output);
     }
-    commands
+    if own { commands } else { Vec::new() }
 }
 
 fn cell_at(rect: Rect, m: CellMetrics, pos: Pos2, screen: &Screen) -> (usize, usize) {
@@ -269,7 +291,8 @@ fn paint(
 /// Grosor de la barra y del subrayado del cursor, en puntos.
 const CURSOR_LINE: f32 = 2.0;
 
-/// El resto del comando sugerido, tenue, a partir del cursor y sin salirse de la fila.
+/// El resto del comando sugerido, tenue, a partir del cursor (cabe en la fila: ver
+/// [`Source::suggest`]).
 #[allow(clippy::too_many_arguments)]
 fn paint_suggestion(
     painter: &egui::Painter,
@@ -282,8 +305,6 @@ fn paint_suggestion(
     col: usize,
     rest: &str,
 ) {
-    let room = screen.cols.saturating_sub(col);
-    let text: String = rest.chars().take(room).collect();
     let fg = tunel_term::palette::rgb(theme.foreground);
     let bg = screen.background;
     let mix = |a: u8, b: u8| ((u16::from(a) * 9 + u16::from(b) * 11) / 20) as u8;
@@ -295,7 +316,7 @@ fn paint_suggestion(
             origin.y + row as f32 * m.height,
         ),
         Align2::LEFT_TOP,
-        text,
+        rest,
         font.clone(),
         color,
     );
@@ -488,10 +509,19 @@ pub fn show(
         .observe(&screen, session.emulator.input_modes().alt_screen);
     session.suggestion = source
         .filter(|_| focused && !screen.scrolled_back && session.can_broadcast())
-        .filter(|_| crate::autocomplete::blank_after_cursor(&screen))
-        .and_then(|source| source.suggest(session.line.typed()?));
-    if let (Some(rest), Some((row, col))) = (&session.suggestion, screen.cursor) {
-        paint_suggestion(ui.painter(), rect, m, &font, &screen, theme, row, col, rest);
+        .and_then(|source| source.suggest(session.line.typed()?, &screen));
+    if let (Some(suggestion), Some((row, col))) = (&session.suggestion, screen.cursor) {
+        paint_suggestion(
+            ui.painter(),
+            rect,
+            m,
+            &font,
+            &screen,
+            theme,
+            row,
+            col,
+            &suggestion.rest,
+        );
     }
     if screen.scrolled_back {
         ui.painter().text(

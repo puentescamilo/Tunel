@@ -293,11 +293,13 @@ impl UnlockedVault {
             Some(workspace) => self.save_workspace(workspace),
             None => self.delete_workspace(),
         };
-        // El historial tampoco: es lo que se puede perder.
-        let _ = match &history {
+        // El historial tampoco, pero se avisa: el anterior queda cifrado con la otra clave.
+        if let Err(e) = match &history {
             Some(history) => self.save_history(history),
             None => self.delete_history(),
-        };
+        } {
+            eprintln!("aviso: no se pudo volver a cifrar el historial de comandos: {e}");
+        }
         match &sync {
             Some(sync) => self.save_sync(sync),
             None => self.delete_sync(),

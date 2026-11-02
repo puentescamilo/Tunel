@@ -39,6 +39,7 @@ impl CommandHistory {
         if command.trim().is_empty()
             || command.starts_with(char::is_whitespace)
             || command.chars().count() > MAX_COMMAND_LEN
+            || command.chars().any(char::is_control)
         {
             return self.clone();
         }
@@ -72,14 +73,17 @@ impl CommandHistory {
         let from_snippets = snippets
             .iter()
             .map(|s| s.script.trim())
-            .filter(|s| !s.contains('\n') && !s.contains("{{"));
+            .filter(|s| !s.contains("{{"));
         let elsewhere = self
             .entries
             .iter()
             .filter(|e| e.host != host)
             .map(|e| e.command.as_str());
+        // Sin caracteres de control: un salto de línea o un Escape en un snippet (o en un
+        // historial manipulado) ejecutaría algo al aceptar la sugerencia.
         here.chain(from_snippets)
             .chain(elsewhere)
+            .filter(|c| !c.chars().any(char::is_control))
             .find(|c| c.len() > typed.len() && c.starts_with(typed))
             .map(|c| c[typed.len()..].to_string())
     }
@@ -138,6 +142,18 @@ mod tests {
             Some("reload nginx")
         );
         assert_eq!(h.suggest(Some(web), "systemctl d", &snippets), None);
+    }
+
+    #[test]
+    fn nothing_with_control_characters_is_suggested_or_recorded() {
+        let snippets = [
+            Snippet::new("retorno", "ls\rrm -rf ~/x"),
+            Snippet::new("escape", "ls \x1b[31m"),
+            Snippet::new("tabulador", "ls\t-la"),
+        ];
+        let h = CommandHistory::default();
+        assert_eq!(h.suggest(None, "ls", &snippets), None);
+        assert!(h.record(None, "ls\x03").is_empty());
     }
 
     #[test]

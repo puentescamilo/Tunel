@@ -6195,6 +6195,7 @@ dependencies = [
  "tunel-ssh",
  "tunel-sync",
  "tunel-term",
+ "unicode-width 0.2.2",
  "uuid",
  "windows",
  "winresource",

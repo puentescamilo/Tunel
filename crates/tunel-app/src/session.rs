@@ -56,7 +56,7 @@ pub struct TerminalSession {
     /// Lo que se está escribiendo, para el autocompletado.
     pub line: crate::autocomplete::LineTracker,
     /// Lo que falta del comando sugerido, si se está mostrando.
-    pub suggestion: Option<String>,
+    pub suggestion: Option<crate::autocomplete::Suggestion>,
 }
 
 impl TerminalSession {

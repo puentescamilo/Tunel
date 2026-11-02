@@ -187,6 +187,10 @@ pub struct TunelApp {
     pub saved_workspace: Option<tunel_core::workspace::Workspace>,
     /// Comandos ejecutados en este equipo, para el autocompletado.
     pub history: tunel_core::history::CommandHistory,
+    /// Desde cuándo hay comandos sin guardar.
+    pub history_changed: Option<Instant>,
+    /// Ya se avisó de que no se pudo guardar el historial.
+    pub history_failed: bool,
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
     pub updates: crate::updates::UpdateChecker,
@@ -392,6 +396,8 @@ impl TunelApp {
             snippet_values: HashMap::new(),
             saved_workspace: None,
             history: Default::default(),
+            history_changed: None,
+            history_failed: false,
             notices: Vec::new(),
             sync: Default::default(),
             updates: Default::default(),
@@ -460,6 +466,7 @@ impl TunelApp {
         self.sync = Default::default();
         self.live = Default::default();
         self.saved_workspace = None;
+        crate::autocomplete::save(self);
         self.history = Default::default();
         self.snippet_prompt = None;
         self.snippet_values.clear();
@@ -861,6 +868,10 @@ fn status_message(status: &SessionStatus) -> Option<String> {
 }
 
 impl eframe::App for TunelApp {
+    fn on_exit(&mut self) {
+        crate::autocomplete::save(self);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.vault.is_none() {
@@ -876,6 +887,7 @@ impl eframe::App for TunelApp {
         self.process_background();
         crate::workspace::tick(self);
         crate::biometric::tick(self);
+        crate::autocomplete::tick(self);
         crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
         let wait = match self.active.and_then(|i| self.tabs.get(i)) {
