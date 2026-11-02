@@ -620,12 +620,28 @@ async fn send(socket: &mut WebSocket, message: Message) -> bool {
     )
 }
 
+/// Cuánto se espera a que el cliente confirme el cierre.
+const CLOSE_WAIT: Duration = Duration::from_secs(2);
+
+/// Cierra con `code` y espera la confirmación del cliente, como pide RFC 6455. Si se soltara
+/// la conexión enseguida, lo que el cliente mande mientras tanto (un pong atrasado) haría que
+/// Linux la reiniciara, y el cliente perdería el motivo del cierre.
 async fn close(socket: &mut WebSocket, (code, reason): CloseReason) {
     let frame = CloseFrame {
         code,
         reason: Utf8Bytes::from_static(reason),
     };
-    let _ = send(socket, Message::Close(Some(frame))).await;
+    if !send(socket, Message::Close(Some(frame))).await {
+        return;
+    }
+    let _ = tokio::time::timeout(CLOSE_WAIT, async {
+        while let Some(Ok(message)) = socket.recv().await {
+            if matches!(message, Message::Close(_)) {
+                break;
+            }
+        }
+    })
+    .await;
 }
 
 #[derive(Debug, Clone, Copy)]
