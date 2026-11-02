@@ -20,7 +20,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 5c | Avisar de claves débiles | 0.8.0 | ✅ |
 | 2a | Actualización automática con paquetes verificados | 0.8.1 | hecha, sin publicar |
 | 3a | Registro de auditoría de los Teams | 0.9.0 | hecha, sin publicar |
-| 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | depende de 3a |
+| 3b | Grabación de sesiones (opcional por Team) | 0.9.0 | en curso |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor

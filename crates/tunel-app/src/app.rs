@@ -451,16 +451,30 @@ impl TunelApp {
 
     /// Abre `host` usando `data`, que puede incluir hosts temporales que no están en la bóveda.
     pub fn open_host_in(&mut self, data: &VaultData, host: HostId) {
-        match self
-            .engine
-            .open_host(data, host, DEFAULT_COLS, DEFAULT_ROWS)
-        {
-            Ok(session) => {
-                crate::audit::connected(self, data, host);
-                self.push_tab(Tab::Terminal(Box::new(session)));
-            }
+        match self.host_session(data, host) {
+            Ok(session) => self.push_tab(Tab::Terminal(Box::new(session))),
             Err(e) => self.notify(format!("No se pudo abrir la sesión: {e:#}")),
         }
+    }
+
+    /// Una sesión nueva con `host`. Si es de un Team, se anota en su registro y, si el
+    /// Team lo pide, se graba.
+    pub fn host_session(
+        &mut self,
+        data: &VaultData,
+        host: HostId,
+    ) -> anyhow::Result<TerminalSession> {
+        let mut session = self
+            .engine
+            .open_host(data, host, DEFAULT_COLS, DEFAULT_ROWS)?;
+        crate::audit::connected(self, data, host);
+        if let Some((recorder, upload)) =
+            crate::recording::start(self, data, host, (DEFAULT_COLS, DEFAULT_ROWS))
+        {
+            session.recorder = Some(recorder);
+            self.engine.upload_recording(upload);
+        }
+        Ok(session)
     }
 
     pub fn open_local(&mut self) {
@@ -507,9 +521,7 @@ impl TunelApp {
         let data = self.data()?.clone();
         let scrollback = data.settings.scrollback_lines;
         Some(match host {
-            Some(host) => self
-                .engine
-                .open_host(&data, host, DEFAULT_COLS, DEFAULT_ROWS),
+            Some(host) => self.host_session(&data, host),
             None => self
                 .engine
                 .open_local(DEFAULT_COLS, DEFAULT_ROWS, scrollback),
@@ -556,7 +568,7 @@ impl TunelApp {
         self.push_tab(tab);
     }
 
-    fn push_tab(&mut self, tab: Tab) {
+    pub fn push_tab(&mut self, tab: Tab) {
         self.tabs.push(tab);
         self.active = Some(self.tabs.len() - 1);
     }
@@ -631,6 +643,15 @@ impl TunelApp {
                 AppEvent::KeyInstalled { host, result } => {
                     self.notify(crate::editor::installed_message(&host, &result))
                 }
+                AppEvent::Notice(message) => self.notify(message),
+                AppEvent::RecordingsLoaded { team, result } => {
+                    views::recordings::on_loaded(self, team, result)
+                }
+                AppEvent::RecordingOpened {
+                    title,
+                    export,
+                    result,
+                } => views::recordings::on_opened(self, title, export, result),
                 AppEvent::AuditLoaded { team, more, result } => {
                     views::team_audit::on_loaded(self, team, more, result)
                 }
@@ -704,6 +725,12 @@ impl TunelApp {
                 }
                 if session.live.is_some() {
                     live_action = views::live::bar(ui, session);
+                }
+                if let Some(recorder) = &session.recorder {
+                    views::recordings::banner(ui, &recorder.team_name);
+                }
+                if session.playback.is_some() {
+                    views::recordings::player_bar(ui, session);
                 }
                 if let Some(message) = status_message(&session.status) {
                     let failed = matches!(session.status, SessionStatus::Failed(_));
@@ -782,6 +809,14 @@ impl eframe::App for TunelApp {
         crate::workspace::tick(self);
         crate::fonts::tick(self, &ctx);
         let wait = self.updates.wait();
+        let wait = match self.active.and_then(|i| self.tabs.get(i)) {
+            Some(Tab::Terminal(s)) => s
+                .playback
+                .as_ref()
+                .and_then(|p| p.wait())
+                .map_or(wait, |w| w.min(wait)),
+            _ => wait,
+        };
         let wait = if crate::live::active(self) {
             wait.min(crate::live::POLL)
         } else {

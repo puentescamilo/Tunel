@@ -227,6 +227,8 @@ fn team_details(app: &mut TunelApp, ui: &mut egui::Ui, team: &TeamLocal, busy: b
         ui.add_space(8.0);
         super::team_audit::section(app, ui, team);
         ui.add_space(8.0);
+        super::recordings::section(app, ui, team, busy);
+        ui.add_space(8.0);
     }
     let confirm = app.sync.teams.confirm.clone();
     ui.horizontal(|ui| {

@@ -33,6 +33,8 @@ services:
       TUNEL_OIDC_ID_CLIENTE: ${TUNEL_OIDC_ID_CLIENTE:-}
       TUNEL_OIDC_SECRETO: ${TUNEL_OIDC_SECRETO:-}
       TUNEL_SOLO_PROVEEDORES: ${TUNEL_SOLO_PROVEEDORES:-0}
+      TUNEL_GRABACIONES_GB: ${TUNEL_GRABACIONES_GB:-2}
+      TUNEL_GRABACIONES_DIAS: ${TUNEL_GRABACIONES_DIAS:-90}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

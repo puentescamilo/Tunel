@@ -132,6 +132,27 @@ fn make_room(
     Ok(())
 }
 
+/// Todas las claves anteriores guardadas del Team, de la más nueva a la más vieja.
+pub(crate) fn previous_keys(
+    conn: &rusqlite::Connection,
+    team: &str,
+) -> Result<Vec<PreviousKey>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT epoch, blob FROM team_previous_keys WHERE team_id = ?1 ORDER BY epoch DESC",
+    )?;
+    let rows = stmt.query_map(params![team], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.map(|row| {
+        let (epoch, blob) = row?;
+        Ok(PreviousKey {
+            epoch: epoch as u64,
+            blob: serde_json::from_str(&blob)?,
+        })
+    })
+    .collect()
+}
+
 impl Db {
     pub async fn append_audit(
         &self,
@@ -220,23 +241,7 @@ impl Db {
             };
             let more = entries.len() > limit;
             entries.truncate(limit);
-            let previous_keys = {
-                let mut stmt = conn.prepare(
-                    "SELECT epoch, blob FROM team_previous_keys WHERE team_id = ?1
-                     ORDER BY epoch DESC",
-                )?;
-                let rows = stmt.query_map(params![team], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })?;
-                rows.map(|row| {
-                    let (epoch, blob) = row?;
-                    Ok(PreviousKey {
-                        epoch: epoch as u64,
-                        blob: serde_json::from_str(&blob)?,
-                    })
-                })
-                .collect::<Result<_, DbError>>()?
-            };
+            let previous_keys = previous_keys(conn, &team)?;
             Ok(AuditPage {
                 entries,
                 previous_keys,

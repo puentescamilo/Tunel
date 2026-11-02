@@ -126,7 +126,7 @@ pub struct AuditLog {
 }
 
 /// Las claves del Team por época, desde la actual hacia atrás mientras la cadena siga.
-fn keys_by_epoch(team: &TeamLocal, previous: &[PreviousKey]) -> BTreeMap<u64, VaultKey> {
+pub(crate) fn keys_by_epoch(team: &TeamLocal, previous: &[PreviousKey]) -> BTreeMap<u64, VaultKey> {
     let blobs: BTreeMap<u64, _> = previous.iter().map(|p| (p.epoch, &p.blob)).collect();
     let mut keys = BTreeMap::new();
     let mut epoch = team.epoch;
@@ -145,7 +145,7 @@ fn keys_by_epoch(team: &TeamLocal, previous: &[PreviousKey]) -> BTreeMap<u64, Va
 
 /// La clave con la que firma `email`: la de la lista de miembros, la fijada al verla por
 /// primera vez o, si es esta cuenta, la suya.
-fn signer_key(local: &SyncLocal, team: &TeamLocal, email: &str) -> Option<PublicKey> {
+pub(crate) fn signer_key(local: &SyncLocal, team: &TeamLocal, email: &str) -> Option<PublicKey> {
     team.roster
         .as_ref()
         .and_then(|r| r.members.get(email))

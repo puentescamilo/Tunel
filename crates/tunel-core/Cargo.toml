@@ -26,4 +26,6 @@ curve25519-dalek.workspace = true
 ed25519-dalek.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tempfile.workspace = true
+# Comprime las grabaciones de sesiones; ya lo trae russh.
+flate2 = "1"
 

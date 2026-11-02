@@ -80,6 +80,18 @@ pub enum AppEvent {
         host: String,
         result: Result<Installed, String>,
     },
+    /// Un aviso de una tarea en segundo plano.
+    Notice(String),
+    RecordingsLoaded {
+        team: String,
+        result: Result<Vec<tunel_core::sync::protocol::RecordingSummary>, String>,
+    },
+    RecordingOpened {
+        title: String,
+        /// Se pidió guardarla en este archivo en vez de reproducirla.
+        export: Option<std::path::PathBuf>,
+        result: Result<Box<tunel_sync::recording::Recording>, String>,
+    },
     AuditLoaded {
         team: String,
         /// La página se pidió a continuación de otra.
@@ -454,6 +466,29 @@ impl Engine {
         self.spawn(async move {
             let result = tunel_sync::sync_once(&local, &data).await.map(Box::new);
             let _ = events.send(AppEvent::SyncFinished { round, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Sube una grabación de sesión. No se cancela al bloquear la bóveda: así llega el
+    /// final de la grabación aunque la sesión se cierre por eso.
+    pub fn upload_recording(&self, upload: impl Future<Output = Option<String>> + Send + 'static) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn(async move {
+            if let Some(message) = upload.await {
+                let _ = events.send(AppEvent::Notice(message));
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    /// Lanza una tarea de grabaciones y entrega su resultado como evento.
+    pub fn recordings_task(&self, task: impl Future<Output = AppEvent> + Send + 'static) {
+        let events = self.events_tx.clone();
+        let ctx = self.ctx.clone();
+        self.spawn(async move {
+            let _ = events.send(task.await);
             ctx.request_repaint();
         });
     }

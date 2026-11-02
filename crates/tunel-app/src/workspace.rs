@@ -127,12 +127,7 @@ fn open(app: &mut TunelApp, kind: &SavedTabKind) -> anyhow::Result<Tab> {
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("la bóveda está bloqueada"))?;
     Ok(match kind {
-        SavedTabKind::Host { host } => Tab::Terminal(Box::new(app.engine.open_host(
-            &data,
-            *host,
-            DEFAULT_COLS,
-            DEFAULT_ROWS,
-        )?)),
+        SavedTabKind::Host { host } => Tab::Terminal(Box::new(app.host_session(&data, *host)?)),
         SavedTabKind::Local => Tab::Terminal(Box::new(app.engine.open_local(
             DEFAULT_COLS,
             DEFAULT_ROWS,

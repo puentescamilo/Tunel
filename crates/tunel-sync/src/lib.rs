@@ -10,6 +10,7 @@ pub mod audit;
 mod keypair;
 pub mod live;
 pub mod oauth;
+pub mod recording;
 mod roster;
 pub mod run;
 mod session;
@@ -102,6 +103,11 @@ pub enum SyncError {
     NotInRoster(String),
     #[error("alguien salió del Team y un administrador tiene que renovar la clave")]
     RekeyNeeded,
+    #[error(
+        "el Team todavía no tiene lista de miembros firmada: confirma la huella de todos sus \
+         miembros y vuelve a intentarlo"
+    )]
+    NoRoster,
     #[error("el nombre del Team no puede estar vacío ni pasar de 60 caracteres")]
     InvalidName,
     #[error("la conexión de la sesión compartida falló: {0}")]

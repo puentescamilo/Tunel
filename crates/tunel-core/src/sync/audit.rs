@@ -47,6 +47,8 @@ pub enum AuditAction {
     RoleChanged { email: String, role: TeamRole },
     /// Salió del Team por su cuenta.
     Left,
+    /// Un admin encendió o apagó la grabación de las sesiones.
+    RecordingChanged { on: bool },
 }
 
 impl AuditAction {
@@ -73,7 +75,7 @@ impl AuditAction {
                 email: clean_name(&email),
                 role,
             },
-            Self::Joined | Self::Left => self,
+            Self::Joined | Self::Left | Self::RecordingChanged { .. } => self,
         }
     }
 
@@ -81,7 +83,10 @@ impl AuditAction {
     pub fn needs_admin(&self) -> bool {
         matches!(
             self,
-            Self::MemberInvited { .. } | Self::MemberRemoved { .. } | Self::RoleChanged { .. }
+            Self::MemberInvited { .. }
+                | Self::MemberRemoved { .. }
+                | Self::RoleChanged { .. }
+                | Self::RecordingChanged { .. }
         )
     }
 
@@ -102,6 +107,8 @@ impl AuditAction {
             Self::MemberRemoved { email } => format!("sacó a {email} del Team"),
             Self::RoleChanged { email, role: r } => format!("hizo {} a {email}", role(r)),
             Self::Left => "salió del Team".into(),
+            Self::RecordingChanged { on: true } => "activó la grabación de sesiones".into(),
+            Self::RecordingChanged { on: false } => "desactivó la grabación de sesiones".into(),
         }
     }
 }

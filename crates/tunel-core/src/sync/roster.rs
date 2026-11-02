@@ -42,6 +42,10 @@ pub struct Roster {
     pub version: u64,
     /// Por correo, en minúsculas.
     pub members: BTreeMap<String, RosterMember>,
+    /// Se graban las sesiones con los hosts del Team (ver [`super::recording`]). Va aquí,
+    /// firmado por un admin, para que ni el servidor ni un miembro lo puedan apagar.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub record_sessions: bool,
 }
 
 /// Lo que se firma: la lista ligada a su Team, su época y quien la escribe.
@@ -86,6 +90,7 @@ impl Roster {
     pub fn trusting(members: &[TeamMember]) -> Self {
         Self {
             version: 1,
+            record_sessions: false,
             members: members
                 .iter()
                 .map(|m| {
@@ -106,6 +111,16 @@ impl Roster {
         Self {
             version: self.version + 1,
             members,
+            record_sessions: self.record_sessions,
+        }
+    }
+
+    /// La lista con la grabación de sesiones encendida o apagada.
+    pub fn recording(&self, on: bool) -> Self {
+        Self {
+            version: self.version + 1,
+            record_sessions: on,
+            ..self.clone()
         }
     }
 
