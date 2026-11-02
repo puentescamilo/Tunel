@@ -126,6 +126,6 @@ que ya tenga el usuario: Túnel no guarda credenciales de la nube.
 | Autocompletado de comandos | fase 2 |
 | Llaves FIDO2 en Windows | pendiente |
 | Cliente Mosh propio | más adelante |
-| Borrar de la memoria las copias temporales de la bóveda en la interfaz | seguridad |
-| Permisos propios del archivo de la bóveda en Windows | seguridad |
+| Borrar de la memoria las copias temporales de la bóveda en la interfaz | ✅ 0.11.1 |
+| Permisos propios del archivo de la bóveda en Windows | ✅ 0.11.1 |
 | Pruebas automáticas de SFTP real, Mosh, Telnet, puerto serie e interfaz | pruebas |

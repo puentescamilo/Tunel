@@ -692,7 +692,9 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
 
 - La contraseña maestra no se guarda. Si la olvidas, la bóveda no se puede recuperar.
 - La bóveda se escribe de forma atómica: archivo temporal privado, `fsync` y renombrado, con
-  permisos `0600` en Unix. Solo una instancia de Túnel puede abrirla a la vez.
+  permisos `0600` en Unix. En Windows solo pueden abrirla tu usuario y SYSTEM, sin heredar los
+  permisos de la carpeta; una bóveda de una versión anterior se corrige al abrirla. Solo una
+  instancia de Túnel puede abrirla a la vez.
 - Los parámetros de Argon2 leídos del archivo tienen límites, para que uno manipulado no agote la memoria.
 - Con Touch ID o Windows Hello, la clave de la bóveda se guarda en `<bóveda>.biometria`, cifrada
   con otra que solo da el sistema tras la huella o el PIN. En macOS esa clave está en el llavero
@@ -703,12 +705,9 @@ espacio de cada cuenta (20 000 registros y 256 MiB).
   no evita que se pida.
 - El texto pegado se limpia de caracteres de control, así que no puede inyectar teclas.
 - La contraseña guardada solo se envía cuando el servidor la pide; los códigos 2FA los escribe el usuario.
-- Contraseñas, frases de paso y claves privadas no aparecen en los registros de depuración,
-  y se borran de la memoria al bloquear la bóveda.
-
-**Pendiente:**
-- La interfaz hace copias temporales de la bóveda que no se borran de la memoria explícitamente.
-- En Windows el archivo usa los permisos heredados de la carpeta del usuario.
+- Contraseñas, frases de paso y claves privadas no aparecen en los registros de depuración.
+  Cada copia se borra de la memoria al soltarse, también las que hace la interfaz para editar
+  o sincronizar, y lo escrito en los formularios de host y de clave nueva al cerrarlos.
 
 ## Estado y hoja de ruta
 

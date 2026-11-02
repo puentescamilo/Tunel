@@ -3,6 +3,7 @@
 use std::sync::mpsc::{Receiver, TryRecvError};
 use tunel_core::SshKey;
 use tunel_ssh::keygen::{self, GeneratedKey, KeyType, KeygenError};
+use zeroize::Zeroize;
 
 /// Lo que se va a generar, y la generación en curso: una RSA tarda unos segundos.
 pub struct KeyGenForm {
@@ -25,6 +26,14 @@ fn default_comment() -> String {
         (false, false) => format!("{user}@{host}"),
         (false, true) => user,
         (true, _) => host,
+    }
+}
+
+/// La frase de paso escrita no se queda en memoria al cerrar el formulario.
+impl Drop for KeyGenForm {
+    fn drop(&mut self) {
+        self.passphrase.zeroize();
+        self.confirm.zeroize();
     }
 }
 
@@ -162,12 +171,10 @@ mod tests {
 
     #[test]
     fn the_generated_key_keeps_its_passphrase_and_public_key() {
-        let mut form = KeyGenForm {
-            label: " servidor ".into(),
-            passphrase: "frase".into(),
-            confirm: "frase".into(),
-            ..KeyGenForm::new()
-        };
+        let mut form = KeyGenForm::new();
+        form.label = " servidor ".into();
+        form.passphrase = "frase".into();
+        form.confirm = "frase".into();
         form.start(&egui::Context::default()).unwrap();
         let key = wait(&mut form).expect("clave generada");
         assert_eq!(key.label, "servidor");
@@ -185,17 +192,13 @@ mod tests {
     #[test]
     fn mismatched_passphrases_or_no_name_are_refused() {
         let ctx = egui::Context::default();
-        let mut form = KeyGenForm {
-            passphrase: "a".into(),
-            confirm: "b".into(),
-            ..KeyGenForm::new()
-        };
+        let mut form = KeyGenForm::new();
+        form.passphrase = "a".into();
+        form.confirm = "b".into();
         assert!(form.start(&ctx).is_err());
         assert!(!form.generating());
-        let mut unnamed = KeyGenForm {
-            label: "  ".into(),
-            ..KeyGenForm::new()
-        };
+        let mut unnamed = KeyGenForm::new();
+        unnamed.label = "  ".into();
         assert!(unnamed.start(&ctx).is_err());
     }
 }

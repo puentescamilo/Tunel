@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use tunel_core::share;
 use tunel_core::vault::can_use;
 use tunel_core::*;
+use zeroize::Zeroize;
 
 /// Parsea un puerto; vacío significa "por defecto".
 pub fn parse_port(text: &str) -> Result<Option<u16>, String> {
@@ -102,6 +103,14 @@ pub struct HostForm {
     /// Al cambiar de espacio, copiar sus credenciales o quitárselas.
     copy_credentials: bool,
     pub(super) error: Option<String>,
+}
+
+/// Las contraseñas escritas no se quedan en memoria al cerrar el formulario.
+impl Drop for HostForm {
+    fn drop(&mut self) {
+        self.proxy_password.zeroize();
+        self.new_password.zeroize();
+    }
 }
 
 impl HostForm {
