@@ -83,6 +83,7 @@ pub enum AppEvent {
     /// Un aviso de una tarea en segundo plano.
     Notice(String),
     Cloud(crate::views::cloud_import::CloudEvent),
+    Containers(crate::views::containers::ContainersEvent),
     RecordingsLoaded {
         team: String,
         result: Result<Vec<tunel_core::sync::protocol::RecordingSummary>, String>,
@@ -316,6 +317,26 @@ impl Engine {
         local::spawn(&CommandSpec::default_shell(), cols, rows, backend)?;
         Ok(TerminalSession::new(
             "Local".into(),
+            None,
+            cols,
+            rows,
+            scrollback,
+            self.wake_on_output(io),
+        ))
+    }
+
+    /// Una terminal de este equipo que ejecuta `spec` en vez de la shell.
+    pub fn open_program(
+        &mut self,
+        title: String,
+        spec: &CommandSpec,
+        scrollback: usize,
+    ) -> anyhow::Result<TerminalSession> {
+        let (cols, rows) = (crate::app::DEFAULT_COLS, crate::app::DEFAULT_ROWS);
+        let (io, backend) = session_pair();
+        local::spawn(spec, cols, rows, backend)?;
+        Ok(TerminalSession::new(
+            title,
             None,
             cols,
             rows,

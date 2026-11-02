@@ -80,6 +80,11 @@ fn rail(app: &mut TunelApp, ui: &mut egui::Ui) {
             {
                 app.open_local();
             }
+            let containers = Section::Containers;
+            if ui::rail_item(ui, containers.icon(), containers.label(), false).clicked() {
+                app.section = containers;
+                app.active = None;
+            }
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 if ui::rail_item(ui, icons::LOCK, "Bloquear bóveda", false).clicked() {
                     app.lock_vault();
@@ -161,6 +166,12 @@ pub fn sidebar(app: &mut TunelApp, ui: &mut egui::Ui) {
                 .clicked()
             {
                 app.open_local();
+            }
+            let containers = Section::Containers;
+            let selected = app.active.is_none() && app.section == containers;
+            if ui::nav_item(ui, containers.icon(), containers.label(), selected, None).clicked() {
+                app.section = containers;
+                app.active = None;
             }
         });
 }

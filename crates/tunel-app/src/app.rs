@@ -26,6 +26,8 @@ pub enum Section {
     Snippets,
     KnownHosts,
     Settings,
+    /// Contenedores y pods de este equipo; va con «Este equipo», no con la bóveda.
+    Containers,
 }
 
 impl Section {
@@ -46,6 +48,7 @@ impl Section {
             Section::Snippets => "Snippets",
             Section::KnownHosts => "Known hosts",
             Section::Settings => "Ajustes",
+            Section::Containers => "Contenedores",
         }
     }
 
@@ -58,6 +61,7 @@ impl Section {
             Section::Snippets => icons::CODE,
             Section::KnownHosts => icons::SHIELD,
             Section::Settings => icons::GEAR,
+            Section::Containers => icons::COLUMNS,
         }
     }
 }
@@ -100,7 +104,8 @@ impl Tab {
     pub fn saved(&self) -> Option<tunel_core::workspace::SavedTab> {
         use tunel_core::workspace::{SavedTab, SavedTabKind};
         let kind = match self {
-            Tab::Terminal(t) if t.is_watching() => return None,
+            // Tampoco una shell en un contenedor: puede que ya no exista.
+            Tab::Terminal(t) if t.is_watching() || t.program.is_some() => return None,
             Tab::Terminal(t) => match t.host {
                 Some(host) => SavedTabKind::Host { host },
                 None => SavedTabKind::Local,
@@ -164,6 +169,8 @@ pub struct TunelApp {
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     /// Importación de máquinas de la nube en curso.
     pub cloud_import: Option<crate::views::cloud_import::CloudImport>,
+    /// Contenedores y pods de este equipo, según la última consulta.
+    pub containers: crate::views::containers::ContainersView,
     /// Pestaña a la que se está cambiando el nombre.
     pub tab_rename: Option<crate::tabs::TabRename>,
     /// Snippet con variables esperando sus valores.
@@ -368,6 +375,7 @@ impl TunelApp {
             password_change: Default::default(),
             quick_connect: None,
             cloud_import: None,
+            containers: Default::default(),
             tab_rename: None,
             snippet_prompt: None,
             snippet_values: HashMap::new(),
@@ -523,11 +531,21 @@ impl TunelApp {
             return None;
         }
         let host = session.host;
+        let program = session.program.clone();
+        let title = session.title.clone();
         let data = self.data()?.clone();
         let scrollback = data.settings.scrollback_lines;
-        Some(match host {
-            Some(host) => self.host_session(&data, host),
-            None => self
+        Some(match (host, program) {
+            (Some(host), _) => self.host_session(&data, host),
+            (None, Some(spec)) => {
+                self.engine
+                    .open_program(title, &spec, scrollback)
+                    .map(|mut s| {
+                        s.program = Some(spec);
+                        s
+                    })
+            }
+            (None, None) => self
                 .engine
                 .open_local(DEFAULT_COLS, DEFAULT_ROWS, scrollback),
         })
@@ -650,6 +668,7 @@ impl TunelApp {
                 }
                 AppEvent::Notice(message) => self.notify(message),
                 AppEvent::Cloud(event) => views::cloud_import::on_event(self, event),
+                AppEvent::Containers(event) => views::containers::on_event(self, event),
                 AppEvent::RecordingsLoaded { team, result } => {
                     views::recordings::on_loaded(self, team, result)
                 }
@@ -785,6 +804,19 @@ impl TunelApp {
             Section::Snippets => views::snippets::show(self, ui),
             Section::KnownHosts => views::known_hosts::show(self, ui),
             Section::Settings => views::settings::show(self, ui),
+            Section::Containers => views::containers::show(self, ui),
+        }
+    }
+
+    /// Abre en una pestaña la shell de un contenedor o un pod.
+    pub fn open_container_shell(&mut self, title: String, spec: tunel_term::local::CommandSpec) {
+        let scrollback = self.data().map_or(10_000, |d| d.settings.scrollback_lines);
+        match self.engine.open_program(title, &spec, scrollback) {
+            Ok(mut session) => {
+                session.program = Some(spec);
+                self.push_tab(Tab::Terminal(Box::new(session)));
+            }
+            Err(e) => self.notify(format!("No se pudo abrir la shell: {e:#}")),
         }
     }
 }
