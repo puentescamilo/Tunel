@@ -147,6 +147,11 @@ pub fn placeholder(hint: &'static str) -> By<'static> {
     by().predicate(move |node| node.data().placeholder() == Some(hint))
 }
 
+/// Un desplegable por el nombre de su etiqueta.
+pub fn combo(label: &'static str) -> By<'static> {
+    by().label(label).role(egui::accesskit::Role::ComboBox)
+}
+
 /// Un campo de texto con su etiqueta al lado (`labelled_by`).
 pub fn field(label: &'static str) -> By<'static> {
     by().label(label).predicate(|node| {

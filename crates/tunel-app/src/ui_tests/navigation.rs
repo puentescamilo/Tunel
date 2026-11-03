@@ -6,6 +6,8 @@ use crate::app::Section;
 #[test]
 fn every_section_opens_from_the_menu_and_names_its_controls() {
     let mut app = TestApp::unlocked(VaultData::default());
+    // Contenedores consulta el docker y el kubectl de este equipo, solo para leer; lo que
+    // aparezca después también tiene que tener nombre.
     let sections = Section::ALL.into_iter().chain([Section::Containers]);
     for section in sections {
         app.click(&button(section.label()));

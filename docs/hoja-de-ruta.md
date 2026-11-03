@@ -135,4 +135,4 @@ que ya tenga el usuario: Túnel no guarda credenciales de la nube.
 | Borrar de la memoria las copias temporales de la bóveda en la interfaz | ✅ |
 | Permisos propios del archivo de la bóveda en Windows | ✅ |
 | Pruebas automáticas de SFTP real, Mosh, Telnet y puerto serie | ✅ |
-| Pruebas automáticas de la interfaz | pruebas |
+| Pruebas automáticas de la interfaz | ✅ |

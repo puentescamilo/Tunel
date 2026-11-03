@@ -24,6 +24,9 @@ fn a_new_host_is_listed_and_saved() {
     app.click(&button("Host"));
     assert!(app.exists(&text("Nuevo host")));
     app.harness.check_accessibility();
+    for name in ["Grupo", "Identidad", "Tema"] {
+        assert!(app.exists(&combo(name)), "falta el desplegable «{name}»");
+    }
 
     app.fill(&field("Nombre"), "bastión");
     app.fill(&field("Dirección"), "bastion.ejemplo.com");
@@ -151,10 +154,21 @@ fn the_key_editors_name_their_fields() {
     app.click(&button("Clave"));
     assert!(app.exists(&text("Nueva clave SSH")));
     app.harness.check_accessibility();
+    for name in [
+        "Nombre",
+        "Clave privada (OpenSSH/PEM)",
+        "Frase de paso (si la clave está cifrada)",
+    ] {
+        assert!(app.exists(&field(name)), "falta el campo «{name}»");
+    }
     app.click(&button("Cancelar"));
     app.click(&button("Generar clave"));
     assert!(app.exists(&text("Generar clave SSH")));
     app.harness.check_accessibility();
+    for name in ["Nombre", "Comentario", "Frase de paso", "Repítela"] {
+        assert!(app.exists(&field(name)), "falta el campo «{name}»");
+    }
+    assert!(app.exists(&combo("Tipo")));
 }
 
 #[test]
@@ -169,6 +183,16 @@ fn turning_off_autocomplete_is_saved() {
         app.get(&switch).accesskit_node().toggled(),
         Some(egui::accesskit::Toggled::True)
     );
+    // Los números y los desplegables de los ajustes llevan el nombre de su fila.
+    for name in ["Líneas de historial", "Keepalive SSH"] {
+        let number = by().label(name).role(egui::accesskit::Role::SpinButton);
+        assert!(app.exists(&number), "falta «{name}»");
+    }
+    let size = by()
+        .label("Tamaño de letra de la terminal")
+        .role(egui::accesskit::Role::Slider);
+    assert!(app.exists(&size));
+    assert!(app.exists(&combo("Fuente de la terminal")));
     app.click(&switch);
     assert_eq!(
         app.get(&switch).accesskit_node().toggled(),
@@ -183,11 +207,22 @@ fn the_group_and_tunnel_editors_name_their_fields() {
     app.click(&button("Grupo"));
     assert!(app.exists(&text("Nuevo grupo")));
     app.harness.check_accessibility();
+    assert!(app.exists(&field("Nombre")));
+    for name in [
+        "Identidad por defecto para sus hosts",
+        "Grupo padre",
+        "Tema de la terminal para sus hosts",
+    ] {
+        assert!(app.exists(&combo(name)), "falta el desplegable «{name}»");
+    }
     app.click(&button("Cancelar"));
     app.click(&button("Túneles"));
     app.click(&button("Regla"));
     assert!(app.exists(&text("Nueva regla de túnel")));
     app.harness.check_accessibility();
+    assert!(app.exists(&field("Escuchar en este equipo")));
+    assert!(app.exists(&field("Destino")));
+    assert!(app.exists(&combo("Host SSH")));
 }
 
 #[test]

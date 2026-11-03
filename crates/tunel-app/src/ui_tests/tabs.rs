@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::{Tab, TabState};
+use crate::session::SessionStatus;
 use std::time::{Duration, Instant};
 use tunel_core::Host;
 
@@ -48,12 +49,14 @@ fn quick_connect_finds_hosts_as_you_type() {
 
 #[test]
 fn a_failed_connection_says_why_in_its_tab() {
-    // Un puerto recién liberado: nadie escucha y la conexión falla enseguida.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    // Un «servidor» que cuelga nada más aceptar: la conexión falla enseguida y siempre igual.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            drop(stream);
+        }
+    });
     let host = Host {
         port: Some(port),
         ..Host::new("apagado", "127.0.0.1")
@@ -63,6 +66,15 @@ fn a_failed_connection_says_why_in_its_tab() {
     app.key(egui::Modifiers::NONE, egui::Key::Enter);
     assert!(app.exists(&tab("apagado")));
     wait_for(&mut app, TabState::Failed);
+    let Some(Tab::Terminal(session)) = app.harness.state().tabs.first() else {
+        panic!("no es una terminal");
+    };
+    let SessionStatus::Failed(error) = session.status.clone() else {
+        unreachable!();
+    };
+    // El motivo se ve en la pestaña, con la opción de reintentar.
+    let reason = by().predicate(move |n| n.value().is_some_and(|v| v == error.as_str()));
+    assert!(app.exists(&reason), "no se ve el error");
     assert!(app.exists(&button("Reconectar")));
 }
 
@@ -93,4 +105,7 @@ fn the_vault_tab_goes_back_to_the_sections() {
         1,
         "la terminal sigue abierta"
     );
+    // Bloquear cierra la terminal: no queda una shell suelta al acabar la prueba.
+    app.click(&button("Bloquear bóveda"));
+    assert!(app.harness.state().tabs.is_empty());
 }

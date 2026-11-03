@@ -764,6 +764,14 @@ Las pruebas de punta a punta corren contra servidores de prueba en el mismo proc
 - **Telnet:** un servidor TCP que negocia como uno real.
 - **Puerto serie:** una pareja de pseudoterminales. Solo en Linux, porque macOS no deja fijar la velocidad de una.
 
+Las de la interfaz (`crates/tunel-app/src/ui_tests`) abren la app entera con
+[`egui_kittest`](https://crates.io/crates/egui_kittest), sin ventana ni tarjeta gráfica, y la
+manejan por su árbol de accesibilidad: buscan un texto o un botón, pulsan y escriben. Cada una
+usa una bóveda nueva en una carpeta temporal y no sale a internet. Cubren crear y desbloquear
+la bóveda, el menú, los editores, la búsqueda, los ajustes, las preguntas de las conexiones, la
+conexión rápida y las pestañas. Además fallan si un control no tiene nombre para los lectores de
+pantalla o si un texto usa un carácter que no está en las fuentes.
+
 | Crate | Contenido |
 |---|---|
 | `tunel-core` | Modelos, bóveda cifrada, temas guardados, importación de `~/.ssh/config`, núcleo de la sincronización |
@@ -773,7 +781,7 @@ Las pruebas de punta a punta corren contra servidores de prueba en el mismo proc
 | `tunel-sync` | Cliente de sincronización: cuentas y rondas de sincronización con el servidor |
 | `tunel-server` | Servidor de sincronización (axum + SQLite): cuentas, sesiones y registros cifrados |
 
-**Pruebas:** 465 en total.
+**Pruebas:** 663 en total en macOS.
 
 - **SSH:** 16 de punta a punta contra un servidor SSH que arranca el propio test
   (`crates/tunel-ssh/tests/end_to_end.rs`). Cubren contraseña, clave cifrada, 2FA, clave de
@@ -784,9 +792,6 @@ Las pruebas de punta a punta corren contra servidores de prueba en el mismo proc
   - las de la API del servidor (`crates/tunel-server/tests/api.rs`);
   - las de varios equipos contra un `tunel-server` real, incluido uno que intenta ocultar
     datos (`crates/tunel-sync/tests/sync.rs`).
-
-Aún no tienen pruebas automáticas el SFTP contra un servidor real, Mosh, Telnet, el puerto
-serie ni la interfaz.
 
 **Capturas y pruebas manuales:** en compilaciones de depuración, unas variables de entorno
 abren la app directamente en una pantalla con datos de ejemplo:
