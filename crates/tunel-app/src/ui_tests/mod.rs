@@ -48,8 +48,19 @@ impl TestApp {
         let mut app = Self::locked(data);
         app.type_into(&placeholder("Contraseña maestra"), PASSWORD);
         app.click(&button("Desbloquear"));
-        assert!(app.harness.state().vault.is_some(), "no se desbloqueó");
+        if app.harness.state().vault.is_none() {
+            panic!("no se desbloqueó; en pantalla: {:?}", app.visible_text());
+        }
         app
+    }
+
+    /// Los textos que se ven, para explicar por qué falló una prueba.
+    pub fn visible_text(&self) -> Vec<String> {
+        use egui_kittest::kittest::NodeT;
+        self.harness
+            .query_all(by().role(egui::accesskit::Role::Label))
+            .filter_map(|n| n.accesskit_node().value().map(str::to_string))
+            .collect()
     }
 
     fn open(dir: tempfile::TempDir, path: PathBuf) -> Self {
