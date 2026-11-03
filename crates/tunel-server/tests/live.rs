@@ -651,6 +651,8 @@ async fn a_connection_that_stops_answering_is_closed() {
     // Sin leer, el cliente no contesta a los pings.
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert_eq!(next::<HostEvent>(&mut s.host).await, Err(Some(4009)));
+    // Al seguir leyendo, el cliente confirma el cierre, como el de Túnel.
+    while let Ok(Some(Ok(_))) = tokio::time::timeout(WAIT, s.host.next()).await {}
     let (_, sessions) = s.server.list(&s.bob).await;
     assert!(sessions.is_empty());
 }
