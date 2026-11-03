@@ -160,8 +160,12 @@ pub struct TunelApp {
     pub tabs: Vec<Tab>,
     /// `None` muestra la sección del menú lateral en lugar de una pestaña.
     pub active: Option<usize>,
-    /// Segunda pestaña mostrada a la derecha (vista dividida).
-    pub split: Option<usize>,
+    /// Vista dividida: hasta cuatro pestañas a la vez en la ventana principal.
+    pub layout: Option<crate::layout::Layout>,
+    /// Pestañas abiertas en una ventana propia.
+    pub detached: Vec<crate::panes::Detached>,
+    /// Ventana desacoplada que hay que traer al frente en cuanto exista.
+    pub raise_window: Option<egui::ViewportId>,
     pub search: String,
     /// Grupo abierto en la vista de hosts (`None` = raíz).
     pub host_group: Option<tunel_core::GroupId>,
@@ -267,6 +271,35 @@ impl TunelApp {
             self.open_local();
             for i in 0..self.tabs.len() {
                 crate::broadcast::toggle(self, i);
+            }
+        }
+        // `TUNEL_DEV_PANES=<2-4>` abre esas terminales en la vista dividida;
+        // `TUNEL_DEV_DETACH=1` saca además otra a su propia ventana.
+        if let Some(n) = std::env::var("TUNEL_DEV_PANES")
+            .ok()
+            .and_then(|n| n.parse::<usize>().ok())
+        {
+            use crate::layout::Direction;
+            self.open_local();
+            let first = self.tabs.len() - 1;
+            for (i, direction) in [Direction::Right, Direction::Down, Direction::Down]
+                .into_iter()
+                .take(n.saturating_sub(1))
+                .enumerate()
+            {
+                self.open_local();
+                let new = self.tabs.len() - 1;
+                // Una cuadrícula: la 2.ª a la derecha de la 1.ª, la 3.ª debajo de la 1.ª y la
+                // 4.ª debajo de la 2.ª.
+                self.active = Some(if i == 2 { first + 1 } else { first });
+                self.split_with(new, direction);
+            }
+            if std::env::var("TUNEL_DEV_DETACH").as_deref() == Ok("1") {
+                let shown = self.active;
+                self.open_local();
+                let last = self.tabs.len() - 1;
+                self.detach(last);
+                self.active = shown;
             }
         }
         if std::env::var("TUNEL_DEV_LOCAL").as_deref() == Ok("1") {
@@ -388,7 +421,9 @@ impl TunelApp {
             section: Section::Hosts,
             tabs: Vec::new(),
             active: None,
-            split: None,
+            layout: None,
+            detached: Vec::new(),
+            raise_window: None,
             search: String::new(),
             host_group: None,
             host_tags: Default::default(),
@@ -470,7 +505,9 @@ impl TunelApp {
         self.prompts.clear();
         self.tabs.clear();
         self.active = None;
-        self.split = None;
+        self.layout = None;
+        self.detached.clear();
+        self.tab_rename = None;
         self.forwards.clear();
         self.editor = None;
         self.sync = Default::default();
@@ -597,7 +634,10 @@ impl TunelApp {
             Some(Ok(mut session)) => {
                 session.title = self.tabs[index].title().to_string();
                 self.tabs[index] = Tab::Terminal(Box::new(session));
-                self.active = Some(index);
+                // Una desacoplada sigue en su ventana.
+                if !self.is_detached(index) {
+                    self.active = Some(index);
+                }
             }
             Some(Err(e)) => self.notify(format!("No se pudo reconectar: {e:#}")),
             None => {}
@@ -610,11 +650,7 @@ impl TunelApp {
             Some(Ok(session)) => {
                 self.tabs
                     .insert(index + 1, Tab::Terminal(Box::new(session)));
-                if let Some(split) = self.split.as_mut()
-                    && *split > index
-                {
-                    *split += 1;
-                }
+                self.reindex(|t| Some(if t > index { t + 1 } else { t }));
                 self.active = Some(index + 1);
             }
             Some(Err(e)) => self.notify(format!("No se pudo duplicar la pestaña: {e:#}")),
@@ -636,16 +672,25 @@ impl TunelApp {
             return;
         }
         self.tabs.remove(index);
-        let fix = |slot: Option<usize>| match slot {
-            Some(i) if i == index => None,
-            Some(i) if i > index => Some(i - 1),
-            other => other,
+        let fix = |t: usize| match t {
+            t if t == index => None,
+            t if t > index => Some(t - 1),
+            t => Some(t),
         };
-        self.split = fix(self.split);
-        self.active = fix(self.active).or_else(|| self.tabs.len().checked_sub(1));
-        if self.split == self.active {
-            self.split = None;
+        let neighbour = self
+            .layout
+            .as_ref()
+            .filter(|_| self.active == Some(index))
+            .and_then(|l| l.clone().without(index))
+            .map(|l| l.panes()[0]);
+        self.reindex(fix);
+        // Al cerrar un panel, el foco pasa a otro de la vista; si no, a la última pestaña
+        // de esta ventana.
+        self.active = match self.active {
+            Some(a) if a == index => neighbour.and_then(fix),
+            other => other.and_then(fix),
         }
+        .or_else(|| (0..self.tabs.len()).rev().find(|t| !self.is_detached(*t)));
     }
 
     /// Envía texto a la terminal activa o a todas.
@@ -760,7 +805,7 @@ impl TunelApp {
         }
     }
 
-    fn show_tab(&mut self, ui: &mut egui::Ui, index: usize) {
+    pub(crate) fn show_tab(&mut self, ui: &mut egui::Ui, index: usize) {
         let host = match &self.tabs[index] {
             Tab::Terminal(session) => session.host,
             Tab::Sftp(_) | Tab::Pending(_) => None,
@@ -927,18 +972,14 @@ impl eframe::App for TunelApp {
         let frame = egui::Frame::central_panel(ui.style()).inner_margin(margin);
         egui::CentralPanel::default()
             .frame(frame)
-            .show(ui, |ui| match (self.active, self.split) {
-                (Some(active), Some(split)) if split < self.tabs.len() => {
-                    ui.columns(2, |cols| {
-                        self.show_tab(&mut cols[0], active);
-                        if split < self.tabs.len() {
-                            self.show_tab(&mut cols[1], split);
-                        }
-                    });
+            .show(ui, |ui| match self.active {
+                Some(_) if self.shown_layout().is_some() => self.show_layout(ui),
+                Some(active) if active < self.tabs.len() && !self.is_detached(active) => {
+                    self.show_tab(ui, active)
                 }
-                (Some(active), _) if active < self.tabs.len() => self.show_tab(ui, active),
                 _ => self.show_section(ui),
             });
+        self.show_detached(&ctx);
 
         crate::editor::show(self, &ctx);
         crate::prompts::show(self, &ctx);

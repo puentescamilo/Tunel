@@ -75,8 +75,14 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 - Emulación basada en `alacritty_terminal`: 256 colores y truecolor, negrita, cursiva,
   subrayado, caracteres de doble ancho, historial desplazable y selección con copiar y pegar.
-- Pestañas con indicador de estado, vista dividida y reconexión con un clic. Con clic derecho
-  en una pestaña: reconectar, duplicar, compartir con un Team o cerrar.
+- Pestañas con indicador de estado y reconexión con un clic. Con clic derecho en una pestaña:
+  reconectar, duplicar, compartir con un Team o cerrar, y también:
+  - **Dividir a la derecha** o **Dividir abajo**: hasta cuatro terminales a la vista a la vez,
+    de hosts distintos. La franja entre paneles se arrastra para repartir el espacio, y el
+    panel en el que pulsas es el que recibe el teclado.
+  - **Abrir en otra ventana**: la terminal pasa a una ventana propia, por ejemplo para llevarla
+    a otra pantalla y compararla. Al cerrar esa ventana, la terminal vuelve a la principal sin
+    desconectarse.
 - Pegado seguro (bracketed paste), título de ventana por OSC y registro de la sesión en archivo.
 - **13 temas incluidos**: Túnel Oscuro y Claro, Dracula, Nord, Tokyo Night, Catppuccin
   Mocha y Latte, One Dark, Gruvbox, Solarized Oscuro y Claro, Monokai y GitHub Claro.
@@ -804,7 +810,7 @@ TUNEL_VAULT=/tmp/demo.json TUNEL_DEV_PASSWORD=demo-password TUNEL_DEV_SECTION=se
   cargo run -p tunel-app
 ```
 
-Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_TAGS=<etiqueta>,…` (filtra los hosts por etiquetas), `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_RUN=<comando>`),
+Otras variables: `TUNEL_DEV_GROUP=<grupo>`, `TUNEL_DEV_TAGS=<etiqueta>,…` (filtra los hosts por etiquetas), `TUNEL_DEV_LOCAL=1` (con `TUNEL_DEV_RUN=<comando>`), `TUNEL_DEV_PANES=<2-4>` (terminales locales en la vista dividida; con `TUNEL_DEV_DETACH=1`, otra más en su propia ventana),
 `TUNEL_DEV_QUICK=<texto>`, `TUNEL_DEV_EDIT=<host o grupo>`, `TUNEL_DEV_PROMPT=cambio|nuevo|llave`,
 `TUNEL_DEV_THEME=<id de tema>`, `TUNEL_DEV_FONTS=<interfaz>|<terminal>` (elige las fuentes; vacío = del sistema), `TUNEL_DEV_CURSOR=bloque|barra|subrayado`,
 `TUNEL_DEV_SCROLL=temas` (baja en Ajustes hasta los temas),

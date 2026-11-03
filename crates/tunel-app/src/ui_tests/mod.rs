@@ -5,6 +5,7 @@
 mod editing;
 mod lock;
 mod navigation;
+mod panes;
 mod prompts;
 mod tabs;
 
