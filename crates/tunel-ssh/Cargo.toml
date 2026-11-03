@@ -17,10 +17,17 @@ rand.workspace = true
 # ssh-key genera claves con rand_core 0.10.
 rand10 = { package = "rand", version = "0.10" }
 
-# Llaves FIDO2 por USB. En Windows el acceso directo por HID está bloqueado (hace falta la API
-# WebAuthn del sistema), así que allí no se usa.
+# Llaves FIDO2 por USB. En Windows el acceso directo por HID está bloqueado, así que allí se
+# usa la API WebAuthn del sistema (ver src/webauthn.rs).
 [target.'cfg(not(windows))'.dependencies]
 ctap-hid-fido2 = { version = "3.6.0", default-features = false, features = ["aws-lc-rs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WindowsWebServices",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 ed25519-dalek = "3.0.0"

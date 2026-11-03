@@ -412,13 +412,15 @@ async fn authenticate_with_security_key(
         None => fido::system_authenticator()?,
     };
     let host = target.host.address.clone();
-    let pin = if key.needs_pin() {
+    // En Windows, el sistema pide el PIN y que se toque la llave en su propia ventana.
+    let own_prompts = !authenticator.prompts_itself();
+    let pin = if key.needs_pin() && own_prompts {
         Some(ask_security_key_pin(&ctx.interactions, &host).await?)
     } else {
         None
     };
     let finished = Arc::new(AtomicBool::new(false));
-    if key.needs_touch() {
+    if key.needs_touch() && own_prompts {
         ctx.interactions
             .send(Interaction::TouchSecurityKey {
                 host,

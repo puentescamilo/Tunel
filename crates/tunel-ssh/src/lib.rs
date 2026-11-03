@@ -11,6 +11,8 @@ pub mod mosh;
 pub mod proxy;
 pub mod sftp;
 pub mod shell;
+#[cfg(windows)]
+mod webauthn;
 pub mod x11;
 
 pub use client::{ConnectContext, HostKeyLookup, Interaction, SshConnection, SshError};

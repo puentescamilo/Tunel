@@ -815,6 +815,10 @@ async fn unrequested_x11_channel_is_rejected() {
 struct SoftSecurityKey {
     signing: ed25519_dalek::SigningKey,
     key_handle: Vec<u8>,
+    /// Como en Windows: el sistema pide el PIN y que se toque, no Túnel.
+    system_prompts: bool,
+    /// Si la última petición exigía verificar al usuario.
+    asked_verification: std::sync::Mutex<Option<bool>>,
 }
 
 impl SoftSecurityKey {
@@ -822,6 +826,8 @@ impl SoftSecurityKey {
         Self {
             signing: ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
             key_handle: vec![7; 64],
+            system_prompts: false,
+            asked_verification: Default::default(),
         }
     }
 
@@ -845,6 +851,10 @@ impl fido::Authenticator for SoftSecurityKey {
         use ed25519_dalek::Signer as _;
         use sha2::{Digest, Sha256};
         assert_eq!(request.key_handle, self.key_handle);
+        *self.asked_verification.lock().unwrap() = Some(request.user_verification);
+        if self.system_prompts {
+            assert_eq!(request.pin, None, "el sistema pide el PIN, no Túnel");
+        }
         if request.pin.is_some_and(|pin| pin != "2468") {
             return Err(fido::FidoError::Device("PIN incorrecto".into()));
         }
@@ -856,6 +866,10 @@ impl fido::Authenticator for SoftSecurityKey {
             auth_data,
             signature: self.signing.sign(&signed).to_bytes().to_vec(),
         })
+    }
+
+    fn prompts_itself(&self) -> bool {
+        self.system_prompts
     }
 }
 
@@ -880,9 +894,20 @@ async fn connect_with_security_key(
     Result<SshConnection, tunel_ssh::SshError>,
     tokio::task::JoinHandle<Vec<String>>,
 ) {
+    connect_with_key(f, otp, Arc::new(SoftSecurityKey::new())).await
+}
+
+async fn connect_with_key(
+    f: &Fixture,
+    otp: Option<&'static str>,
+    key: Arc<SoftSecurityKey>,
+) -> (
+    Result<SshConnection, tunel_ssh::SshError>,
+    tokio::task::JoinHandle<Vec<String>>,
+) {
     let (tx, answers) = auto_answer(otp);
     let ctx = ConnectContext {
-        security_key: Some(Arc::new(SoftSecurityKey::new())),
+        security_key: Some(key),
         ..context(&f.vault, tx)
     };
     let target = f.vault.resolve(f.target).unwrap();
@@ -927,6 +952,27 @@ async fn security_key_with_verification_asks_for_pin() {
         seen.contains(&"prompt:PIN de la llave".to_string()),
         "{seen:?}"
     );
+}
+
+#[tokio::test]
+async fn a_key_that_prompts_by_itself_gets_no_pin_or_touch_notice_from_tunel() {
+    let port = start_server().await;
+    let flags = fido::FLAG_USER_PRESENCE | fido::FLAG_USER_VERIFICATION;
+    let f = security_key_fixture(port, flags);
+    let key = Arc::new(SoftSecurityKey {
+        system_prompts: true,
+        ..SoftSecurityKey::new()
+    });
+    let (conn, answers) = connect_with_key(&f, None, key.clone()).await;
+    let seen = seen_after_closing(conn.unwrap(), answers).await;
+    // Solo la clave del servidor, que se acepta sola: ni PIN ni aviso de tocar la llave.
+    assert!(
+        seen.iter()
+            .all(|s| s != "tocar-llave" && !s.starts_with("prompt:")),
+        "{seen:?}"
+    );
+    // Pero sí le dice al sistema que la clave exige verificar al usuario.
+    assert_eq!(*key.asked_verification.lock().unwrap(), Some(true));
 }
 
 #[tokio::test]

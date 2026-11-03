@@ -28,7 +28,12 @@ pub enum FidoError {
     BadResponse,
     #[error("la llave de seguridad pide un PIN y no se introdujo")]
     PinRequired,
-    #[error("las llaves de seguridad FIDO2 aún no funcionan en este sistema; usa el agente SSH")]
+    #[error("se canceló el uso de la llave de seguridad")]
+    Cancelled,
+    #[error(
+        "este sistema no permite usar llaves de seguridad FIDO2 (en Windows hace falta la \
+         versión 1903 o posterior); usa el agente SSH"
+    )]
     Unsupported,
 }
 
@@ -104,6 +109,8 @@ pub struct AssertionRequest<'a> {
     pub message: &'a [u8],
     pub key_handle: &'a [u8],
     pub user_presence: bool,
+    /// La clave exige verificar al usuario (PIN o biometría).
+    pub user_verification: bool,
     pub pin: Option<&'a str>,
 }
 
@@ -116,6 +123,12 @@ pub struct Assertion {
 /// Una llave de seguridad. Las llamadas bloquean hasta que el usuario la toca.
 pub trait Authenticator: Send + Sync {
     fn get_assertion(&self, request: &AssertionRequest) -> Result<Assertion, FidoError>;
+
+    /// El sistema muestra su propia ventana para tocar la llave y pedir el PIN (Windows):
+    /// Túnel no los pide.
+    fn prompts_itself(&self) -> bool {
+        false
+    }
 }
 
 /// Firma SSH codificada (`string alg, string firma, byte flags, uint32 contador`).
@@ -226,6 +239,7 @@ impl russh::Signer for SkSigner {
                     message: &to_sign,
                     key_handle: &key.key_handle,
                     user_presence: key.needs_touch(),
+                    user_verification: key.needs_pin(),
                     pin: pin.as_deref(),
                 };
                 let assertion = authenticator.get_assertion(&request);
@@ -289,7 +303,9 @@ pub fn system_authenticator() -> Result<Arc<dyn Authenticator>, FidoError> {
     }
     #[cfg(windows)]
     {
-        Err(FidoError::Unsupported)
+        crate::webauthn::WebAuthnAuthenticator::new()
+            .map(|a| Arc::new(a) as Arc<dyn Authenticator>)
+            .ok_or(FidoError::Unsupported)
     }
 }
 
@@ -398,6 +414,7 @@ mod tests {
             message,
             key_handle: &key.key_handle,
             user_presence: true,
+            user_verification: false,
             pin: None,
         };
         let blob = encode_signature(&key, &soft.get_assertion(&request).unwrap()).unwrap();
