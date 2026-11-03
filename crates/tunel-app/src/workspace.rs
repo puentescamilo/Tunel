@@ -67,9 +67,14 @@ pub fn restore(app: &mut TunelApp) {
 /// En cada fotograma: conecta las pestañas en espera que están a la vista y guarda las
 /// pestañas si cambiaron.
 pub fn tick(app: &mut TunelApp) {
+    let tabs = app.tabs.len();
     for index in app.visible_tabs() {
         if matches!(app.tabs.get(index), Some(Tab::Pending(_))) {
             connect(app, index);
+        }
+        // Si falló y se cerró, los demás índices ya no valen hasta el próximo fotograma.
+        if app.tabs.len() != tabs {
+            break;
         }
     }
     save_if_changed(app);

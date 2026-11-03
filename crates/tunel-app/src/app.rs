@@ -163,9 +163,9 @@ pub struct TunelApp {
     /// Vista dividida: hasta cuatro pestañas a la vez en la ventana principal.
     pub layout: Option<crate::layout::Layout>,
     /// Pestañas abiertas en una ventana propia.
-    pub detached: Vec<usize>,
+    pub detached: Vec<crate::panes::Detached>,
     /// Ventana desacoplada que hay que traer al frente en cuanto exista.
-    pub raise_window: Option<usize>,
+    pub raise_window: Option<egui::ViewportId>,
     pub search: String,
     /// Grupo abierto en la vista de hosts (`None` = raíz).
     pub host_group: Option<tunel_core::GroupId>,
@@ -507,6 +507,7 @@ impl TunelApp {
         self.active = None;
         self.layout = None;
         self.detached.clear();
+        self.tab_rename = None;
         self.forwards.clear();
         self.editor = None;
         self.sync = Default::default();
@@ -633,7 +634,10 @@ impl TunelApp {
             Some(Ok(mut session)) => {
                 session.title = self.tabs[index].title().to_string();
                 self.tabs[index] = Tab::Terminal(Box::new(session));
-                self.active = Some(index);
+                // Una desacoplada sigue en su ventana.
+                if !self.is_detached(index) {
+                    self.active = Some(index);
+                }
             }
             Some(Err(e)) => self.notify(format!("No se pudo reconectar: {e:#}")),
             None => {}

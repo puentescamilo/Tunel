@@ -398,8 +398,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                 });
         });
     match action {
-        Some(TabAction::Select(Some(i))) if app.is_detached(i) => app.bring_to_front(ui.ctx(), i),
-        Some(TabAction::Select(index)) => app.active = index,
+        Some(TabAction::Select(index)) => app.select_tab(ui.ctx(), index),
         Some(TabAction::Close(i)) => app.close_tab(i),
         Some(TabAction::Share { tab, team }) => crate::live::start_sharing(app, tab, team),
         Some(TabAction::StopSharing(tab)) => crate::live::stop_sharing(app, tab),
@@ -421,6 +420,19 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
 pub struct TabRename {
     index: usize,
     name: String,
+}
+
+impl TabRename {
+    /// Sigue a su pestaña tras abrir o cerrar otras; `false` si la suya se cerró.
+    pub fn remap(&mut self, f: &impl Fn(usize) -> Option<usize>) -> bool {
+        match f(self.index) {
+            Some(index) => {
+                self.index = index;
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 /// Nombre válido para una pestaña: sin espacios a los lados y no vacío.

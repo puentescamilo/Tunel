@@ -103,7 +103,7 @@ fn closing_a_tab_before_the_panes_keeps_them_pointing_at_the_same_terminals() {
 fn a_tab_opens_in_its_own_window_and_comes_back() {
     let mut app = terminals(2);
     menu(&mut app, "dos", "Abrir en otra ventana");
-    assert_eq!(app.harness.state().detached, [1]);
+    assert_eq!(app.harness.state().detached_tabs(), [1]);
     // La principal enseña la otra; la desacoplada sigue teniendo su pestaña aquí.
     assert_eq!(app.harness.state().active, Some(0));
     assert!(app.exists(&tab("dos")));
@@ -128,7 +128,7 @@ fn a_detached_tab_leaves_the_split_view() {
         app.harness.state().layout.is_none(),
         "con un solo panel no hay división"
     );
-    assert_eq!(app.harness.state().detached, [0]);
+    assert_eq!(app.harness.state().detached_tabs(), [0]);
     assert_eq!(app.harness.state().active, Some(2));
     // Y se puede volver a dividir con ella desde la principal.
     let state = app.harness.state_mut();
@@ -145,4 +145,47 @@ fn locking_closes_the_panes_and_the_windows() {
     app.click(&button("Bloquear bóveda"));
     assert!(app.harness.state().layout.is_none());
     assert!(app.harness.state().detached.is_empty());
+}
+
+#[test]
+fn closing_one_detached_tab_keeps_the_other_windows() {
+    let mut app = terminals(3);
+    menu(&mut app, "uno", "Abrir en otra ventana");
+    // La ventana interna de «uno» tapa la barra de pestañas (con ventanas de verdad no pasa).
+    crate::panes::apply(app.harness.state_mut(), 1, crate::panes::Place::Detach);
+    app.settle();
+    let windows: Vec<_> = app
+        .harness
+        .state()
+        .detached
+        .iter()
+        .map(|d| d.window)
+        .collect();
+    app.harness.state_mut().close_tab(0);
+    app.settle();
+    // «dos» pasa a ser la pestaña 0, en la misma ventana de antes.
+    let state = app.harness.state();
+    assert_eq!(state.detached_tabs(), [0]);
+    assert_eq!(state.detached[0].window, windows[1]);
+    assert_eq!(state.tabs[0].title(), "dos");
+    assert!(app.exists(&text("dos — Túnel")));
+    assert!(!app.exists(&text("uno — Túnel")));
+}
+
+#[test]
+fn renaming_follows_its_tab_when_another_closes() {
+    let mut app = terminals(3);
+    menu(&mut app, "tres", "Renombrar");
+    app.harness.state_mut().close_tab(0);
+    app.settle();
+    app.fill(&by().role(egui::accesskit::Role::TextInput), "producción");
+    app.click(&button("Guardar"));
+    let titles: Vec<String> = app
+        .harness
+        .state()
+        .tabs
+        .iter()
+        .map(|t| t.title().to_string())
+        .collect();
+    assert_eq!(titles, ["dos", "producción"]);
 }

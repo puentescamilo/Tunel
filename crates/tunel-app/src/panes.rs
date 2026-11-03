@@ -4,9 +4,20 @@
 use crate::app::{Tab, TunelApp};
 use crate::layout::{Direction, Layout};
 use crate::ui;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Tamaño con el que se abre una ventana desacoplada.
 const DETACHED_SIZE: [f32; 2] = [900.0, 600.0];
+
+static NEXT_WINDOW: AtomicU64 = AtomicU64::new(1);
+
+/// Una pestaña en su propia ventana. La ventana no cambia aunque la pestaña se reconecte
+/// o cambie de posición en la barra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Detached {
+    pub tab: usize,
+    pub window: egui::ViewportId,
+}
 
 impl TunelApp {
     /// Si la pestaña activa está en la vista dividida, la vista; si no, `None`.
@@ -22,13 +33,15 @@ impl TunelApp {
             (None, Some(active)) => vec![active],
             (None, None) => Vec::new(),
         };
-        main.into_iter()
-            .chain(self.detached.iter().copied())
-            .collect()
+        main.into_iter().chain(self.detached_tabs()).collect()
+    }
+
+    pub fn detached_tabs(&self) -> Vec<usize> {
+        self.detached.iter().map(|d| d.tab).collect()
     }
 
     pub fn is_detached(&self, tab: usize) -> bool {
-        self.detached.contains(&tab)
+        self.detached.iter().any(|d| d.tab == tab)
     }
 
     /// Se puede poner `tab` junto a lo que se ve ahora en la ventana principal.
@@ -52,7 +65,7 @@ impl TunelApp {
             Some(layout) if layout.contains(active) => layout,
             _ => Layout::Pane(active),
         };
-        self.detached.retain(|t| *t != tab);
+        self.detached.retain(|d| d.tab != tab);
         self.layout = Some(base.split(active, tab, direction));
         self.focus_pane(tab);
     }
@@ -74,8 +87,12 @@ impl TunelApp {
         }
         let was_active = self.active == Some(tab);
         self.unsplit(tab);
-        self.detached.push(tab);
-        self.raise_window = Some(tab);
+        let window = egui::ViewportId::from_hash_of((
+            "ventana",
+            NEXT_WINDOW.fetch_add(1, Ordering::Relaxed),
+        ));
+        self.detached.push(Detached { tab, window });
+        self.raise_window = Some(window);
         if was_active {
             // Lo que estaba al lado, o la pestaña de antes que siga en esta ventana.
             self.active = self
@@ -88,7 +105,7 @@ impl TunelApp {
 
     /// Vuelve a traer `tab` a la ventana principal, como pestaña activa.
     pub fn attach(&mut self, tab: usize) {
-        self.detached.retain(|t| *t != tab);
+        self.detached.retain(|d| d.tab != tab);
         if tab < self.tabs.len() {
             self.active = Some(tab);
             self.wants_focus(tab);
@@ -97,8 +114,18 @@ impl TunelApp {
 
     /// Al elegir una pestaña desacoplada se trae al frente su ventana.
     pub fn bring_to_front(&self, ctx: &egui::Context, tab: usize) {
-        if let Some(id) = self.viewport_id(tab) {
-            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Focus);
+        if let Some(d) = self.detached.iter().find(|d| d.tab == tab) {
+            ctx.send_viewport_cmd_to(d.window, egui::ViewportCommand::Focus);
+        }
+    }
+
+    /// Elegir una pestaña de la barra la pone a la vista y le da el teclado; si está en
+    /// otra ventana, trae esa ventana al frente.
+    pub fn select_tab(&mut self, ctx: &egui::Context, tab: Option<usize>) {
+        match tab {
+            Some(t) if self.is_detached(t) => self.bring_to_front(ctx, t),
+            Some(t) => self.focus_pane(t),
+            None => self.active = None,
         }
     }
 
@@ -110,7 +137,16 @@ impl TunelApp {
             .take()
             .and_then(|l| l.remap(&f))
             .filter(|l| !matches!(l, Layout::Pane(_)));
-        self.detached = self.detached.iter().filter_map(|t| f(*t)).collect();
+        self.detached = self
+            .detached
+            .iter()
+            .filter_map(|d| f(d.tab).map(|tab| Detached { tab, ..*d }))
+            .collect();
+        if let Some(rename) = self.tab_rename.as_mut()
+            && !rename.remap(&f)
+        {
+            self.tab_rename = None;
+        }
     }
 
     fn focus_pane(&mut self, tab: usize) {
@@ -125,15 +161,6 @@ impl TunelApp {
                 session.wants_focus = i == tab;
             }
         }
-    }
-
-    fn viewport_id(&self, tab: usize) -> Option<egui::ViewportId> {
-        let key = match self.tabs.get(tab)? {
-            Tab::Terminal(session) => session.key,
-            Tab::Sftp(sftp) => sftp.id,
-            Tab::Pending(_) => return None,
-        };
-        Some(egui::ViewportId::from_hash_of(("pestaña", key)))
     }
 
     /// La vista dividida de la ventana principal, con franjas que se arrastran para
@@ -201,11 +228,16 @@ impl TunelApp {
     /// Una ventana del sistema por cada pestaña desacoplada. Al cerrarla, la pestaña vuelve
     /// a la ventana principal sin desconectarse.
     pub fn show_detached(&mut self, ctx: &egui::Context) {
-        let tabs = self.tabs.len();
-        for tab in self.detached.clone() {
-            let Some(id) = self.viewport_id(tab) else {
+        // Por ventana y no por índice: si una pestaña se cierra desde su ventana, las demás
+        // siguen dibujándose en este fotograma (una ventana que no se dibuja, se cierra).
+        let windows: Vec<_> = self.detached.iter().map(|d| d.window).collect();
+        for id in windows {
+            let Some(tab) = self.detached.iter().find(|d| d.window == id).map(|d| d.tab) else {
                 continue;
             };
+            if tab >= self.tabs.len() {
+                continue;
+            }
             let title = format!("{} — Túnel", self.tabs[tab].title());
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
@@ -224,17 +256,14 @@ impl TunelApp {
                     .show(ui, |ui| self.show_tab(ui, tab));
                 ui.input(|i| i.viewport().close_requested())
             });
-            if self.tabs.len() != tabs {
-                break;
-            }
             // macOS da por tapada una ventana nueva hasta que pasa al frente, y mientras
             // tanto wgpu no pinta en ella: se queda en blanco.
-            if self.raise_window == Some(tab) {
+            if self.raise_window == Some(id) {
                 self.raise_window = None;
                 ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Focus);
             }
-            if closing {
-                self.attach(tab);
+            if closing && let Some(d) = self.detached.iter().find(|d| d.window == id).copied() {
+                self.attach(d.tab);
             }
         }
     }
