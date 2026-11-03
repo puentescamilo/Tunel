@@ -17,7 +17,9 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   la cara o el PIN de Windows Hello, solo en ese equipo. La primera vez de cada día se pide la
   contraseña maestra, para no olvidarla; al cambiarla hay que volver a activarlo.
 - **Hosts y grupos anidados**: los hosts heredan usuario y puerto de su grupo. Etiquetas,
-  filtro por etiquetas, búsqueda por nombre, dirección o etiqueta, y duplicar host.
+  filtro por etiquetas, búsqueda por nombre, dirección o etiqueta, y duplicar host. Cada grupo
+  puede llevar cualquiera de los iconos de [Phosphor](https://phosphoricons.com) en lugar de la
+  carpeta, y su tarjeta dice cuántos subgrupos y hosts tiene.
 - **Llavero**: identidades (usuario + contraseña, clave o agente SSH) y claves privadas
   OpenSSH/PEM, cifradas o no, con certificados OpenSSH opcionales. Las contraseñas se ven
   con un ojo: las tuyas siempre; las de un Team, solo sus admins.
