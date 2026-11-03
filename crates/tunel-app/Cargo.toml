@@ -56,6 +56,8 @@ windows = { version = "0.62", features = [
 [dev-dependencies]
 russh.workspace = true
 tempfile.workspace = true
+# Pruebas de la interfaz: manejan la app por su árbol de accesibilidad, sin abrir ventanas.
+egui_kittest = { version = "0.37", features = ["eframe"] }
 
 # Incrusta el icono y los datos de versión en el .exe de Windows.
 [build-dependencies]

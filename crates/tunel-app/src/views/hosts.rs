@@ -234,11 +234,15 @@ fn host_card(
             ui::icon_font(16.0),
             p.muted,
         );
+        ui::describe(&play_r, egui::Role::Button, "Conectar");
+        ui::describe(&more_r, egui::Role::Button, "Más acciones");
         if play_r.on_hover_text("Conectar").clicked() {
             actions.push(Action::Connect(host.id));
         }
         egui::Popup::menu(&more_r).show(|ui| host_menu(ui, host, actions));
     }
+    let name = format!("{}, {}", host.display_name(), subtitle(data, host));
+    ui::describe(&response, egui::Role::Button, &with_team(team, name));
     if response.double_clicked() {
         actions.push(Action::Connect(host.id));
     }
@@ -294,6 +298,11 @@ fn group_card(
         } else {
             format!("{count} hosts")
         },
+    );
+    ui::describe(
+        &response,
+        egui::Role::Button,
+        &format!("{}, {hosts}", group.name),
     );
     ui.painter().text(
         egui::pos2(text_left, rect.top() + 32.0),

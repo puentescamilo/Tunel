@@ -210,7 +210,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                 egui::Grid::new("nube-cuenta")
                     .num_columns(2)
                     .show(ui, |ui| {
-                        ui.label(noun);
+                        let label = ui.label(noun);
                         egui::ComboBox::from_id_salt("nube-cuentas")
                             .width(360.0)
                             .selected_text(
@@ -220,7 +220,9 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                                 for (i, account) in accounts.iter().enumerate() {
                                     ui.selectable_value(&mut state.account, i, &account.label);
                                 }
-                            });
+                            })
+                            .response
+                            .labelled_by(label.id);
                         ui.end_row();
                         if state.provider == Provider::Aws {
                             ui.label("Región");

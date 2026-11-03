@@ -226,6 +226,17 @@ pub struct UpdateChecker {
     pub install: install::UpdateInstall,
 }
 
+#[cfg(test)]
+impl UpdateChecker {
+    /// No comprueba nunca: las pruebas de la interfaz no salen a internet.
+    pub fn never() -> Self {
+        Self {
+            next_check: Instant::now() + Duration::from_secs(365 * 24 * 3600),
+            ..Default::default()
+        }
+    }
+}
+
 impl Default for UpdateChecker {
     fn default() -> Self {
         Self {

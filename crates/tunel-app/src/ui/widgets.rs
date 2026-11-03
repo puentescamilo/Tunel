@@ -23,6 +23,16 @@ pub fn with_icon(icon: &str, text: &str) -> String {
     }
 }
 
+/// Da nombre a un control dibujado a mano, para los lectores de pantalla y las pruebas.
+pub fn describe(response: &Response, role: egui::Role, label: &str) {
+    response.widget_info(|| egui::WidgetInfo::labeled(role, response.enabled(), label));
+}
+
+/// Como [`describe`], para un control que puede estar elegido o activado.
+pub fn describe_selected(response: &Response, role: egui::Role, selected: bool, label: &str) {
+    response.widget_info(|| egui::WidgetInfo::selected(role, response.enabled(), selected, label));
+}
+
 /// Elemento del menú lateral con barra de acento cuando está seleccionado.
 pub fn nav_item(
     ui: &mut Ui,
@@ -79,6 +89,7 @@ pub fn nav_item(
             p.muted,
         );
     }
+    describe_selected(&response, egui::Role::Button, selected, label);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -105,13 +116,14 @@ pub fn rail_item(ui: &mut Ui, icon: &str, tooltip: &str, selected: bool) -> Resp
         icon_font(19.0),
         color,
     );
+    describe_selected(&response, egui::Role::Button, selected, tooltip);
     response
         .on_hover_text(tooltip)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Interruptor de encendido/apagado.
-pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
+/// Interruptor de encendido/apagado; `label` es su nombre para los lectores de pantalla.
+pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
     let p = pal(ui);
     let (rect, mut response) = ui.allocate_exact_size(Vec2::new(38.0, 22.0), Sense::click());
     if response.clicked() {
@@ -126,6 +138,7 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     let knob = if *on { p.accent_text } else { p.muted };
     ui.painter()
         .circle_filled(egui::pos2(x, rect.center().y), 8.0, knob);
+    describe_selected(&response, egui::Role::Switch, *on, label);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -154,6 +167,7 @@ pub fn icon_button_colored(
         icon_font(16.0),
         fg,
     );
+    describe(&response, egui::Role::Button, tooltip);
     response
         .on_hover_text(tooltip)
         .on_hover_cursor(egui::CursorIcon::PointingHand)

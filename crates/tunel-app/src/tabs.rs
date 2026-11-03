@@ -192,8 +192,15 @@ fn tab(ui: &mut egui::Ui, spec: TabSpec) -> (egui::Response, bool) {
             ui::icon_font(12.0),
             fg,
         );
+        ui::describe(&close, egui::Role::Button, "Cerrar pestaña");
         close_clicked = close.clicked();
     }
+    ui::describe_selected(
+        &response,
+        egui::Role::Tab,
+        spec.selected.is_some(),
+        spec.title,
+    );
     (
         response
             .on_hover_text(spec.title)

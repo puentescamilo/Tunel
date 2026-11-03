@@ -110,26 +110,32 @@ pub fn keygen_form(ui: &mut egui::Ui, form: &mut KeyGenForm) {
         egui::Grid::new("form-generar-clave")
             .num_columns(2)
             .show(ui, |ui| {
-                ui.label("Nombre");
-                ui.text_edit_singleline(&mut form.label);
+                let label = ui.label("Nombre");
+                ui.text_edit_singleline(&mut form.label)
+                    .labelled_by(label.id);
                 ui.end_row();
-                ui.label("Tipo");
+                let label = ui.label("Tipo");
                 egui::ComboBox::from_id_salt("tipo-clave")
                     .selected_text(form.kind.label())
                     .show_ui(ui, |ui| {
                         for kind in KeyType::ALL {
                             ui.selectable_value(&mut form.kind, kind, kind.label());
                         }
-                    });
+                    })
+                    .response
+                    .labelled_by(label.id);
                 ui.end_row();
-                ui.label("Comentario");
-                ui.text_edit_singleline(&mut form.comment);
+                let label = ui.label("Comentario");
+                ui.text_edit_singleline(&mut form.comment)
+                    .labelled_by(label.id);
                 ui.end_row();
-                ui.label("Frase de paso");
-                ui.add(egui::TextEdit::singleline(&mut form.passphrase).password(true));
+                let label = ui.label("Frase de paso");
+                ui.add(egui::TextEdit::singleline(&mut form.passphrase).password(true))
+                    .labelled_by(label.id);
                 ui.end_row();
-                ui.label("Repítela");
-                ui.add(egui::TextEdit::singleline(&mut form.confirm).password(true));
+                let label = ui.label("Repítela");
+                ui.add(egui::TextEdit::singleline(&mut form.confirm).password(true))
+                    .labelled_by(label.id);
                 ui.end_row();
             });
     });

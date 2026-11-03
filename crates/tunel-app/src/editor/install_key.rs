@@ -51,14 +51,15 @@ fn ssh_hosts(data: &VaultData) -> Vec<(HostId, String)> {
 
 pub fn install_key_form(ui: &mut egui::Ui, form: &mut InstallKeyForm, data: &VaultData) {
     ui.label(format!("Clave «{}»", form.key.label));
-    ui.label("Host");
+    let label = ui.label("Host");
     combo(
         ui,
         "instalar-host",
         &mut form.host,
         &ssh_hosts(data),
         "(elige un host)",
-    );
+    )
+    .labelled_by(label.id);
     ui.label(
         egui::RichText::new(
             "Túnel se conecta al host como siempre, con su contraseña por ejemplo, y añade la \

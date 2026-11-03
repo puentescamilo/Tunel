@@ -233,18 +233,24 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                     ui.painter().text(
                         rect.right_center() - Vec2::new(12.0, 0.0),
                         Align2::RIGHT_CENTER,
-                        "↵",
-                        egui::FontId::proportional(14.0),
+                        icons::RETURN,
+                        ui::icon_font(14.0),
                         p.muted,
                     );
                 }
+                ui::describe_selected(
+                    &row,
+                    egui::Role::Button,
+                    i == state.selected,
+                    &format!("{title}, {subtitle}"),
+                );
                 if row.clicked() {
                     picked = Some(i);
                 }
             }
             ui.add_space(4.0);
             ui.label(
-                RichText::new("↑↓ para moverte · ↵ para conectar · Esc para cerrar")
+                RichText::new("↑↓ para moverte · Intro para conectar · Esc para cerrar")
                     .size(11.0)
                     .color(p.muted),
             );

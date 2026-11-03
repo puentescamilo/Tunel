@@ -265,6 +265,7 @@ fn file_row(
             ui::icon_font(13.0),
             fg,
         );
+        ui::describe(&r, egui::Role::Button, tooltip);
         clicked = r.on_hover_text(tooltip).clicked();
         right = button.left() - 8.0;
     }
@@ -277,6 +278,7 @@ fn file_row(
             p.muted,
         );
     }
+    ui::describe(&response, egui::Role::Button, name);
     (response, clicked)
 }
 

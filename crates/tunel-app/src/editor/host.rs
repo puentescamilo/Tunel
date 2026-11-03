@@ -322,7 +322,7 @@ pub(super) fn team_picker(
     id: &str,
     team: &mut Option<String>,
     teams: &[(String, String)],
-) {
+) -> egui::Response {
     let selected = team
         .as_ref()
         .and_then(|t| teams.iter().find(|(id, _)| id == t))
@@ -334,7 +334,8 @@ pub(super) fn team_picker(
             for (id, name) in teams {
                 ui.selectable_value(team, Some(id.clone()), name);
             }
-        });
+        })
+        .response
 }
 
 pub(super) fn host_form(
@@ -349,8 +350,8 @@ pub(super) fn host_form(
         .spacing([10.0, 6.0])
         .show(ui, |ui| {
             if !teams.is_empty() || form.team.is_some() {
-                ui.label("Compartir en");
-                team_picker(ui, "team-host", &mut form.team, teams);
+                let label = ui.label("Compartir en");
+                team_picker(ui, "team-host", &mut form.team, teams).labelled_by(label.id);
                 ui.end_row();
                 if form.credentials_elsewhere(data) {
                     ui.label("Credenciales");
@@ -369,12 +370,13 @@ pub(super) fn host_form(
                     ui.end_row();
                 }
             }
-            ui.label("Nombre");
+            let label = ui.label("Nombre");
             ui.add(
                 egui::TextEdit::singleline(&mut form.host.label)
                     .hint_text("web-01")
                     .desired_width(FIELD_WIDTH),
-            );
+            )
+            .labelled_by(label.id);
             ui.end_row();
             ui.label("Protocolo");
             ui.horizontal(|ui| {
@@ -394,31 +396,35 @@ pub(super) fn host_form(
                         }
                     });
                 ui.end_row();
-                ui.label("Baudios");
-                ui.text_edit_singleline(&mut form.serial_baud);
+                let label = ui.label("Baudios");
+                ui.text_edit_singleline(&mut form.serial_baud)
+                    .labelled_by(label.id);
                 ui.end_row();
             } else {
-                ui.label("Dirección");
+                let label = ui.label("Dirección");
                 ui.add(
                     egui::TextEdit::singleline(&mut form.host.address)
                         .hint_text("servidor.ejemplo.com")
                         .desired_width(FIELD_WIDTH),
-                );
+                )
+                .labelled_by(label.id);
                 ui.end_row();
-                ui.label("Puerto");
+                let label = ui.label("Puerto");
                 ui.add(
                     egui::TextEdit::singleline(&mut form.port)
                         .hint_text(default_port_hint(form.protocol))
                         .desired_width(80.0),
-                );
+                )
+                .labelled_by(label.id);
                 ui.end_row();
             }
             if form.protocol == ProtocolChoice::Mosh {
-                ui.label("Comando mosh-server");
-                ui.add(egui::TextEdit::singleline(&mut form.mosh_command).hint_text("mosh-server"));
+                let label = ui.label("Comando mosh-server");
+                ui.add(egui::TextEdit::singleline(&mut form.mosh_command).hint_text("mosh-server"))
+                    .labelled_by(label.id);
                 ui.end_row();
             }
-            ui.label("Grupo");
+            let label = ui.label("Grupo");
             // Un host de un Team solo usa grupos, jump hosts y snippets de ese Team.
             let groups: Vec<(GroupId, String)> = data
                 .groups
@@ -426,9 +432,9 @@ pub(super) fn host_form(
                 .filter(|g| can_use(&form.team, &g.team))
                 .map(|g| (g.id, g.name.clone()))
                 .collect();
-            combo(ui, "grupo", &mut form.host.group, &groups, "(sin grupo)");
+            combo(ui, "grupo", &mut form.host.group, &groups, "(sin grupo)").labelled_by(label.id);
             ui.end_row();
-            ui.label("Identidad");
+            let label = ui.label("Identidad");
             let identities: Vec<(IdentityId, String)> = data
                 .identities
                 .iter()
@@ -448,7 +454,8 @@ pub(super) fn host_form(
                 &mut form.host.identity,
                 &identities,
                 &inherited,
-            );
+            )
+            .labelled_by(label.id);
             ui.end_row();
             let identity = effective_identity(form, data);
             if let Some((identity, password)) =
@@ -468,13 +475,14 @@ pub(super) fn host_form(
                 });
                 ui.end_row();
             }
-            ui.label("Usuario nuevo");
+            let label = ui.label("Usuario nuevo");
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut form.new_username)
                         .hint_text("usuario")
                         .desired_width(FIELD_WIDTH / 2.0 - 4.0),
-                );
+                )
+                .labelled_by(label.id);
                 crate::ui::password_field(
                     ui,
                     "host-nueva",
@@ -485,18 +493,21 @@ pub(super) fn host_form(
                 );
             });
             ui.end_row();
-            ui.label("Etiquetas");
+            let label = ui.label("Etiquetas");
             ui.add(
                 egui::TextEdit::singleline(&mut form.tags)
                     .hint_text("producción, web")
                     .desired_width(FIELD_WIDTH),
-            );
+            )
+            .labelled_by(label.id);
             ui.end_row();
             // Arriba, alineada con el desplegable y no con el centro de la vista previa.
-            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.add_space(3.0);
-                ui.label("Tema");
-            });
+            let label = ui
+                .with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.add_space(3.0);
+                    ui.label("Tema")
+                })
+                .inner;
             let inherited = inherited_theme(data, form.host.group);
             theme_picker(
                 ui,
@@ -504,17 +515,22 @@ pub(super) fn host_form(
                 &mut form.host.terminal_theme,
                 &inherited,
                 &data.settings.custom_themes,
-            );
+            )
+            .labelled_by(label.id);
             ui.end_row();
         });
 
     ui.collapsing("Avanzado", |ui| {
         ui.horizontal(|ui| {
-            crate::ui::toggle(ui, &mut form.host.agent_forwarding);
+            crate::ui::toggle(
+                ui,
+                &mut form.host.agent_forwarding,
+                "Reenvío del agente SSH",
+            );
             ui.label("Reenvío del agente SSH");
         });
         ui.horizontal(|ui| {
-            crate::ui::toggle(ui, &mut form.host.x11_forwarding);
+            crate::ui::toggle(ui, &mut form.host.x11_forwarding, "Reenvío X11");
             ui.label("Reenvío X11 (aplicaciones gráficas del servidor)");
         })
         .response
@@ -579,7 +595,7 @@ pub(super) fn host_form(
             });
         }
         ui.separator();
-        ui.label("Snippet de inicio");
+        let label = ui.label("Snippet de inicio");
         let snippets: Vec<(SnippetId, String)> = data
             .snippets
             .iter()
@@ -592,7 +608,8 @@ pub(super) fn host_form(
             &mut form.host.startup_snippet,
             &snippets,
             "(ninguno)",
-        );
+        )
+        .labelled_by(label.id);
         ui.label("Variables de entorno (NOMBRE=valor por línea)");
         ui.add(
             egui::TextEdit::multiline(&mut form.env)
