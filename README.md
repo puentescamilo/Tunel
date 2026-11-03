@@ -177,7 +177,7 @@ Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puente
 e instálalo con:
 
 ```bash
-sudo apt install ./tunel_0.13.0_amd64.deb
+sudo apt install ./tunel_0.13.1_amd64.deb
 ```
 
 Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
@@ -263,7 +263,7 @@ cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` e
 Con los cuatro paquetes en `dist/`, en el equipo que tiene la clave privada:
 
 ```bash
-./scripts/firmar-version.sh 0.13.0
+./scripts/firmar-version.sh 0.13.1
 ```
 
 Escribe `SHA256SUMS.txt` con los cuatro, lo firma con `ssh-keygen -Y sign` en
