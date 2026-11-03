@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 2 de noviembre de 2026, con Túnel 0.12.1.
+Actualizada el 2 de noviembre de 2026, con Túnel 0.12.2.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
