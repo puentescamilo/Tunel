@@ -80,11 +80,6 @@ fn rail(app: &mut TunelApp, ui: &mut egui::Ui) {
             {
                 app.open_local();
             }
-            let containers = Section::Containers;
-            if ui::rail_item(ui, containers.icon(), containers.label(), false).clicked() {
-                app.section = containers;
-                app.active = None;
-            }
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 if ui::rail_item(ui, icons::LOCK, "Bloquear bóveda", false).clicked() {
                     app.lock_vault();
@@ -105,21 +100,23 @@ fn rail(app: &mut TunelApp, ui: &mut egui::Ui) {
         });
 }
 
+/// Cuántas cosas guarda la bóveda en una sección; las que no guardan nada no llevan número.
+fn section_count(data: &tunel_core::VaultData, section: Section) -> usize {
+    match section {
+        Section::Hosts => data.hosts.len(),
+        Section::Keychain => data.identities.len() + data.keys.len(),
+        Section::Forwarding => data.forwards.len(),
+        Section::Snippets => data.snippets.len(),
+        Section::KnownHosts => data.known_hosts.len(),
+        Section::Containers | Section::Settings => 0,
+    }
+}
+
 pub fn sidebar(app: &mut TunelApp, ui: &mut egui::Ui) {
     if app.active.is_some() {
         return rail(app, ui);
     }
     let p = ui::pal(ui);
-    let counts = app.data().map(|d| {
-        [
-            d.hosts.len(),
-            d.identities.len() + d.keys.len(),
-            d.forwards.len(),
-            d.snippets.len(),
-            d.known_hosts.len(),
-            0,
-        ]
-    });
     let frame = egui::Frame::new()
         .fill(p.sidebar)
         .inner_margin(egui::Margin::symmetric(12, 14));
@@ -151,9 +148,9 @@ pub fn sidebar(app: &mut TunelApp, ui: &mut egui::Ui) {
             }
             ui.add_space(12.0);
             ui::section_label(ui, "Bóveda");
-            for (i, section) in Section::ALL.into_iter().enumerate() {
+            for section in Section::ALL {
                 let selected = app.active.is_none() && app.section == section;
-                let badge = counts.map(|c| c[i]);
+                let badge = app.data().map(|d| section_count(d, section));
                 if ui::nav_item(ui, section.icon(), section.label(), selected, badge).clicked() {
                     app.section = section;
                     app.active = None;
@@ -166,12 +163,6 @@ pub fn sidebar(app: &mut TunelApp, ui: &mut egui::Ui) {
                 .clicked()
             {
                 app.open_local();
-            }
-            let containers = Section::Containers;
-            let selected = app.active.is_none() && app.section == containers;
-            if ui::nav_item(ui, containers.icon(), containers.label(), selected, None).clicked() {
-                app.section = containers;
-                app.active = None;
             }
         });
 }

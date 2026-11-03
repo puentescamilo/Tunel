@@ -250,3 +250,75 @@ fn a_new_group_holds_its_hosts() {
     let host = saved.hosts.iter().find(|h| h.label == "api-01").unwrap();
     assert_eq!(host.group, Some(group.id));
 }
+
+#[test]
+fn a_group_card_counts_its_subgroups_and_hosts() {
+    let parent = tunel_core::Group::new("Producción");
+    let child = tunel_core::Group {
+        parent: Some(parent.id),
+        ..tunel_core::Group::new("Base de datos")
+    };
+    let other = tunel_core::Group {
+        parent: Some(parent.id),
+        ..tunel_core::Group::new("Web")
+    };
+    let data = VaultData::default()
+        .with_group(parent)
+        .with_group(child)
+        .with_group(other);
+    let app = TestApp::unlocked(data);
+    let card = by()
+        .role(egui::accesskit::Role::Button)
+        .label("Producción, 2 grupos y 0 hosts");
+    assert!(app.exists(&card));
+}
+
+#[test]
+fn a_group_gets_a_phosphor_icon() {
+    let mut app =
+        TestApp::unlocked(VaultData::default().with_group(tunel_core::Group::new("Bases")));
+    let card = by()
+        .role(egui::accesskit::Role::Button)
+        .label("Bases, 0 hosts");
+    app.get(&card).click_secondary();
+    app.settle();
+    app.click(&button("Editar grupo"));
+    app.harness.check_accessibility();
+    // La carpeta de siempre, hasta que se elige otro.
+    let selected = |name: &'static str| {
+        by().role(egui::accesskit::Role::Button)
+            .label(name)
+            .predicate(|n| {
+                n.is_selected() == Some(true) || n.toggled() == Some(egui::accesskit::Toggled::True)
+            })
+    };
+    assert!(app.exists(&selected("folder")));
+
+    app.type_into(&field("Icono"), "database");
+    assert!(!app.exists(&button("folder")), "la búsqueda no filtra");
+    app.click(&button("database"));
+    assert!(app.exists(&selected("database")));
+    app.click(&button("Guardar"));
+    let saved = app.lock_and_read();
+    assert_eq!(saved.groups[0].icon.as_deref(), Some("database"));
+}
+
+#[test]
+fn going_back_to_the_folder_clears_the_icon() {
+    let group = tunel_core::Group {
+        icon: Some("cloud".into()),
+        ..tunel_core::Group::new("Nube")
+    };
+    let mut app = TestApp::unlocked(VaultData::default().with_group(group));
+    app.get(
+        &by()
+            .role(egui::accesskit::Role::Button)
+            .label("Nube, 0 hosts"),
+    )
+    .click_secondary();
+    app.settle();
+    app.click(&button("Editar grupo"));
+    app.click(&button("Volver a la carpeta"));
+    app.click(&button("Guardar"));
+    assert_eq!(app.lock_and_read().groups[0].icon, None);
+}

@@ -49,7 +49,6 @@ fn vault_path() -> anyhow::Result<std::path::PathBuf> {
     Ok(dirs.data_dir().join(VAULT_FILE))
 }
 
-/// Icono de la barra de tareas en Windows y Linux. En macOS se usa el del paquete `.app`.
 /// Solo en depuración: `TUNEL_DEV_POSITION=x,y` abre la ventana en esa posición, por ejemplo
 /// en la pantalla Retina para que las capturas salgan a doble resolución.
 fn dev_position(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
@@ -64,9 +63,12 @@ fn dev_position(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
     viewport
 }
 
+/// Icono de la barra de tareas en Windows y Linux. En macOS se usa el del paquete `.app`.
 fn window_icon(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
     if cfg!(target_os = "macos") {
-        return viewport;
+        // El del paquete `.app`. Sin icono, eframe pondría en el Dock el de egui mientras la app
+        // está abierta; el vacío le dice que no toque el que hay.
+        return viewport.with_icon(egui::IconData::default());
     }
     match eframe::icon_data::from_png_bytes(include_bytes!("../assets/icons/256x256.png")) {
         Ok(icon) => viewport.with_icon(icon),

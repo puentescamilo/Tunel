@@ -25,7 +25,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let network = Group {
         identity: Some(root.id),
+        icon: Some("network".into()),
         ..Group::new("Red")
+    };
+    let databases = Group {
+        parent: Some(prod.id),
+        icon: Some("database".into()),
+        ..Group::new("Bases de datos")
     };
     let bastion = Host {
         group: Some(prod.id),
@@ -81,7 +87,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_identity(root)
         .with_group(prod)
         .with_group(staging)
-        .with_group(network);
+        .with_group(network)
+        .with_group(databases);
     for host in hosts {
         data = data.with_host(host);
     }
