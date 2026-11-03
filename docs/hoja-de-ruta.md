@@ -26,6 +26,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 6c | Contenedores Docker de un host SSH | 0.10.0 | ✅ |
 | 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | ✅ |
 | 7b | Autocompletado de comandos en la terminal | 0.12.0 | ✅ |
+| 7c | Vista dividida de hasta cuatro terminales y terminales en otra ventana | 0.13.0 | ✅ |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
