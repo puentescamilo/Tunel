@@ -370,7 +370,10 @@ impl TunelApp {
         }
     }
 
-    fn build(cc: &eframe::CreationContext<'_>, vault_path: PathBuf) -> anyhow::Result<Self> {
+    pub(crate) fn build(
+        cc: &eframe::CreationContext<'_>,
+        vault_path: PathBuf,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             engine: Engine::new(cc.egui_ctx.clone())?,
             lock: LockScreen::new(vault_path),

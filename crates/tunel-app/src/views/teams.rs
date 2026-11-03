@@ -398,7 +398,7 @@ fn invite_form(app: &mut TunelApp, ui: &mut egui::Ui, team: &TeamLocal, busy: bo
                         .hint_text("Correo de la cuenta a invitar")
                         .desired_width(240.0),
                 );
-                ui::toggle(ui, &mut teams.invite_admin);
+                ui::toggle(ui, &mut teams.invite_admin, "Admin");
                 ui.label("Admin");
                 let email = teams.invite_email.trim().to_string();
                 let search = ui

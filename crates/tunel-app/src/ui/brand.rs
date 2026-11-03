@@ -185,6 +185,7 @@ pub fn button(ui: &mut Ui, id: &str, label: &str) -> Response {
         rect.center().y - galley.size().y / 2.0,
     );
     painter.galley(text_pos, galley, look.text);
+    super::describe(&response, egui::Role::Button, label);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

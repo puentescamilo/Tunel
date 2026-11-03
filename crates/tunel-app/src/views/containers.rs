@@ -159,7 +159,7 @@ fn remote_section(app: &mut TunelApp, ui: &mut egui::Ui) {
             .remote_host
             .and_then(|id| hosts.iter().find(|(h, _)| *h == id))
             .map_or("(elige un host)", |(_, name)| name.as_str());
-        egui::ComboBox::from_id_salt("docker-servidor")
+        let combo = egui::ComboBox::from_id_salt("docker-servidor")
             .selected_text(current)
             .show_ui(ui, |ui| {
                 for (id, name) in &hosts {
@@ -170,7 +170,9 @@ fn remote_section(app: &mut TunelApp, ui: &mut egui::Ui) {
                         chosen = Some(*id);
                     }
                 }
-            });
+            })
+            .response;
+        ui::describe(&combo, egui::Role::ComboBox, "Servidor con Docker");
         if app.containers.remote_host.is_some() {
             reload = ui::icon_button(ui, icons::REFRESH, "Volver a consultar").clicked();
         }
@@ -304,7 +306,7 @@ fn kubernetes_section(app: &mut TunelApp, ui: &mut egui::Ui) {
         ui::section_label(ui, "Kubernetes");
         if let Loading::Ready(contexts) = &app.containers.contexts {
             let current = app.containers.context.clone().unwrap_or_default();
-            egui::ComboBox::from_id_salt("kube-contexto")
+            let combo = egui::ComboBox::from_id_salt("kube-contexto")
                 .selected_text(&current)
                 .show_ui(ui, |ui| {
                     for context in contexts {
@@ -312,7 +314,9 @@ fn kubernetes_section(app: &mut TunelApp, ui: &mut egui::Ui) {
                             switch = Some(context.clone());
                         }
                     }
-                });
+                })
+                .response;
+            ui::describe(&combo, egui::Role::ComboBox, "Contexto de Kubernetes");
         }
         reload = ui::icon_button(ui, icons::REFRESH, "Volver a consultar").clicked();
         ui.add(

@@ -56,6 +56,8 @@ windows = { version = "0.62", features = [
 [dev-dependencies]
 russh.workspace = true
 tempfile.workspace = true
+# Pruebas de la interfaz: manejan la app por su árbol de accesibilidad, sin abrir ventanas.
+egui_kittest = { version = "0.37", features = ["eframe"] }
 
 # Incrusta el icono y los datos de versión en el .exe de Windows.
 [build-dependencies]
@@ -80,10 +82,11 @@ minimum-system-version = "11.0"
 signing-identity = "-"
 
 # El binario solo enlaza libudev; X11, Wayland, OpenGL y Vulkan se cargan al arrancar.
+# DejaVu Sans es el respaldo de los glifos que no tenga la fuente del sistema (ui::theme).
 [package.metadata.packager.deb]
 package-name = "tunel"
 section = "net"
-depends = ["libudev1", "libxkbcommon0", "libegl1", "libgl1"]
+depends = ["libudev1", "libxkbcommon0", "libegl1", "libgl1", "fonts-dejavu-core"]
 
 # Instaladores de Windows: .msi (WiX) y .exe (NSIS, se instala para el usuario sin pedir administrador).
 [package.metadata.packager.wix]

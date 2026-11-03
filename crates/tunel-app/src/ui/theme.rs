@@ -206,6 +206,15 @@ const MONO_FONTS: &[&str] = &[
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
 ];
 
+/// Respaldo para los glifos que no tienen las de arriba ni las de egui, como las flechas
+/// (→, ↑): sin él, en un Ubuntu sin Noto Sans salen como cuadros. El paquete .deb depende de
+/// `fonts-dejavu-core`, que la instala.
+const FALLBACK_FONTS: &[&str] = &[
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+];
+
 fn first_readable(paths: &[&str]) -> Option<(String, Vec<u8>)> {
     paths
         .iter()
@@ -252,12 +261,18 @@ pub fn install_fonts(
         tracing::info!(%family, "fuente de terminal elegida");
         prefer(&mut fonts, FontFamily::Monospace, "mono-elegida", bytes);
     }
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+    let fallback = first_readable(FALLBACK_FONTS).map(|(path, bytes)| {
+        tracing::info!(path, "fuente de respaldo");
         fonts
-            .families
-            .entry(family)
-            .or_default()
-            .push(ICON_FONT.into());
+            .font_data
+            .insert("respaldo".into(), Arc::new(FontData::from_owned(bytes)));
+    });
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        let list = fonts.families.entry(family).or_default();
+        if fallback.is_some() {
+            list.push("respaldo".into());
+        }
+        list.push(ICON_FONT.into());
     }
     fonts
         .families

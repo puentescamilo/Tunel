@@ -78,16 +78,40 @@ pub(super) fn setting_row(
     help: &str,
     control: impl FnOnce(&mut egui::Ui),
 ) {
+    labelled_setting_row(ui, label, help, |ui| -> Option<egui::Response> {
+        control(ui);
+        None
+    });
+}
+
+/// Como [`setting_row`], para un control sin texto propio (un número, un desplegable): toma
+/// como nombre el de la fila, para que un lector de pantalla diga qué ajusta.
+pub(super) fn labelled_setting_row<R: Into<Option<egui::Response>>>(
+    ui: &mut egui::Ui,
+    label: &str,
+    help: &str,
+    control: impl FnOnce(&mut egui::Ui) -> R,
+) {
     let p = ui::pal(ui);
     ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            ui.label(label);
-            if !help.is_empty() {
-                ui.label(RichText::new(help).size(12.0).color(p.muted));
-            }
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
+        let name = ui
+            .vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                let name = ui.label(label);
+                if !help.is_empty() {
+                    ui.label(RichText::new(help).size(12.0).color(p.muted));
+                }
+                name
+            })
+            .inner;
+        let control = ui
+            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                control(ui).into()
+            })
+            .inner;
+        if let Some(control) = control {
+            control.labelled_by(name.id);
+        }
     });
     ui.add_space(6.0);
 }
@@ -121,8 +145,8 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
             setting_row(ui, "Cursor", "Los programas como vim pueden cambiarlo mientras se ejecutan", |ui| {
                 themes::cursor_selector(ui, &mut settings.cursor_style);
             });
-            setting_row(ui, "Tamaño de letra de la terminal", "", |ui| {
-                ui.add(egui::Slider::new(&mut settings.font_size, MIN_FONT..=MAX_FONT).suffix(" pt"));
+            labelled_setting_row(ui, "Tamaño de letra de la terminal", "", |ui| {
+                ui.add(egui::Slider::new(&mut settings.font_size, MIN_FONT..=MAX_FONT).suffix(" pt"))
             });
             super::fonts::rows(ui, &mut settings, &app.fonts);
             super::fonts::import_row(app, ui, &mut settings);
@@ -168,19 +192,19 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         });
         card(ui, icons::TERMINAL, "Terminal", |ui| {
             setting_row(ui, "Restaurar las pestañas", "Al abrir Túnel vuelven las de la última vez; cada una se conecta al seleccionarla", |ui| {
-                ui::toggle(ui, &mut settings.restore_tabs);
+                ui::toggle(ui, &mut settings.restore_tabs, "Restaurar las pestañas");
             });
-            setting_row(ui, "Líneas de historial", "Cuántas líneas se guardan para desplazarse hacia atrás", |ui| {
-                ui.add(egui::DragValue::new(&mut settings.scrollback_lines).range(0..=200_000).speed(100));
+            labelled_setting_row(ui, "Líneas de historial", "Cuántas líneas se guardan para desplazarse hacia atrás", |ui| {
+                ui.add(egui::DragValue::new(&mut settings.scrollback_lines).range(0..=200_000).speed(100))
             });
-            setting_row(ui, "Keepalive SSH", "Segundos entre paquetes para mantener viva la conexión (0 = desactivado)", |ui| {
-                ui.add(egui::DragValue::new(&mut settings.keepalive_seconds).range(0..=600).suffix(" s"));
+            labelled_setting_row(ui, "Keepalive SSH", "Segundos entre paquetes para mantener viva la conexión (0 = desactivado)", |ui| {
+                ui.add(egui::DragValue::new(&mut settings.keepalive_seconds).range(0..=600).suffix(" s"))
             });
             setting_row(ui, "Copiar al seleccionar", "Copia el texto al portapapeles en cuanto lo seleccionas", |ui| {
-                ui::toggle(ui, &mut settings.copy_on_select);
+                ui::toggle(ui, &mut settings.copy_on_select, "Copiar al seleccionar");
             });
             setting_row(ui, "Autocompletar comandos", "Sugiere en gris los comandos que ya ejecutaste y tus snippets; → la acepta. Lo que empieza por un espacio no se recuerda", |ui| {
-                ui::toggle(ui, &mut settings.autocomplete);
+                ui::toggle(ui, &mut settings.autocomplete, "Autocompletar comandos");
             });
             let commands = app.history.entries().len();
             let help = match commands {

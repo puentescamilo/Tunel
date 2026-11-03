@@ -15,11 +15,11 @@ fn picker(
     suggested: &[&str],
     custom: &[String],
     state: &FontState,
-) {
+) -> egui::Response {
     let p = ui::pal(ui);
     let selected = value.clone().unwrap_or_else(|| SYSTEM.to_string());
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt(id)
+        let combo = egui::ComboBox::from_id_salt(id)
             .selected_text(&selected)
             .width(200.0)
             .show_ui(ui, |ui| {
@@ -34,7 +34,8 @@ fn picker(
                         ui.selectable_value(value, Some(family.clone()), family);
                     }
                 }
-            });
+            })
+            .response;
         if let Some(family) = value.as_deref() {
             if state.is_pending(family) {
                 ui.spinner();
@@ -48,13 +49,15 @@ fn picker(
                 .on_hover_text(error);
             }
         }
-    });
+        combo
+    })
+    .inner
 }
 
 /// Filas de fuentes de la tarjeta «Apariencia».
 pub fn rows(ui: &mut egui::Ui, settings: &mut tunel_core::Settings, state: &FontState) {
     let custom = settings.custom_fonts.clone();
-    super::settings::setting_row(
+    super::settings::labelled_setting_row(
         ui,
         "Fuente de la terminal",
         "Se descarga de Google Fonts la primera vez",
@@ -69,7 +72,7 @@ pub fn rows(ui: &mut egui::Ui, settings: &mut tunel_core::Settings, state: &Font
             )
         },
     );
-    super::settings::setting_row(ui, "Fuente de la interfaz", "", |ui| {
+    super::settings::labelled_setting_row(ui, "Fuente de la interfaz", "", |ui| {
         picker(
             ui,
             "fuente-interfaz",

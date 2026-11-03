@@ -28,6 +28,8 @@ pub const LIGHTNING: &str = "\u{E2DE}";
 pub const UPLOAD: &str = "\u{E4C0}";
 pub const DOWNLOAD: &str = "\u{E20C}";
 pub const ARROW_UP: &str = "\u{E08E}";
+/// La tecla Intro (↵): las fuentes del sistema no siempre la tienen.
+pub const RETURN: &str = "\u{E044}";
 pub const REFRESH: &str = "\u{E036}";
 pub const BROADCAST: &str = "\u{E0F2}";
 pub const COLUMNS: &str = "\u{E546}";

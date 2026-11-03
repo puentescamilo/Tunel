@@ -89,7 +89,7 @@ pub(super) fn combo<T: Copy + PartialEq>(
     value: &mut Option<T>,
     options: &[(T, String)],
     none: &str,
-) {
+) -> egui::Response {
     let selected = value
         .and_then(|v| options.iter().find(|(o, _)| *o == v))
         .map(|(_, l)| l.clone())
@@ -101,7 +101,8 @@ pub(super) fn combo<T: Copy + PartialEq>(
             for (option, label) in options {
                 ui.selectable_value(value, Some(*option), label);
             }
-        });
+        })
+        .response
 }
 
 fn pick_text_file(title: &str) -> Option<Result<String, String>> {
@@ -113,18 +114,22 @@ fn pick_text_file(title: &str) -> Option<Result<String, String>> {
 }
 
 fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
-    ui.label("Nombre");
-    ui.text_edit_singleline(&mut key.label);
-    ui.horizontal(|ui| {
-        ui.label("Clave privada (OpenSSH/PEM)");
-        if ui.button("Importar archivo…").clicked()
-            && let Some(Ok(text)) = pick_text_file("Clave privada")
-        {
-            key.private_key.zeroize();
-            key.private_key = text;
-            key.public_key = None;
-        }
-    });
+    let label = ui.label("Nombre");
+    ui.text_edit_singleline(&mut key.label)
+        .labelled_by(label.id);
+    let private_label = ui
+        .horizontal(|ui| {
+            let label = ui.label("Clave privada (OpenSSH/PEM)");
+            if ui.button("Importar archivo…").clicked()
+                && let Some(Ok(text)) = pick_text_file("Clave privada")
+            {
+                key.private_key.zeroize();
+                key.private_key = text;
+                key.public_key = None;
+            }
+            label
+        })
+        .inner;
     let edited = ui
         .add(
             egui::TextEdit::multiline(&mut key.private_key)
@@ -132,15 +137,17 @@ fn key_form(ui: &mut egui::Ui, key: &mut SshKey) {
                 .code_editor()
                 .hint_text("-----BEGIN OPENSSH PRIVATE KEY-----"),
         )
+        .labelled_by(private_label.id)
         .changed();
     if edited {
         key.public_key = None;
     }
     // Se copia en cada fotograma: la copia se borra al soltarse.
     let mut passphrase = Zeroizing::new(key.passphrase.clone().unwrap_or_default());
-    ui.label("Frase de paso (si la clave está cifrada)");
+    let label = ui.label("Frase de paso (si la clave está cifrada)");
     if ui
         .add(egui::TextEdit::singleline(&mut *passphrase).password(true))
+        .labelled_by(label.id)
         .changed()
     {
         key.passphrase.zeroize();
@@ -186,13 +193,15 @@ fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData, s
     egui::Grid::new("form-identidad")
         .num_columns(2)
         .show(ui, |ui| {
-            ui.label("Nombre");
-            ui.text_edit_singleline(&mut identity.label);
+            let label = ui.label("Nombre");
+            ui.text_edit_singleline(&mut identity.label)
+                .labelled_by(label.id);
             ui.end_row();
-            ui.label("Usuario");
-            ui.text_edit_singleline(&mut identity.username);
+            let label = ui.label("Usuario");
+            ui.text_edit_singleline(&mut identity.username)
+                .labelled_by(label.id);
             ui.end_row();
-            ui.label("Contraseña");
+            let label = ui.label("Contraseña");
             let mut password = identity.password.clone().unwrap_or_default();
             let can_reveal = secrets.can_reveal(identity.team.as_deref());
             let changed = ui
@@ -200,15 +209,16 @@ fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData, s
                     crate::ui::password_field(ui, "identidad", &mut password, "", 220.0, can_reveal)
                 })
                 .inner
+                .labelled_by(label.id)
                 .changed();
             if changed {
                 identity.password = Some(password).filter(|p| !p.is_empty());
             }
             ui.end_row();
-            ui.label("Clave");
+            let label = ui.label("Clave");
             let keys: Vec<(KeyId, String)> =
                 data.keys.iter().map(|k| (k.id, k.label.clone())).collect();
-            combo(ui, "clave", &mut identity.key, &keys, "(ninguna)");
+            combo(ui, "clave", &mut identity.key, &keys, "(ninguna)").labelled_by(label.id);
             ui.end_row();
         });
     ui.checkbox(
@@ -237,17 +247,34 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     let mut save = false;
     let mut cancel = false;
     use crate::ui::icons;
-    let (icon, noun, exists) = match &*editor {
-        Editor::Host(f) => (icons::SERVERS, "host", data.host(f.host.id).is_some()),
-        Editor::Group(g) => (icons::FOLDER, "grupo", data.group(g.id).is_some()),
-        Editor::Identity(i) => (icons::IDENTITY, "identidad", data.identity(i.id).is_some()),
-        Editor::Key(k) => (icons::KEY, "clave SSH", data.key(k.id).is_some()),
-        Editor::GenerateKey(_) => (icons::KEY, "clave SSH", false),
-        Editor::InstallKey(_) => (icons::UPLOAD, "clave SSH", false),
-        Editor::Snippet(s) => (icons::CODE, "snippet", data.snippet(s.id).is_some()),
+    // «Nuevo» o «Nueva», según el nombre.
+    let (icon, noun, new, exists) = match &*editor {
+        Editor::Host(f) => (
+            icons::SERVERS,
+            "host",
+            "Nuevo",
+            data.host(f.host.id).is_some(),
+        ),
+        Editor::Group(g) => (icons::FOLDER, "grupo", "Nuevo", data.group(g.id).is_some()),
+        Editor::Identity(i) => (
+            icons::IDENTITY,
+            "identidad",
+            "Nueva",
+            data.identity(i.id).is_some(),
+        ),
+        Editor::Key(k) => (icons::KEY, "clave SSH", "Nueva", data.key(k.id).is_some()),
+        Editor::GenerateKey(_) => (icons::KEY, "clave SSH", "Nueva", false),
+        Editor::InstallKey(_) => (icons::UPLOAD, "clave SSH", "Nueva", false),
+        Editor::Snippet(s) => (
+            icons::CODE,
+            "snippet",
+            "Nuevo",
+            data.snippet(s.id).is_some(),
+        ),
         Editor::Forward { rule, .. } => (
             icons::TUNNEL,
             "regla de túnel",
+            "Nueva",
             data.forwards.iter().any(|f| f.id == rule.id),
         ),
     };
@@ -256,7 +283,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
         Editor::GenerateKey(_) => ("Generar clave SSH".to_string(), "  Generar  "),
         Editor::InstallKey(_) => ("Instalar la clave en un host".to_string(), "  Instalar  "),
         _ if exists => (format!("Editar {noun}"), "  Guardar  "),
-        _ => (format!("Nuevo {noun}"), "  Guardar  "),
+        _ => (format!("{new} {noun}"), "  Guardar  "),
     };
     let p = crate::ui::theme::palette(ctx);
     let frame = egui::Frame::popup(&ctx.global_style())
@@ -281,13 +308,15 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                 .show(ui, |ui| match editor {
                     Editor::Host(form) => host_form(ui, form, &data, &teams, &secrets),
                     Editor::Group(group) => {
-                        ui.label("Nombre");
-                        ui.text_edit_singleline(&mut group.name);
+                        let label = ui.label("Nombre");
+                        ui.text_edit_singleline(&mut group.name)
+                            .labelled_by(label.id);
                         if !teams.is_empty() || group.team.is_some() {
-                            ui.label("Compartir en (con sus subgrupos y hosts)");
-                            team_picker(ui, "team-grupo", &mut group.team, &teams);
+                            let label = ui.label("Compartir en (con sus subgrupos y hosts)");
+                            team_picker(ui, "team-grupo", &mut group.team, &teams)
+                                .labelled_by(label.id);
                         }
-                        ui.label("Identidad por defecto para sus hosts");
+                        let label = ui.label("Identidad por defecto para sus hosts");
                         let identities: Vec<(IdentityId, String)> = data
                             .identities
                             .iter()
@@ -299,16 +328,18 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                             &mut group.identity,
                             &identities,
                             "(ninguna)",
-                        );
-                        ui.label("Grupo padre");
+                        )
+                        .labelled_by(label.id);
+                        let label = ui.label("Grupo padre");
                         let parents: Vec<(GroupId, String)> = data
                             .groups
                             .iter()
                             .filter(|g| g.id != group.id)
                             .map(|g| (g.id, g.name.clone()))
                             .collect();
-                        combo(ui, "grupo-padre", &mut group.parent, &parents, "(raíz)");
-                        ui.label("Tema de la terminal para sus hosts");
+                        combo(ui, "grupo-padre", &mut group.parent, &parents, "(raíz)")
+                            .labelled_by(label.id);
+                        let label = ui.label("Tema de la terminal para sus hosts");
                         let inherited = inherited_theme(&data, group.parent);
                         crate::views::themes::theme_picker(
                             ui,
@@ -316,21 +347,24 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                             &mut group.terminal_theme,
                             &inherited,
                             &data.settings.custom_themes,
-                        );
+                        )
+                        .labelled_by(label.id);
                     }
                     Editor::Identity(identity) => identity_form(ui, identity, &data, &secrets),
                     Editor::Key(key) => key_form(ui, key),
                     Editor::GenerateKey(form) => keygen_form(ui, form),
                     Editor::InstallKey(form) => install_key_form(ui, form, &data),
                     Editor::Snippet(snippet) => {
-                        ui.label("Nombre");
-                        ui.text_edit_singleline(&mut snippet.label);
-                        ui.label("Script");
+                        let label = ui.label("Nombre");
+                        ui.text_edit_singleline(&mut snippet.label)
+                            .labelled_by(label.id);
+                        let label = ui.label("Script");
                         ui.add(
                             egui::TextEdit::multiline(&mut snippet.script)
                                 .desired_rows(8)
                                 .code_editor(),
-                        );
+                        )
+                        .labelled_by(label.id);
                         ui.label(
                             egui::RichText::new(
                                 "Escribe {{nombre}} para que pida un valor al ejecutarlo, por \
@@ -355,9 +389,10 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                                 "Dinámico (-D)",
                             );
                         });
-                        ui.label("Nombre");
-                        ui.text_edit_singleline(&mut rule.label);
-                        ui.label("Host SSH");
+                        let label = ui.label("Nombre");
+                        ui.text_edit_singleline(&mut rule.label)
+                            .labelled_by(label.id);
+                        let label = ui.label("Host SSH");
                         // Una regla de un Team solo va por hosts de ese Team.
                         let hosts: Vec<(HostId, String)> = data
                             .hosts
@@ -366,7 +401,8 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                             .map(|h| (h.id, h.display_name().to_string()))
                             .collect();
                         let mut host = Some(rule.host);
-                        combo(ui, "regla-host", &mut host, &hosts, "(elige un host)");
+                        combo(ui, "regla-host", &mut host, &hosts, "(elige un host)")
+                            .labelled_by(label.id);
                         if let Some(h) = host {
                             rule.host = h;
                         }
@@ -375,22 +411,32 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                         } else {
                             "Escuchar en este equipo"
                         };
-                        ui.label(bind_label);
+                        let label = ui.label(bind_label);
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(&mut rule.bind_address)
                                     .desired_width(140.0),
+                            )
+                            .labelled_by(label.id);
+                            ui.add(
+                                egui::TextEdit::singleline(bind_port)
+                                    .hint_text("puerto")
+                                    .desired_width(70.0),
                             );
-                            ui.add(egui::TextEdit::singleline(bind_port).desired_width(70.0));
                         });
                         if rule.kind != ForwardKind::Dynamic {
-                            ui.label("Destino");
+                            let label = ui.label("Destino");
                             ui.horizontal(|ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut rule.destination_host)
                                         .desired_width(140.0),
+                                )
+                                .labelled_by(label.id);
+                                ui.add(
+                                    egui::TextEdit::singleline(dest_port)
+                                        .hint_text("puerto")
+                                        .desired_width(70.0),
                                 );
-                                ui.add(egui::TextEdit::singleline(dest_port).desired_width(70.0));
                             });
                         }
                         if let Some(error) = error {

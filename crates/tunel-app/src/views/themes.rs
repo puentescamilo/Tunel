@@ -71,7 +71,7 @@ pub fn theme_picker(
     value: &mut Option<String>,
     inherited: &InheritedTheme,
     custom: &[Theme],
-) {
+) -> egui::Response {
     let inherited_theme = palette::find(inherited.theme_id, custom);
     let inherit_label = match inherited.group {
         Some(group) => format!("Del grupo «{group}» ({})", inherited_theme.name),
@@ -86,7 +86,7 @@ pub fn theme_picker(
         inherit_label.clone()
     };
     ui.vertical(|ui| {
-        egui::ComboBox::from_id_salt(id_salt)
+        let combo = egui::ComboBox::from_id_salt(id_salt)
             .selected_text(selected)
             .width(CARD_WIDTH)
             .show_ui(ui, |ui| {
@@ -95,11 +95,14 @@ pub fn theme_picker(
                 for theme in custom.iter().chain(palette::builtin()) {
                     ui.selectable_value(value, Some(theme.id.clone()), &theme.name);
                 }
-            });
+            })
+            .response;
         let size = Vec2::new(CARD_WIDTH, PREVIEW_HEIGHT);
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
         paint_preview(ui.painter(), rect, effective);
-    });
+        combo
+    })
+    .inner
 }
 
 /// Tarjeta seleccionable de un tema. Devuelve (seleccionar, eliminar).
@@ -160,6 +163,7 @@ fn theme_card(ui: &mut egui::Ui, theme: &Theme, selected: bool) -> (bool, bool) 
             ui::icon_font(12.0),
             Color32::WHITE,
         );
+        ui::describe(&r, egui::Role::Button, "Eliminar tema importado");
         delete = r.on_hover_text("Eliminar tema importado").clicked();
     }
     let badge = if theme.has_low_contrast() {
@@ -188,6 +192,7 @@ fn theme_card(ui: &mut egui::Ui, theme: &Theme, selected: bool) -> (bool, bool) 
     } else {
         "Usar este tema"
     };
+    ui::describe_selected(&response, egui::Role::RadioButton, selected, &theme.name);
     let clicked = response
         .on_hover_text(tooltip)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -278,6 +283,7 @@ fn swatch(ui: &mut egui::Ui, fill: Color32, selected: bool, tooltip: &str) -> eg
         SWATCH / 2.0 - 1.0,
         Stroke::new(if selected { 2.0 } else { 1.0 }, ring),
     );
+    ui::describe_selected(&response, egui::Role::RadioButton, selected, tooltip);
     response
         .on_hover_text(tooltip)
         .on_hover_cursor(egui::CursorIcon::PointingHand)

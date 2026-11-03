@@ -30,6 +30,9 @@ mod updates;
 mod views;
 mod workspace;
 
+#[cfg(test)]
+mod ui_tests;
+
 use anyhow::Context as _;
 
 const APP_NAME: &str = "Túnel";

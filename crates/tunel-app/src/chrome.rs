@@ -335,6 +335,8 @@ fn version_row(app: &mut TunelApp, ui: &mut egui::Ui) {
         FontId::proportional(12.0),
         color,
     );
+    let name = format!("Túnel {} {status}", current_version());
+    ui::describe(&response, egui::Role::Button, name.trim_end());
     let hover = match &app.updates.status {
         UpdateStatus::Failed(error) => {
             format!("No se pudo comprobar: {error}\nClic para reintentar")

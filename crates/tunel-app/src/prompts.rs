@@ -196,13 +196,15 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                 answers.resize(prompts.len(), String::new());
                 let mut submit = false;
                 for (i, ((prompt, echo), answer)) in prompts.iter().zip(answers.iter_mut()).enumerate() {
-                    ui.label(prompt);
-                    let field = ui.add(
-                        egui::TextEdit::singleline(answer)
-                            .password(!echo)
-                            .desired_width(f32::INFINITY)
-                            .margin(egui::Margin::symmetric(10, 8)),
-                    );
+                    let label = ui.label(prompt);
+                    let field = ui
+                        .add(
+                            egui::TextEdit::singleline(answer)
+                                .password(!echo)
+                                .desired_width(f32::INFINITY)
+                                .margin(egui::Margin::symmetric(10, 8)),
+                        )
+                        .labelled_by(label.id);
                     if i == 0 && answer.is_empty() && !field.has_focus() {
                         field.request_focus();
                     }
