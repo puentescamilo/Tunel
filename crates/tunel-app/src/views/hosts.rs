@@ -251,10 +251,33 @@ fn host_card(
         .context_menu(|ui| host_menu(ui, host, actions));
 }
 
+/// «3 hosts», o «2 grupos y 1 host» si tiene subgrupos.
+fn group_contents(groups: usize, hosts: usize) -> String {
+    let hosts = if hosts == 1 {
+        "1 host".to_string()
+    } else {
+        format!("{hosts} hosts")
+    };
+    match groups {
+        0 => hosts,
+        1 => format!("1 grupo y {hosts}"),
+        n => format!("{n} grupos y {hosts}"),
+    }
+}
+
+/// El icono de un grupo: el elegido o la carpeta.
+pub fn group_icon(group: &Group) -> String {
+    group
+        .icon
+        .as_deref()
+        .and_then(ui::icon_catalog::glyph)
+        .map_or_else(|| icons::FOLDER.to_string(), String::from)
+}
+
 fn group_card(
     ui: &mut egui::Ui,
     group: &Group,
-    count: usize,
+    (groups, count): (usize, usize),
     team: Option<&str>,
     actions: &mut Vec<Action>,
 ) {
@@ -280,7 +303,7 @@ fn group_card(
         egui::StrokeKind::Inside,
     );
     let avatar = Rect::from_min_size(rect.left_top() + Vec2::new(12.0, 11.0), Vec2::splat(36.0));
-    ui::avatar(ui, avatar, icons::FOLDER, p.muted);
+    ui::avatar(ui, avatar, &group_icon(group), p.muted);
     let text_left = avatar.right() + 12.0;
     let name = elided(
         ui,
@@ -291,14 +314,7 @@ fn group_card(
     );
     ui.painter()
         .galley(egui::pos2(text_left, rect.top() + 12.0), name, p.text);
-    let hosts = with_team(
-        team,
-        if count == 1 {
-            "1 host".to_string()
-        } else {
-            format!("{count} hosts")
-        },
-    );
+    let hosts = with_team(team, group_contents(groups, count));
     ui::describe(
         &response,
         egui::Role::Button,
@@ -546,13 +562,14 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                 if !groups.is_empty() {
                     ui::section_label(ui, "Grupos");
                     grid(ui, &groups, GROUP_HEIGHT, |ui, group| {
-                        let count = data
+                        let hosts = data
                             .hosts
                             .iter()
                             .filter(|h| h.group == Some(group.id))
                             .count();
+                        let groups = child_groups(&data, Some(group.id)).len();
                         let team = team_name(&teams, &group.team);
-                        group_card(ui, group, count, team, &mut actions);
+                        group_card(ui, group, (groups, hosts), team, &mut actions);
                     });
                     ui.add_space(8.0);
                 }
@@ -619,6 +636,14 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_group_says_how_many_groups_and_hosts_it_holds() {
+        assert_eq!(group_contents(0, 0), "0 hosts");
+        assert_eq!(group_contents(0, 1), "1 host");
+        assert_eq!(group_contents(1, 3), "1 grupo y 3 hosts");
+        assert_eq!(group_contents(2, 0), "2 grupos y 0 hosts");
+    }
 
     #[test]
     fn columns_fit_cards_into_width() {

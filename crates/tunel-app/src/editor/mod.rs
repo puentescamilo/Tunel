@@ -1,6 +1,7 @@
 //! Ventanas de edición para cada tipo de elemento de la bóveda.
 
 mod host;
+mod icon_picker;
 mod install_key;
 mod keygen;
 
@@ -248,6 +249,11 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     let mut cancel = false;
     use crate::ui::icons;
     // «Nuevo» o «Nueva», según el nombre.
+    // El de un grupo cambia al elegir otro en el editor.
+    let group_icon = match &*editor {
+        Editor::Group(g) => crate::views::hosts::group_icon(g),
+        _ => String::new(),
+    };
     let (icon, noun, new, exists) = match &*editor {
         Editor::Host(f) => (
             icons::SERVERS,
@@ -255,7 +261,12 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
             "Nuevo",
             data.host(f.host.id).is_some(),
         ),
-        Editor::Group(g) => (icons::FOLDER, "grupo", "Nuevo", data.group(g.id).is_some()),
+        Editor::Group(g) => (
+            group_icon.as_str(),
+            "grupo",
+            "Nuevo",
+            data.group(g.id).is_some(),
+        ),
         Editor::Identity(i) => (
             icons::IDENTITY,
             "identidad",
@@ -311,6 +322,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                         let label = ui.label("Nombre");
                         ui.text_edit_singleline(&mut group.name)
                             .labelled_by(label.id);
+                        icon_picker::icon_picker(ui, &mut group.icon);
                         if !teams.is_empty() || group.team.is_some() {
                             let label = ui.label("Compartir en (con sus subgrupos y hosts)");
                             team_picker(ui, "team-grupo", &mut group.team, &teams)

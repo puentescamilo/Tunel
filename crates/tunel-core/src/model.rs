@@ -161,6 +161,9 @@ pub struct Group {
     /// Tema de la terminal para los hosts del grupo que no tengan uno propio.
     #[serde(default)]
     pub terminal_theme: Option<String>,
+    /// Icono de Phosphor por su nombre (`database`, `cloud`…); `None` es la carpeta.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 impl Group {

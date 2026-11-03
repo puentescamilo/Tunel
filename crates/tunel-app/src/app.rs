@@ -26,13 +26,15 @@ pub enum Section {
     Snippets,
     KnownHosts,
     Settings,
-    /// Contenedores y pods de este equipo; va con «Este equipo», no con la bóveda.
+    /// Contenedores y pods de este equipo y de los servidores; no se guardan en la bóveda.
     Containers,
 }
 
 impl Section {
-    pub const ALL: [Section; 6] = [
+    /// En el orden del menú lateral.
+    pub const ALL: [Section; 7] = [
         Section::Hosts,
+        Section::Containers,
         Section::Keychain,
         Section::Forwarding,
         Section::Snippets,
@@ -328,7 +330,12 @@ impl TunelApp {
                 .data()
                 .and_then(|d| d.hosts.iter().find(|h| h.label == name))
                 .cloned();
-            self.editor = host.map(Editor::host);
+            // Si no hay un host con ese nombre, un grupo.
+            let group = self
+                .data()
+                .and_then(|d| d.groups.iter().find(|g| g.name == name))
+                .cloned();
+            self.editor = host.map(Editor::host).or(group.map(Editor::Group));
         }
         if let Ok(query) = std::env::var("TUNEL_DEV_QUICK") {
             self.quick_connect = Some(crate::quick_connect::QuickConnect::with_query(query));
