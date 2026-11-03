@@ -59,14 +59,15 @@ pub fn restore(app: &mut TunelApp) {
         .map(|t| Tab::Pending(Box::new(t)))
         .collect();
     app.active = restored.active;
-    app.split = None;
+    app.layout = None;
+    app.detached.clear();
     app.saved_workspace = Some(restored);
 }
 
 /// En cada fotograma: conecta las pestañas en espera que están a la vista y guarda las
 /// pestañas si cambiaron.
 pub fn tick(app: &mut TunelApp) {
-    for index in [app.active, app.split].into_iter().flatten() {
+    for index in app.visible_tabs() {
         if matches!(app.tabs.get(index), Some(Tab::Pending(_))) {
             connect(app, index);
         }

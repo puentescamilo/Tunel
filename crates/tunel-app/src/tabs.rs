@@ -93,7 +93,7 @@ fn shadowed_dot(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
 enum TabAction {
     Select(Option<usize>),
     Close(usize),
-    ToggleSplit(usize),
+    Place(usize, crate::panes::Place),
     Share { tab: u64, team: String },
     StopSharing(u64),
     Reconnect(usize),
@@ -310,15 +310,11 @@ fn context_menu(
     }
     ui.separator();
     share_menu(ui, &app.tabs[i], teams, action);
-    let label = if app.split == Some(i) {
-        "Quitar de la vista dividida"
-    } else {
-        "Abrir en vista dividida"
-    };
-    if ui.button(ui::with_icon(icons::COLUMNS, label)).clicked() {
-        *action = Some(TabAction::ToggleSplit(i));
-        ui.close();
+    ui.separator();
+    if let Some(place) = crate::panes::place_menu(ui, app, i) {
+        *action = Some(TabAction::Place(i, place));
     }
+    ui.separator();
     if ui
         .button(ui::with_icon(icons::CLOSE, "Cerrar pestaña"))
         .clicked()
@@ -363,9 +359,15 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                             action = Some(TabAction::Select(None));
                         }
                         for (i, t) in app.tabs.iter().enumerate() {
-                            let selected = app.active == Some(i) || app.split == Some(i);
+                            let in_view = app.shown_layout().is_some_and(|l| l.contains(i));
+                            let selected = app.active == Some(i) || in_view;
+                            let detached = app.is_detached(i);
                             let spec = TabSpec {
-                                icon: t.icon(),
+                                icon: if detached {
+                                    icons::ARROW_SQUARE_OUT
+                                } else {
+                                    t.icon()
+                                },
                                 title: t.title(),
                                 selected: selected
                                     .then(|| selected_look(tab_background(app, &p, t), border)),
@@ -396,6 +398,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                 });
         });
     match action {
+        Some(TabAction::Select(Some(i))) if app.is_detached(i) => app.bring_to_front(ui.ctx(), i),
         Some(TabAction::Select(index)) => app.active = index,
         Some(TabAction::Close(i)) => app.close_tab(i),
         Some(TabAction::Share { tab, team }) => crate::live::start_sharing(app, tab, team),
@@ -409,13 +412,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                 name: app.tabs[i].title().to_string(),
             });
         }
-        Some(TabAction::ToggleSplit(i)) => {
-            app.split = if app.split == Some(i) || app.active == Some(i) {
-                None
-            } else {
-                Some(i)
-            };
-        }
+        Some(TabAction::Place(i, place)) => crate::panes::apply(app, i, place),
         None => {}
     }
 }
