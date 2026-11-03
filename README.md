@@ -53,8 +53,10 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 - **SSH** con autenticación por clave, certificado, agente SSH (Unix y Windows), contraseña
   y keyboard-interactive (2FA).
-- **Llaves de seguridad FIDO2** (claves `sk-ed25519` y `sk-ecdsa` de OpenSSH, como una YubiKey)
-  en macOS y Linux: Túnel pide que toques la llave y, si la clave lo exige, el PIN.
+- **Llaves de seguridad FIDO2** (claves `sk-ed25519` y `sk-ecdsa` de OpenSSH, como una YubiKey).
+  En macOS y Linux, Túnel pide que toques la llave y, si la clave lo exige, el PIN. En Windows
+  (10 versión 1903 o posterior) lo pide el propio sistema en su ventana de seguridad, sin
+  permisos de administrador.
 - **Verificación de la clave del servidor**: pide confirmación la primera vez y avisa en rojo
   si la clave cambia, aunque sea de otro algoritmo.
 - **Jump hosts encadenados** (ProxyJump) y conexión a través de **proxy SOCKS5 o HTTP**.
@@ -745,7 +747,7 @@ La hoja de ruta detallada, con el orden de las próximas entregas, está en
 | Telnet, puerto serie, terminal local | ✅ |
 | Mosh | ✅ con el `mosh-client` del sistema |
 | Tema por grupo, reenvío X11 | ✅ |
-| Llaves FIDO2 (`sk-*`) | ✅ macOS y Linux · ⏳ Windows |
+| Llaves FIDO2 (`sk-*`) | ✅ |
 | Cliente Mosh propio | ⏳ más adelante |
 | Desbloqueo con Touch ID o Windows Hello | ✅ |
 | Autocompletado de comandos | ✅ |
