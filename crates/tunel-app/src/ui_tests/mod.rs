@@ -59,7 +59,7 @@ impl TestApp {
         use egui_kittest::kittest::NodeT;
         self.harness
             .query_all(by().role(egui::accesskit::Role::Label))
-            .filter_map(|n| n.accesskit_node().value().map(str::to_string))
+            .filter_map(|n| n.accesskit_node().value())
             .collect()
     }
 
