@@ -6194,6 +6194,7 @@ name = "tunel-app"
 version = "0.13.1"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "block2 0.6.2",
  "chrono",
  "directories",
@@ -6220,6 +6221,7 @@ dependencies = [
  "tunel-ssh",
  "tunel-sync",
  "tunel-term",
+ "tunel-vaultwarden",
  "unicode-width 0.2.2",
  "uuid",
  "windows",

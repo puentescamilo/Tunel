@@ -27,8 +27,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | ✅ |
 | 7b | Autocompletado de comandos en la terminal | 0.12.0 | ✅ |
 | 7c | Vista dividida de hasta cuatro terminales y terminales en otra ventana | 0.13.0 | ✅ |
-| 8a | Vaultwarden: protocolo, cifrado y pruebas contra un servidor real | 0.14.0 | en curso |
-| 8b | Vaultwarden: ajustes y credenciales de Vaultwarden en las identidades | 0.14.0 | pendiente |
+| 8a | Vaultwarden: protocolo, cifrado y pruebas contra un servidor real | 0.14.0 | ✅ |
+| 8b | Vaultwarden: ajustes y credenciales de Vaultwarden en las identidades | 0.14.0 | ✅ |
 | 8c | Vaultwarden: mover una credencial de Túnel a Vaultwarden | — | pendiente |
 | 8d | Vaultwarden: hosts desde las colecciones | — | pendiente |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |

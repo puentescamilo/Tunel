@@ -126,7 +126,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
     ui::page_header(
         ui,
         "Ajustes",
-        "Apariencia, terminal, sincronización, importación y seguridad",
+        "Apariencia, terminal, sincronización, Vaultwarden, importación y seguridad",
         |_| {},
     );
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -135,6 +135,7 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
         if app.sync.account().is_some() {
             card(ui, icons::USERS, "Teams", |ui| super::teams::card(app, ui));
         }
+        card(ui, icons::SHIELD, "Vaultwarden", |ui| super::vaultwarden::card(app, ui));
         card(ui, icons::PALETTE, "Apariencia", |ui| {
             setting_row(ui, "Interfaz", "En automático sigue al fondo del tema de la terminal", |ui| {
                 themes::ui_mode_selector(ui, &mut settings.ui_theme);
@@ -327,7 +328,7 @@ fn biometric_row(app: &mut TunelApp, ui: &mut egui::Ui) {
 }
 
 /// "hace 3 min", para la última sincronización.
-fn ago(when: std::time::SystemTime) -> String {
+pub(super) fn ago(when: std::time::SystemTime) -> String {
     let secs = when.elapsed().map_or(0, |d| d.as_secs());
     match secs {
         0..60 => "hace un momento".into(),

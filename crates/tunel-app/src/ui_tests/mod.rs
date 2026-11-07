@@ -8,6 +8,7 @@ mod navigation;
 mod panes;
 mod prompts;
 mod tabs;
+mod vaultwarden;
 
 use crate::app::TunelApp;
 use egui_kittest::kittest::{By, Queryable, by};

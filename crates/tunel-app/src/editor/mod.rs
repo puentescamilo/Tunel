@@ -190,7 +190,13 @@ fn public_key_field(ui: &mut egui::Ui, key: &mut SshKey) {
     );
 }
 
-fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData, secrets: &Secrets) {
+fn identity_form(
+    ui: &mut egui::Ui,
+    identity: &mut Identity,
+    data: &VaultData,
+    secrets: &Secrets,
+    vaultwarden: &crate::vaultwarden::Choices,
+) {
     egui::Grid::new("form-identidad")
         .num_columns(2)
         .show(ui, |ui| {
@@ -202,30 +208,133 @@ fn identity_form(ui: &mut egui::Ui, identity: &mut Identity, data: &VaultData, s
             ui.text_edit_singleline(&mut identity.username)
                 .labelled_by(label.id);
             ui.end_row();
-            let label = ui.label("Contraseña");
-            let mut password = identity.password.clone().unwrap_or_default();
-            let can_reveal = secrets.can_reveal(identity.team.as_deref());
-            let changed = ui
-                .horizontal(|ui| {
-                    crate::ui::password_field(ui, "identidad", &mut password, "", 220.0, can_reveal)
-                })
-                .inner
-                .labelled_by(label.id)
-                .changed();
-            if changed {
-                identity.password = Some(password).filter(|p| !p.is_empty());
+            // Sin cuenta de Vaultwarden ni vínculo, el formulario es el de siempre.
+            if vaultwarden.connected || identity.vaultwarden.is_some() {
+                credential_source(ui, identity);
             }
-            ui.end_row();
+            let team = identity.team.clone();
+            if let Some(link) = identity.vaultwarden.as_mut() {
+                let label = ui.label("Elemento");
+                vaultwarden_item(ui, link, team.as_deref(), vaultwarden).labelled_by(label.id);
+                ui.end_row();
+            } else {
+                let label = ui.label("Contraseña");
+                let mut password = identity.password.clone().unwrap_or_default();
+                let can_reveal = secrets.can_reveal(identity.team.as_deref());
+                let changed = ui
+                    .horizontal(|ui| {
+                        crate::ui::password_field(
+                            ui,
+                            "identidad",
+                            &mut password,
+                            "",
+                            220.0,
+                            can_reveal,
+                        )
+                    })
+                    .inner
+                    .labelled_by(label.id)
+                    .changed();
+                if changed {
+                    identity.password = Some(password).filter(|p| !p.is_empty());
+                }
+                ui.end_row();
+            }
             let label = ui.label("Clave");
             let keys: Vec<(KeyId, String)> =
                 data.keys.iter().map(|k| (k.id, k.label.clone())).collect();
             combo(ui, "clave", &mut identity.key, &keys, "(ninguna)").labelled_by(label.id);
             ui.end_row();
         });
+    if identity.vaultwarden.is_some() {
+        let help = if identity.team.is_some() {
+            "La contraseña no se guarda en Túnel ni en el Team: cada miembro la descifra con su \
+             propia cuenta de Vaultwarden, y quien no tenga acceso a esa colección la escribe \
+             al conectar."
+        } else {
+            "La contraseña no se guarda en Túnel: se usa la de Vaultwarden, con una copia local \
+             de hasta 7 días por si el servidor no responde."
+        };
+        ui.label(
+            egui::RichText::new(help)
+                .size(12.0)
+                .color(crate::ui::pal(ui).muted),
+        );
+    }
     ui.checkbox(
         &mut identity.use_agent,
         "Probar también las claves del agente SSH del sistema",
     );
+}
+
+/// «Guardada en Túnel» o «En Vaultwarden». Al pasar a Vaultwarden se borra la contraseña
+/// local: el secreto no debe quedar en la bóveda.
+fn credential_source(ui: &mut egui::Ui, identity: &mut Identity) {
+    let label = ui.label("Credencial");
+    let linked = identity.vaultwarden.is_some();
+    let mut use_vaultwarden = linked;
+    ui.horizontal(|ui| {
+        ui.radio_value(&mut use_vaultwarden, false, "Guardada en Túnel");
+        ui.radio_value(&mut use_vaultwarden, true, "En Vaultwarden");
+    })
+    .response
+    .labelled_by(label.id);
+    ui.end_row();
+    if use_vaultwarden == linked {
+        return;
+    }
+    if use_vaultwarden {
+        identity.password.zeroize();
+        identity.password = None;
+        identity.vaultwarden = Some(VaultwardenLink::default());
+    } else {
+        identity.vaultwarden = None;
+    }
+}
+
+/// Elegir el elemento de Vaultwarden, con un buscador.
+fn vaultwarden_item(
+    ui: &mut egui::Ui,
+    link: &mut VaultwardenLink,
+    team: Option<&str>,
+    vaultwarden: &crate::vaultwarden::Choices,
+) -> egui::Response {
+    let current = match vaultwarden.name(&link.item_id) {
+        Some(name) => name.to_string(),
+        None if link.item_id.is_empty() => "(elige un elemento)".to_string(),
+        None => "(elemento no disponible)".to_string(),
+    };
+    if vaultwarden.items.is_empty() {
+        let note = if vaultwarden.connected {
+            "Vaultwarden aún no ha sincronizado"
+        } else {
+            "Vaultwarden no está conectado en este equipo"
+        };
+        return ui.label(format!("{current} · {note}"));
+    }
+    let search_id = ui.make_persistent_id("vaultwarden-buscar");
+    let mut search: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
+    let response = egui::ComboBox::from_id_salt("vaultwarden-elemento")
+        .selected_text(current)
+        .width(320.0)
+        .show_ui(ui, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut search).hint_text("Buscar…"));
+            let needle = search.to_lowercase();
+            for choice in vaultwarden
+                .for_identity(team)
+                .filter(|c| c.label.to_lowercase().contains(&needle))
+                .take(200)
+            {
+                let selected = choice.item_id == link.item_id;
+                if ui.selectable_label(selected, &choice.label).clicked() {
+                    link.item_id = choice.item_id.clone();
+                    link.organization_id = choice.organization_id.clone();
+                }
+            }
+        })
+        .response;
+    ui.data_mut(|d| d.insert_temp(search_id, search));
+    response
 }
 
 /// Muestra el editor abierto, si lo hay, y aplica los cambios al guardar.
@@ -235,6 +344,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     };
     let teams = crate::sync::teams::names(app);
     let secrets = Secrets::of(app);
+    let vaultwarden = app.vaultwarden.choices();
     if let Some(Editor::GenerateKey(form)) = app.editor.as_mut()
         && let Some(key) = form.poll()
     {
@@ -362,7 +472,9 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                         )
                         .labelled_by(label.id);
                     }
-                    Editor::Identity(identity) => identity_form(ui, identity, &data, &secrets),
+                    Editor::Identity(identity) => {
+                        identity_form(ui, identity, &data, &secrets, &vaultwarden)
+                    }
                     Editor::Key(key) => key_form(ui, key),
                     Editor::GenerateKey(form) => keygen_form(ui, form),
                     Editor::InstallKey(form) => install_key_form(ui, form, &data),
@@ -496,6 +608,14 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                     tunel_core::share::Credentials::Copy,
                 )
             })
+        }
+        Some(Editor::Identity(identity))
+            if identity
+                .vaultwarden
+                .as_ref()
+                .is_some_and(|l| l.item_id.is_empty()) =>
+        {
+            Err("Elige el elemento de Vaultwarden de esta identidad".to_string())
         }
         Some(Editor::Identity(identity)) => Ok(data.with_identity(identity.clone())),
         Some(Editor::Key(key)) => Ok(data.with_key(key.clone())),
