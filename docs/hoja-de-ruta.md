@@ -30,7 +30,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 8a | Vaultwarden: protocolo, cifrado y pruebas contra un servidor real | 0.14.0 | ✅ |
 | 8b | Vaultwarden: ajustes y credenciales de Vaultwarden en las identidades | 0.14.0 | ✅ |
 | 8c | Vaultwarden: mover una credencial de Túnel a Vaultwarden | 0.14.0 | ✅ |
-| 8d | Vaultwarden: hosts desde las colecciones | — | pendiente |
+| 8d | Vaultwarden: hosts desde las colecciones | 0.14.0 | ✅ |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -145,7 +145,8 @@ que siempre. El diseño completo está en [vaultwarden.md](vaultwarden.md).
 - **8c. Mover a Vaultwarden:** pasar la credencial de una identidad a la bóveda personal o a una
   colección, y dejar la identidad vinculada.
 - **8d. Hosts desde las colecciones:** los elementos con URI `ssh://`, `telnet://` o `mosh://`
-  aparecen como hosts, con su puerto y la contraseña *enable* de los switches.
+  se importan como hosts, con su puerto, sus notas y un grupo por colección. La contraseña
+  *enable* de los switches queda pendiente: Túnel aún no la usa.
 
 ## Pendiente de fases anteriores
 

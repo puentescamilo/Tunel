@@ -995,6 +995,7 @@ impl eframe::App for TunelApp {
         crate::prompts::show(self, &ctx);
         crate::quick_connect::show(self, &ctx);
         crate::views::cloud_import::show(self, &ctx);
+        crate::vaultwarden::import::show(self, &ctx);
         crate::tabs::rename_dialog(self, &ctx);
         views::snippets::prompt_dialog(self, &ctx);
         crate::chrome::notices(self, &ctx);

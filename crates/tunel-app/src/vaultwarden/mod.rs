@@ -5,6 +5,7 @@
 //! como siempre. Si Vaultwarden falla, se usa la copia local (7 días) y, sin ella, SSH pide la
 //! contraseña al conectar.
 
+pub mod import;
 pub mod mover;
 
 use crate::app::TunelApp;
@@ -106,6 +107,8 @@ pub struct VaultwardenController {
     /// Lo último de lo que se avisó, para no repetirlo en cada sincronización.
     warned: Vec<String>,
     pub form: VwForm,
+    /// Ventana «Importar de Vaultwarden» abierta.
+    pub import: Option<import::ImportDialog>,
 }
 
 impl Default for VaultwardenController {
@@ -121,6 +124,7 @@ impl Default for VaultwardenController {
             next: None,
             warned: Vec::new(),
             form: VwForm::default(),
+            import: None,
         }
     }
 }
