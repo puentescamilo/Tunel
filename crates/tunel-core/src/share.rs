@@ -51,6 +51,15 @@ impl Copies {
         copy.id = IdentityId::new();
         copy.team = team.map(str::to_string);
         copy.key = key;
+        // Un elemento personal de Vaultwarden no lo puede descifrar nadie más del Team.
+        if team.is_some()
+            && copy
+                .vaultwarden
+                .as_ref()
+                .is_some_and(|l| l.organization_id.is_none())
+        {
+            copy.vaultwarden = None;
+        }
         self.identities.insert(id, copy.id);
         (data.with_identity(copy.clone()), Some(copy.id))
     }
@@ -208,7 +217,7 @@ pub fn credentials_elsewhere(data: &VaultData, host: HostId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Group, Host, Identity, SshKey};
+    use crate::model::{Group, Host, Identity, SshKey, VaultwardenLink};
 
     const TEAM: &str = "6c2b8f0e-6f4e-4d55-9a37-1e2f3a4b5c6d";
 
@@ -345,5 +354,29 @@ mod tests {
         shared.team = Some(TEAM.into());
         let data = data.with_host(shared);
         assert!(credentials_elsewhere(&data, host));
+    }
+
+    #[test]
+    fn copying_to_a_team_keeps_organization_links_and_drops_personal_ones() {
+        let link = |org: Option<&str>| VaultwardenLink {
+            item_id: "i".into(),
+            organization_id: org.map(str::to_string),
+        };
+        for (org, kept) in [(None, false), (Some("org"), true)] {
+            let mut identity = Identity::new("sw", "admin");
+            identity.vaultwarden = Some(link(org));
+            let host = Host {
+                identity: Some(identity.id),
+                ..Host::new("sw", "10.0.0.1")
+            };
+            let id = host.id;
+            let data = VaultData::default().with_identity(identity).with_host(host);
+            let moved = move_host(&data, id, Some(TEAM), Credentials::Copy);
+            let copy = moved
+                .identity(moved.host(id).unwrap().identity.unwrap())
+                .unwrap();
+            assert_eq!(copy.team.as_deref(), Some(TEAM));
+            assert_eq!(copy.vaultwarden.is_some(), kept, "{org:?}");
+        }
     }
 }

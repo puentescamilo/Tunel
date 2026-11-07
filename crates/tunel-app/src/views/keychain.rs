@@ -20,7 +20,9 @@ pub fn key_kind(private_key: &str) -> &'static str {
 
 fn identity_details(data: &VaultData, identity: &Identity) -> String {
     let mut parts = vec![identity.username.clone()];
-    if identity.password.is_some() {
+    if identity.vaultwarden.is_some() {
+        parts.push("Vaultwarden".into());
+    } else if identity.password.is_some() {
         parts.push("contraseña".into());
     }
     if let Some(key) = identity.key.and_then(|k| data.key(k)) {
@@ -216,5 +218,12 @@ mod tests {
             identity_details(&data, &identity),
             "ana · contraseña · agente SSH · 1 host"
         );
+
+        let mut linked = Identity::new("sw", "admin");
+        linked.vaultwarden = Some(tunel_core::VaultwardenLink {
+            item_id: "i".into(),
+            organization_id: None,
+        });
+        assert_eq!(identity_details(&data, &linked), "admin · Vaultwarden");
     }
 }

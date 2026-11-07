@@ -2,13 +2,17 @@
 
 use crate::session::TerminalSession;
 use anyhow::Context as _;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, watch};
 use tunel_core::io::{SessionIo, SessionOutput, session_pair};
 use tunel_core::sync::SyncLocal;
-use tunel_core::{ForwardId, HostId, PortForward, Protocol, VaultData};
+use tunel_core::vaultwarden::ExternalSecret;
+use tunel_core::{
+    ForwardId, HostId, PortForward, Protocol, ResolvedHost, VaultData, VaultwardenLink,
+};
 use tunel_ssh::authorized_keys::{self, Installed};
 use tunel_ssh::forward::{self, ActiveForward};
 use tunel_ssh::sftp::{RemoteEntry, SftpClient};
@@ -82,6 +86,7 @@ pub enum AppEvent {
     },
     /// Un aviso de una tarea en segundo plano.
     Notice(String),
+    Vaultwarden(Box<crate::vaultwarden::VwEvent>),
     Cloud(crate::views::cloud_import::CloudEvent),
     Containers(crate::views::containers::ContainersEvent),
     RecordingsLoaded {
@@ -118,6 +123,9 @@ pub struct Engine {
     next_id: u64,
     /// Cambia de valor al bloquear: las tareas de red en curso se cancelan.
     generation: watch::Sender<u64>,
+    /// Secretos de Vaultwarden por id de elemento, para las identidades vinculadas. Vacío
+    /// sin Vaultwarden: entonces conectar es exactamente igual que sin la integración.
+    pub external_secrets: HashMap<String, ExternalSecret>,
 }
 
 fn host_key_lookup(vault: &VaultData) -> HostKeyLookup {
@@ -146,6 +154,7 @@ impl Engine {
             events,
             next_id: 1,
             generation: watch::Sender::new(0),
+            external_secrets: HashMap::new(),
         })
     }
 
@@ -204,14 +213,30 @@ impl Engine {
         }
     }
 
+    /// El host y sus saltos con las credenciales con las que conectar: las de la bóveda y,
+    /// en las identidades vinculadas, las de Vaultwarden.
+    pub(crate) fn resolve(
+        &self,
+        vault: &VaultData,
+        host: HostId,
+    ) -> Result<(ResolvedHost, Vec<ResolvedHost>), tunel_core::ResolveError> {
+        let lookup = |link: &VaultwardenLink| self.external_secrets.get(&link.item_id).cloned();
+        let target = vault.resolve(host)?.with_external(lookup);
+        let jumps = vault
+            .resolve_jump_chain(host)?
+            .into_iter()
+            .map(|jump| jump.with_external(lookup))
+            .collect();
+        Ok((target, jumps))
+    }
+
     fn connect_task(
         &self,
         vault: &VaultData,
         host: HostId,
     ) -> anyhow::Result<impl Future<Output = Result<SshConnection, tunel_ssh::SshError>> + use<>>
     {
-        let target = vault.resolve(host)?;
-        let jumps = vault.resolve_jump_chain(host)?;
+        let (target, jumps) = self.resolve(vault, host)?;
         let ctx = self.connect_context(vault);
         let ui = self.ctx.clone();
         Ok(async move {
@@ -868,5 +893,72 @@ mod tests {
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
         );
         assert!(engine.events.try_recv().is_err());
+    }
+
+    fn linked_switch() -> (VaultData, HostId) {
+        let mut identity = tunel_core::Identity::new("Switches", "admin");
+        identity.vaultwarden = Some(VaultwardenLink {
+            item_id: "sw-core".into(),
+            organization_id: Some("org".into()),
+        });
+        let local = tunel_core::Identity::new("Local", "ana").with_password("local");
+        let jump = tunel_core::Host {
+            identity: Some(local.id),
+            ..tunel_core::Host::new("bastión", "10.0.0.1")
+        };
+        let host = tunel_core::Host {
+            identity: Some(identity.id),
+            jump_hosts: vec![jump.id],
+            ..tunel_core::Host::new("sw-core", "10.0.0.2")
+        };
+        let id = host.id;
+        let data = VaultData::default()
+            .with_identity(identity)
+            .with_identity(local)
+            .with_host(jump)
+            .with_host(host);
+        (data, id)
+    }
+
+    #[test]
+    fn without_vaultwarden_connecting_resolves_exactly_as_before() {
+        let engine = Engine::new(egui::Context::default()).unwrap();
+        let (data, host) = linked_switch();
+        let (target, jumps) = engine.resolve(&data, host).unwrap();
+        assert_eq!(target, data.resolve(host).unwrap());
+        assert_eq!(jumps, data.resolve_jump_chain(host).unwrap());
+        assert!(target.identity.unwrap().password.is_none(), "SSH la pedirá");
+        assert_eq!(
+            jumps[0].identity.as_ref().unwrap().password.as_deref(),
+            Some("local")
+        );
+    }
+
+    #[test]
+    fn a_linked_identity_connects_with_the_vaultwarden_secret() {
+        let mut engine = Engine::new(egui::Context::default()).unwrap();
+        engine.external_secrets.insert(
+            "sw-core".into(),
+            tunel_core::vaultwarden::ExternalSecret {
+                name: "SW-Core".into(),
+                organization_id: Some("org".into()),
+                username: Some("otro".into()),
+                password: Some("cisco".into()),
+                private_key: None,
+            },
+        );
+        let (data, host) = linked_switch();
+        let (target, jumps) = engine.resolve(&data, host).unwrap();
+        let identity = target.identity.unwrap();
+        assert_eq!(identity.password.as_deref(), Some("cisco"));
+        assert_eq!(
+            identity.username, "admin",
+            "manda el usuario de la identidad"
+        );
+        assert_eq!(
+            jumps[0].identity.as_ref().unwrap().password.as_deref(),
+            Some("local"),
+            "las identidades locales no cambian"
+        );
     }
 }

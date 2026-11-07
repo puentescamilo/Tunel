@@ -189,6 +189,20 @@ pub struct Identity {
     pub key: Option<KeyId>,
     /// Usar el agente SSH del sistema (SSH_AUTH_SOCK / Pageant).
     pub use_agent: bool,
+    /// El secreto está en un elemento de Vaultwarden y no en la bóveda. Opcional para que
+    /// las versiones anteriores lean la identidad igual (al editarla la guardan sin él).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vaultwarden: Option<VaultwardenLink>,
+}
+
+/// Elemento de Vaultwarden del que sale el secreto de una identidad. Solo referencias: el
+/// secreto nunca entra en la bóveda, que en un Team llega a todos sus miembros.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct VaultwardenLink {
+    pub item_id: String,
+    /// Organización del elemento; `None` si está en la bóveda personal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
 }
 
 impl Identity {
@@ -201,6 +215,7 @@ impl Identity {
             password: None,
             key: None,
             use_agent: false,
+            vaultwarden: None,
         }
     }
 
@@ -352,6 +367,7 @@ impl std::fmt::Debug for Identity {
             .field("password", &redact(&self.password))
             .field("key", &self.key)
             .field("use_agent", &self.use_agent)
+            .field("vaultwarden", &self.vaultwarden)
             .finish()
     }
 }

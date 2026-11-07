@@ -199,6 +199,7 @@ pub struct TunelApp {
     pub history_failed: bool,
     pub notices: Vec<(Instant, String)>,
     pub sync: crate::sync::SyncController,
+    pub vaultwarden: crate::vaultwarden::VaultwardenController,
     pub updates: crate::updates::UpdateChecker,
     pub live: crate::live::LiveUi,
     pub fonts: crate::fonts::FontState,
@@ -229,6 +230,7 @@ impl TunelApp {
             Err(e) => return self.notify(format!("TUNEL_DEV_PASSWORD: {e}")),
         }
         crate::sync::on_unlock(self);
+        crate::vaultwarden::on_unlock(self);
         crate::workspace::restore(self);
         crate::autocomplete::load(self);
         // `TUNEL_DEV_SERVER=<url>` deja escrita la dirección del servidor en Ajustes.
@@ -445,6 +447,7 @@ impl TunelApp {
             history_failed: false,
             notices: Vec::new(),
             sync: Default::default(),
+            vaultwarden: Default::default(),
             updates: Default::default(),
             live: Default::default(),
             fonts: Default::default(),
@@ -480,6 +483,7 @@ impl TunelApp {
         match vault.commit(data.clone()) {
             Ok(()) => {
                 crate::sync::after_commit(self, &old, &data);
+                crate::vaultwarden::after_commit(self, &old, &data);
                 crate::audit::after_commit(self, &old, &data);
             }
             Err(e) => self.notify(format!("No se pudo guardar la bóveda: {e}")),
@@ -511,6 +515,8 @@ impl TunelApp {
         self.forwards.clear();
         self.editor = None;
         self.sync = Default::default();
+        self.vaultwarden = Default::default();
+        self.engine.external_secrets.clear();
         self.live = Default::default();
         self.saved_workspace = None;
         crate::autocomplete::save(self);
@@ -747,6 +753,7 @@ impl TunelApp {
                     self.notify(crate::editor::installed_message(&host, &result))
                 }
                 AppEvent::Notice(message) => self.notify(message),
+                AppEvent::Vaultwarden(event) => crate::vaultwarden::on_event(self, *event),
                 AppEvent::Cloud(event) => views::cloud_import::on_event(self, event),
                 AppEvent::Containers(event) => views::containers::on_event(self, event),
                 AppEvent::RecordingsLoaded { team, result } => {
@@ -764,6 +771,7 @@ impl TunelApp {
             }
         }
         crate::sync::tick(self);
+        crate::vaultwarden::tick(self);
         let engine = &self.engine;
         if let Some(update) = self.updates.tick(|| engine.check_updates()) {
             self.notify(format!(
@@ -933,6 +941,7 @@ impl eframe::App for TunelApp {
             if let Some(vault) = self.lock.show(ui) {
                 self.vault = Some(vault);
                 crate::sync::on_unlock(self);
+                crate::vaultwarden::on_unlock(self);
                 crate::workspace::restore(self);
                 crate::autocomplete::load(self);
                 self.apply_theme(&ctx);
@@ -958,6 +967,7 @@ impl eframe::App for TunelApp {
         } else {
             wait
         };
+        let wait = self.vaultwarden.wait().map_or(wait, |w| w.min(wait));
         ctx.request_repaint_after(self.sync.wait().map_or(wait, |w| w.min(wait)));
         self.handle_shortcuts(&ctx);
 

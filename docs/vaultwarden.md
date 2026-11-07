@@ -23,8 +23,9 @@ La integración es opcional y nada de Túnel depende de ella:
 - **La bóveda de Túnel no cambia de formato.** Una identidad vinculada solo añade una
   referencia opcional al elemento de Vaultwarden.
 - **Si Vaultwarden falla, Túnel sigue** (ver [Fallos](#fallos)).
-- **Se puede salir sin perder nada:** al desconectar la cuenta, las identidades vinculadas se
-  convierten en copias locales o se quedan sin secreto y lo piden al conectar.
+- **Se puede salir sin perder nada:** al desconectar la cuenta se borran la sesión y la copia
+  de los secretos de este equipo; las identidades siguen vinculadas y piden la contraseña al
+  conectar hasta que se vuelva a conectar. Convertirlas en copias locales queda para después.
 - **Las pruebas cubren los dos casos.** Toda la batería pasa sin Vaultwarden; las pruebas contra
   un servidor real se saltan si no está configurado.
 
@@ -82,6 +83,20 @@ Detalles de Vaultwarden comprobados contra un servidor real:
 El token de acceso dura poco y se renueva con el de refresco. Si el refresco falla, se pide
 otra vez la contraseña maestra de Vaultwarden.
 
+## Cómo se usa una credencial (8b)
+
+- En **Ajustes → Vaultwarden** se conecta la cuenta (servidor, correo, contraseña maestra y, si
+  la cuenta lo tiene, el código del segundo factor). Se sincroniza al desbloquear, cada 30
+  minutos y con «Sincronizar ahora».
+- En el editor de una identidad aparece **Credencial: Guardada en Túnel / En Vaultwarden** solo
+  si hay cuenta conectada o la identidad ya está vinculada. Al elegir Vaultwarden se borra la
+  contraseña local y se busca el elemento por nombre, usuario o colección.
+- Una identidad de un Team solo puede vincular elementos de una organización: los personales no
+  los podría descifrar ningún otro miembro.
+- Al conectar se usa la contraseña o la clave SSH del elemento. El usuario es el de la
+  identidad; si está vacío, el del elemento. Todo pasa por el mismo punto (`Engine::resolve`),
+  así que vale igual para saltos, SFTP, túneles y contenedores.
+
 ## Correspondencia de datos
 
 | En Vaultwarden | En Túnel |
@@ -111,7 +126,7 @@ elemento se ve bien también en la web y en las extensiones de Vaultwarden.
   Túnel no fallen al sincronizar. Límite conocido: una versión anterior que edite esa identidad
   la guarda sin el vínculo.
 - Con la clave de usuario guardada, al desbloquear Túnel no hace falta volver a escribir la
-  contraseña de Vaultwarden. Se puede elegir pedirla cada vez.
+  contraseña de Vaultwarden. Elegir pedirla cada vez queda para más adelante.
 - La copia de los secretos caduca a los 7 días, y antes si la sincronización dice que el
   elemento cambió, se borró o ya no es accesible.
 
@@ -135,6 +150,14 @@ elemento se ve bien también en la web y en las extensiones de Vaultwarden.
   muestra. **No es una barrera real**: el equipo tiene que descifrarla para usarla. Para personal
   externo, la medida correcta es rotar la contraseña después o usar certificados SSH de corta
   duración.
+- El vínculo de una identidad viene de la bóveda, y en un Team lo puede editar cualquier
+  miembro con permiso de escritura. Por eso Túnel solo usa el secreto si es de la organización
+  que dice el vínculo y, en un Team, nunca uno personal de quien conecta. Copiar una identidad a
+  un Team quita su vínculo si es personal. **Límite:** quien puede editar las identidades y hosts
+  de un Team decide qué credencial de la organización mandan sus miembros y a qué dirección; da
+  permiso de escritura solo a quien confiarías esas credenciales.
+- Solo se descifran para conectar los elementos vinculados, y la copia caduca a los 7 días
+  contados desde la sincronización, aunque la app siga abierta.
 - Vaultwarden registra los accesos a cada elemento; Túnel registra en el Team quién se conectó a
   qué host. Juntos dan la trazabilidad completa.
 
@@ -142,8 +165,8 @@ elemento se ve bien también en la web y en las extensiones de Vaultwarden.
 
 | # | Entrega | Estado |
 |---|---|---|
-| 8a | Crate `tunel-vaultwarden`: inicio de sesión con segundo factor, sincronización, descifrado y creación de elementos, con pruebas contra un servidor real | en curso |
-| 8b | **Ajustes → Vaultwarden** y credenciales de Vaultwarden en las identidades, con copia local y avisos | pendiente |
+| 8a | Crate `tunel-vaultwarden`: inicio de sesión con segundo factor, sincronización, descifrado y creación de elementos, con pruebas contra un servidor real | hecho |
+| 8b | **Ajustes → Vaultwarden** y credenciales de Vaultwarden en las identidades, con copia local y avisos | hecho |
 | 8c | «Mover a Vaultwarden» desde una identidad, a la bóveda personal o a una colección | pendiente |
 | 8d | Hosts desde las colecciones (URI, puerto, protocolo y `enable`) | pendiente |
 | 8e | Editar y rotar credenciales desde Túnel | más adelante |

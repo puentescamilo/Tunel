@@ -16,3 +16,4 @@ pub mod snippets;
 pub mod team_audit;
 pub mod teams;
 pub mod themes;
+pub mod vaultwarden;

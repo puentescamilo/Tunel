@@ -29,6 +29,7 @@ mod terminal_view;
 mod tools;
 mod ui;
 mod updates;
+mod vaultwarden;
 mod views;
 mod workspace;
 
