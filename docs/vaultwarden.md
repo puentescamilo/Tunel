@@ -97,6 +97,21 @@ otra vez la contraseña maestra de Vaultwarden.
   identidad; si está vacío, el del elemento. Todo pasa por el mismo punto (`Engine::resolve`),
   así que vale igual para saltos, SFTP, túneles y contenedores.
 
+## Mover una credencial a Vaultwarden (8c)
+
+- En el editor de una identidad **ya guardada y con contraseña** aparece **Mover a Vaultwarden**,
+  con el destino: la bóveda personal o una colección en la que la cuenta puede escribir.
+- No se ofrece la bóveda personal si una organización tiene «Quitar la bóveda individual» ni
+  para una identidad de un Team, cuyos miembros no podrían descifrarla. Las colecciones de solo
+  lectura no aparecen.
+- Se crea un elemento *Login* con el nombre de la identidad, su usuario y contraseña, la nota
+  «Movido desde Túnel» y como URI los hosts que la usan (`ssh://`, `telnet://`, `mosh://`, con
+  su puerto, también los que la heredan de su grupo).
+- La identidad solo cambia cuando el servidor confirmó el elemento y la sincronización lo trae:
+  entonces queda vinculada y se borra su contraseña de Túnel. Si algo falla, la contraseña
+  sigue donde estaba.
+- Por ahora solo contraseñas. Mover una clave SSH a un elemento *SSH Key* queda para después.
+
 ## Correspondencia de datos
 
 | En Vaultwarden | En Túnel |
@@ -167,7 +182,7 @@ elemento se ve bien también en la web y en las extensiones de Vaultwarden.
 |---|---|---|
 | 8a | Crate `tunel-vaultwarden`: inicio de sesión con segundo factor, sincronización, descifrado y creación de elementos, con pruebas contra un servidor real | hecho |
 | 8b | **Ajustes → Vaultwarden** y credenciales de Vaultwarden en las identidades, con copia local y avisos | hecho |
-| 8c | «Mover a Vaultwarden» desde una identidad, a la bóveda personal o a una colección | pendiente |
+| 8c | «Mover a Vaultwarden» desde una identidad, a la bóveda personal o a una colección | hecho (contraseñas; las claves SSH, más adelante) |
 | 8d | Hosts desde las colecciones (URI, puerto, protocolo y `enable`) | pendiente |
 | 8e | Editar y rotar credenciales desde Túnel | más adelante |
 

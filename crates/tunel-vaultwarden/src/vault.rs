@@ -21,6 +21,8 @@ pub struct Collection {
     pub name: String,
     /// La colección oculta las contraseñas a esta persona: se pueden usar, no mostrar.
     pub hide_passwords: bool,
+    /// Esta persona no puede crear ni cambiar elementos en ella.
+    pub read_only: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
@@ -151,6 +153,7 @@ impl Vault {
                     organization_id: c.organization_id.clone(),
                     name: name.unwrap_or_default(),
                     hide_passwords: c.hide_passwords,
+                    read_only: c.read_only,
                 }),
                 Err(reason) => unreadable.push(Unreadable {
                     id: c.id.clone(),

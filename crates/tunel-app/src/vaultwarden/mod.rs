@@ -5,6 +5,8 @@
 //! como siempre. Si Vaultwarden falla, se usa la copia local (7 días) y, sin ella, SSH pide la
 //! contraseña al conectar.
 
+pub mod mover;
+
 use crate::app::TunelApp;
 use crate::engine::AppEvent;
 use std::collections::HashMap;
@@ -86,6 +88,7 @@ pub enum VwEvent {
         session: Session,
         result: Result<Vault, VwError>,
     },
+    Moved(mover::Moved),
 }
 
 pub struct VaultwardenController {
@@ -165,10 +168,18 @@ impl VaultwardenController {
                 })
                 .collect()
         });
+        let targets = |team: Option<&str>| {
+            self.vault.as_ref().map_or_else(Vec::new, |v| {
+                mover::destinations(&v.collections, v.personal_vault_disabled, team)
+            })
+        };
         Choices {
             connected: self.local.is_some(),
             items,
             names,
+            move_personal: targets(None),
+            move_team: targets(Some("team")),
+            busy: self.busy(),
         }
     }
 
@@ -224,12 +235,25 @@ pub struct Choices {
     /// Vacío si aún no se ha sincronizado.
     pub items: Vec<ItemChoice>,
     names: HashMap<String, String>,
+    /// Adónde se puede mover una contraseña: para identidades personales y de Teams.
+    pub move_personal: Vec<mover::Destination>,
+    pub move_team: Vec<mover::Destination>,
+    /// Hay una tarea de Vaultwarden en curso.
+    pub busy: bool,
 }
 
 impl Choices {
     /// Nombre de un elemento: de la sincronización o, sin ella, de la copia local.
     pub fn name(&self, item_id: &str) -> Option<&str> {
         self.names.get(item_id).map(String::as_str)
+    }
+
+    pub fn move_targets(&self, team: Option<&str>) -> &[mover::Destination] {
+        if team.is_some() {
+            &self.move_team
+        } else {
+            &self.move_personal
+        }
     }
 
     /// Los que puede usar una identidad: en un Team solo los de una organización, que cada
@@ -562,6 +586,7 @@ pub fn after_commit(app: &mut TunelApp, old: &VaultData, new: &VaultData) {
 
 pub fn on_event(app: &mut TunelApp, event: VwEvent) {
     match event {
+        VwEvent::Moved(moved) => mover::on_moved(app, moved),
         VwEvent::SignedIn {
             round,
             result,
@@ -756,7 +781,7 @@ mod tests {
         let choices = Choices {
             connected: true,
             items: vec![choice("mio", None), choice("switch", Some("org"))],
-            names: HashMap::new(),
+            ..Choices::default()
         };
         let ids = |team| -> Vec<String> {
             choices

@@ -82,6 +82,8 @@ pub struct CollectionData {
     pub name: String,
     #[serde(default)]
     pub hide_passwords: bool,
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 /// Un elemento, al leerlo y al crearlo.
