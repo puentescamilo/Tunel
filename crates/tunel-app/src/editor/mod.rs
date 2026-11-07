@@ -196,6 +196,7 @@ fn identity_form(
     data: &VaultData,
     secrets: &Secrets,
     vaultwarden: &crate::vaultwarden::Choices,
+    move_request: &mut Option<(IdentityId, crate::vaultwarden::mover::Destination)>,
 ) {
     egui::Grid::new("form-identidad")
         .num_columns(2)
@@ -265,6 +266,69 @@ fn identity_form(
         &mut identity.use_agent,
         "Probar también las claves del agente SSH del sistema",
     );
+    move_to_vaultwarden(ui, identity, data, vaultwarden, move_request);
+}
+
+/// «Mover a Vaultwarden»: solo para una identidad ya guardada con contraseña.
+fn move_to_vaultwarden(
+    ui: &mut egui::Ui,
+    identity: &Identity,
+    data: &VaultData,
+    vaultwarden: &crate::vaultwarden::Choices,
+    move_request: &mut Option<(IdentityId, crate::vaultwarden::mover::Destination)>,
+) {
+    let targets = vaultwarden.move_targets(identity.team.as_deref());
+    let saved = data.identity(identity.id);
+    let has_password = saved.is_some_and(|s| s.password.as_deref().is_some_and(|p| !p.is_empty()));
+    if identity.vaultwarden.is_some() || targets.is_empty() || !has_password {
+        return;
+    }
+    let p = crate::ui::pal(ui);
+    ui.add_space(8.0);
+    ui.separator();
+    ui.label(egui::RichText::new("Mover a Vaultwarden").strong());
+    ui.label(
+        egui::RichText::new(
+            "Crea un elemento con este usuario y contraseña, deja la identidad vinculada a él y \
+             borra la contraseña de Túnel.",
+        )
+        .size(12.0)
+        .color(p.muted),
+    );
+    let index_id = ui.make_persistent_id("vaultwarden-destino");
+    let mut index: usize = ui
+        .data(|d| d.get_temp(index_id))
+        .unwrap_or(0)
+        .min(targets.len() - 1);
+    let unsaved = saved.is_some_and(|s| s != identity);
+    ui.horizontal(|ui| {
+        let label = ui.label("Destino");
+        egui::ComboBox::from_id_salt("vaultwarden-destino")
+            .selected_text(targets[index].label())
+            .width(240.0)
+            .show_index(ui, &mut index, targets.len(), |i| {
+                targets[i].label().to_string()
+            })
+            .labelled_by(label.id);
+        let enabled = !vaultwarden.busy && !unsaved;
+        if ui
+            .add_enabled(enabled, egui::Button::new("Mover"))
+            .clicked()
+        {
+            *move_request = Some((identity.id, targets[index].clone()));
+        }
+        if vaultwarden.busy {
+            ui.spinner();
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(index_id, index));
+    if unsaved {
+        ui.label(
+            egui::RichText::new("Guarda los cambios antes de moverla.")
+                .size(12.0)
+                .color(p.warning),
+        );
+    }
 }
 
 /// «Guardada en Túnel» o «En Vaultwarden». Al pasar a Vaultwarden se borra la contraseña
@@ -345,6 +409,7 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     let teams = crate::sync::teams::names(app);
     let secrets = Secrets::of(app);
     let vaultwarden = app.vaultwarden.choices();
+    let mut move_request: Option<(IdentityId, crate::vaultwarden::mover::Destination)> = None;
     if let Some(Editor::GenerateKey(form)) = app.editor.as_mut()
         && let Some(key) = form.poll()
     {
@@ -472,9 +537,14 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
                         )
                         .labelled_by(label.id);
                     }
-                    Editor::Identity(identity) => {
-                        identity_form(ui, identity, &data, &secrets, &vaultwarden)
-                    }
+                    Editor::Identity(identity) => identity_form(
+                        ui,
+                        identity,
+                        &data,
+                        &secrets,
+                        &vaultwarden,
+                        &mut move_request,
+                    ),
                     Editor::Key(key) => key_form(ui, key),
                     Editor::GenerateKey(form) => keygen_form(ui, form),
                     Editor::InstallKey(form) => install_key_form(ui, form, &data),
@@ -580,6 +650,9 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     cancel |= modal.should_close();
     record_revealed(app, ctx, &data);
 
+    if let Some((identity, destination)) = move_request {
+        crate::vaultwarden::mover::start(app, identity, &destination);
+    }
     if cancel {
         crate::ui::forget_revealed(ctx, &PASSWORD_FIELDS);
         app.editor = None;

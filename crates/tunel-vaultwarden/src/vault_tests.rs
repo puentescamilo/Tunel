@@ -28,7 +28,7 @@ fn sync_response(user: &SymmetricKey) -> SyncResponse {
             ],
         },
         "collections": [
-            { "id": "col-1", "organizationId": "org-1", "name": seal("Clientes/ACME/Switches", &org), "hidePasswords": true },
+            { "id": "col-1", "organizationId": "org-1", "name": seal("Clientes/ACME/Switches", &org), "hidePasswords": true, "readOnly": true },
             { "id": "col-2", "organizationId": "org-mala", "name": "2.AAAA|AAAA|AAAA" },
         ],
         "ciphers": [
@@ -88,6 +88,7 @@ fn a_synced_vault_opens_with_the_user_key() {
     assert_eq!(vault.collections.len(), 1);
     assert_eq!(vault.collections[0].name, "Clientes/ACME/Switches");
     assert!(vault.collections[0].hide_passwords);
+    assert!(vault.collections[0].read_only);
     assert!(vault.personal_vault_disabled);
 
     let personal = vault.item("personal").unwrap();

@@ -126,16 +126,8 @@ fn an_identity_uses_a_credential_from_a_real_vaultwarden() {
     }
 }
 
-fn check_the_whole_flow(account: &Account, name: &str, item_id: &str) {
-    let identity = Identity::new("Switches de prueba", "");
-    let host = Host {
-        identity: Some(identity.id),
-        ..Host::new("sw-prueba", "10.255.0.9")
-    };
-    let host_id = host.id;
-    let mut app = TestApp::unlocked(VaultData::default().with_identity(identity).with_host(host));
-
-    // Conectar la cuenta desde Ajustes.
+/// Conecta la cuenta desde Ajustes y espera a la primera sincronización.
+fn connect(app: &mut TestApp, account: &Account) {
     app.click(&button("Ajustes"));
     app.fill(
         &placeholder("Servidor, por ejemplo https://vault.tuempresa.com"),
@@ -150,14 +142,26 @@ fn check_the_whole_flow(account: &Account, name: &str, item_id: &str) {
         &account.password,
     );
     app.click(&button("Conectar"));
-    wait_for_vaultwarden(&mut app);
+    wait_for_vaultwarden(app);
     let status = app.harness.state().vaultwarden.status().clone();
     assert!(
         matches!(status, crate::vaultwarden::VwStatus::Ready { .. }),
         "{status:?}; en pantalla: {:?}",
         app.visible_text()
     );
-    assert!(side_file(&app).exists());
+    assert!(side_file(app).exists());
+}
+
+fn check_the_whole_flow(account: &Account, name: &str, item_id: &str) {
+    let identity = Identity::new("Switches de prueba", "");
+    let host = Host {
+        identity: Some(identity.id),
+        ..Host::new("sw-prueba", "10.255.0.9")
+    };
+    let host_id = host.id;
+    let mut app = TestApp::unlocked(VaultData::default().with_identity(identity).with_host(host));
+
+    connect(&mut app, account);
 
     // Vincular la identidad al elemento, buscándolo por su nombre.
     app.click(&button("Llavero"));
@@ -213,4 +217,61 @@ fn check_the_whole_flow(account: &Account, name: &str, item_id: &str) {
         app.harness.state().vaultwarden.status(),
         crate::vaultwarden::VwStatus::Ready { .. }
     ));
+}
+
+#[test]
+fn a_password_moves_from_tunel_to_a_vaultwarden_collection() {
+    let Some(account) = account() else { return };
+    let password = format!("clave-{}", uuid::Uuid::new_v4());
+    let identity = Identity::new("Router de prueba", "admin").with_password(password.clone());
+    let identity_id = identity.id;
+    let host = Host {
+        identity: Some(identity.id),
+        ..Host::new("router-prueba", "10.255.0.7")
+    };
+    let mut app = TestApp::unlocked(VaultData::default().with_identity(identity).with_host(host));
+    connect(&mut app, &account);
+
+    app.click(&button("Llavero"));
+    app.click(&button("Editar"));
+    assert!(app.exists(&text("Mover a Vaultwarden")));
+    app.click(&combo("Destino"));
+    let collection: &'static str = Box::leak(account.collection.clone().into_boxed_str());
+    app.click(&by().label(collection).role(egui::accesskit::Role::Button));
+    app.click(&button("Mover"));
+    wait_for_vaultwarden(&mut app);
+
+    let state = app.harness.state();
+    let moved = state.data().unwrap().identity(identity_id).unwrap().clone();
+    let link = moved.vaultwarden.clone();
+    let secret = link
+        .as_ref()
+        .and_then(|l| state.engine.external_secrets.get(&l.item_id))
+        .and_then(|s| s.password.clone());
+    // «Guardar» en el editor que seguía abierto no devuelve la contraseña.
+    app.click(&button("Guardar"));
+    let saved = app.lock_and_read();
+
+    if let Some(link) = &link {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut helper = helper_session(&runtime, &account);
+        runtime
+            .block_on(helper.delete_item(&link.item_id))
+            .expect("borra el elemento de la prueba");
+    }
+    let link = link.expect("la identidad quedó vinculada");
+    assert!(link.organization_id.is_some(), "va a la colección");
+    assert!(moved.password.is_none(), "la contraseña sale de Túnel");
+    assert_eq!(
+        secret.as_deref(),
+        Some(password.as_str()),
+        "se conecta con ella"
+    );
+    let saved_identity = saved.identity(identity_id).unwrap();
+    assert!(saved_identity.password.is_none());
+    assert_eq!(saved_identity.vaultwarden.as_ref(), Some(&link));
+    assert!(
+        !serde_json::to_string(&saved).unwrap().contains(&password),
+        "la contraseña no queda en la bóveda"
+    );
 }
