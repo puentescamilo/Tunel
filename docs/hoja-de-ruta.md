@@ -27,6 +27,10 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 7a | Desbloquear la bóveda con Touch ID o Windows Hello | 0.11.0 | ✅ |
 | 7b | Autocompletado de comandos en la terminal | 0.12.0 | ✅ |
 | 7c | Vista dividida de hasta cuatro terminales y terminales en otra ventana | 0.13.0 | ✅ |
+| 8a | Vaultwarden: protocolo, cifrado y pruebas contra un servidor real | 0.14.0 | en curso |
+| 8b | Vaultwarden: ajustes y credenciales de Vaultwarden en las identidades | 0.14.0 | pendiente |
+| 8c | Vaultwarden: mover una credencial de Túnel a Vaultwarden | — | pendiente |
+| 8d | Vaultwarden: hosts desde las colecciones | — | pendiente |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -126,6 +130,22 @@ que ya tenga el usuario: Túnel no guarda credenciales de la nube.
   lo cuenta si el servidor lo repite en pantalla: no guarda lo que se escribe sin eco, deja de
   seguir la línea con flechas, Tab o Ctrl+R hasta el siguiente Enter, y no interviene a pantalla
   completa. El historial (`<bóveda>.historial`, 1000 comandos) va cifrado y no se sincroniza.
+
+## 8. Vaultwarden
+
+Usar desde Túnel las credenciales que una empresa guarda en Vaultwarden (o Bitwarden), cada
+ingeniero con su propia cuenta. Es opcional: sin una cuenta configurada, Túnel funciona igual
+que siempre. El diseño completo está en [vaultwarden.md](vaultwarden.md).
+
+- **8a. Protocolo:** crate `tunel-vaultwarden` con inicio de sesión (incluido el segundo factor),
+  sincronización, descifrado y creación de elementos, probado contra un servidor real.
+- **8b. Credenciales en las identidades:** en **Ajustes → Vaultwarden** se conecta la cuenta, y
+  una identidad puede tomar su usuario y contraseña o su clave de un elemento de Vaultwarden.
+  Copia local cifrada que no se sincroniza, y avisos si Vaultwarden no está disponible.
+- **8c. Mover a Vaultwarden:** pasar la credencial de una identidad a la bóveda personal o a una
+  colección, y dejar la identidad vinculada.
+- **8d. Hosts desde las colecciones:** los elementos con URI `ssh://`, `telnet://` o `mosh://`
+  aparecen como hosts, con su puerto y la contraseña *enable* de los switches.
 
 ## Pendiente de fases anteriores
 

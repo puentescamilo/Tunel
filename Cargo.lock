@@ -6340,6 +6340,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tunel-vaultwarden"
+version = "0.13.1"
+dependencies = [
+ "aes",
+ "argon2",
+ "base64 0.22.1",
+ "cbc",
+ "hkdf",
+ "hmac",
+ "pbkdf2",
+ "rand 0.9.5",
+ "reqwest",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "sha2",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "tungstenite"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
