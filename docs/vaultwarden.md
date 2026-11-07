@@ -112,15 +112,29 @@ otra vez la contraseña maestra de Vaultwarden.
   sigue donde estaba.
 - Por ahora solo contraseñas. Mover una clave SSH a un elemento *SSH Key* queda para después.
 
+## Hosts desde Vaultwarden (8d)
+
+- **Ajustes → Importar → Importar de Vaultwarden…** (solo con la cuenta conectada y
+  sincronizada) lista los elementos con alguna URI `ssh://`, `telnet://` o `mosh://`, con un
+  buscador y casillas.
+- Cada URI es un host de la bóveda personal: el nombre del elemento (con la dirección si tiene
+  varias), su puerto y protocolo, sus notas y la etiqueta `vaultwarden`. Va en el grupo
+  «Vaultwarden» y, dentro, en el de su colección (`Clientes/ACME/Switches` se anida).
+- Cada elemento tiene una identidad vinculada, compartida por sus hosts. Su usuario queda vacío
+  para usar siempre el del elemento, aunque cambie en Vaultwarden.
+- Volver a importar no duplica: cada host recuerda de qué elemento y URI salió, y lo que se
+  cambió después en Túnel se respeta. Para compartir los hosts, se mueven a un Team como
+  cualquier otro (los vínculos a elementos de una organización se conservan).
+
 ## Correspondencia de datos
 
 | En Vaultwarden | En Túnel |
 |---|---|
 | Elemento *Login*: usuario y contraseña | Secreto de una `Identity` |
-| URI `ssh://host:22`, `telnet://host`, `mosh://host` | Dirección, puerto y protocolo (8d) |
+| URI `ssh://host:22`, `telnet://host`, `mosh://host` | Dirección, puerto y protocolo (8d); el usuario de la URI si el elemento no tiene |
 | Elemento *SSH Key* | `SshKey` de la identidad |
-| Campo personalizado `enable` (oculto) | Contraseña *enable* de switches (8d) |
-| Colección | Grupo al importar (8d) |
+| Campo personalizado `enable` (oculto) | Contraseña *enable* de switches (pendiente: Túnel aún no la usa) |
+| Colección | Grupo al importar, dentro de «Vaultwarden» y anidado por `/` (8d) |
 | Notas | Notas del host (8d) |
 
 Al mover una credencial de Túnel a Vaultwarden (8c) se usan las mismas convenciones, así que el
@@ -183,7 +197,7 @@ elemento se ve bien también en la web y en las extensiones de Vaultwarden.
 | 8a | Crate `tunel-vaultwarden`: inicio de sesión con segundo factor, sincronización, descifrado y creación de elementos, con pruebas contra un servidor real | hecho |
 | 8b | **Ajustes → Vaultwarden** y credenciales de Vaultwarden en las identidades, con copia local y avisos | hecho |
 | 8c | «Mover a Vaultwarden» desde una identidad, a la bóveda personal o a una colección | hecho (contraseñas; las claves SSH, más adelante) |
-| 8d | Hosts desde las colecciones (URI, puerto, protocolo y `enable`) | pendiente |
+| 8d | Hosts desde las colecciones (URI, puerto, protocolo, notas y grupo por colección) | hecho (sin `enable`) |
 | 8e | Editar y rotar credenciales desde Túnel | más adelante |
 
 ## Pruebas

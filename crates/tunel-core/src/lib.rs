@@ -16,6 +16,7 @@ pub mod template;
 pub mod theme;
 pub mod vault;
 pub mod vaultwarden;
+pub mod vaultwarden_import;
 #[cfg(windows)]
 mod windows_acl;
 pub mod workspace;
