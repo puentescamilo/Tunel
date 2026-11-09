@@ -280,21 +280,42 @@ fn move_to_vaultwarden(
     let targets = vaultwarden.move_targets(identity.team.as_deref());
     let saved = data.identity(identity.id);
     let has_password = saved.is_some_and(|s| s.password.as_deref().is_some_and(|p| !p.is_empty()));
-    if identity.vaultwarden.is_some() || targets.is_empty() || !has_password {
+    if identity.vaultwarden.is_some() || !vaultwarden.connected {
         return;
     }
     let p = crate::ui::pal(ui);
     ui.add_space(8.0);
     ui.separator();
     ui.label(egui::RichText::new("Mover a Vaultwarden").strong());
+    // Se ve siempre con Vaultwarden conectado, y si no se puede mover dice por qué.
+    let blocked = if !has_password {
+        Some(
+            "Para moverla, la identidad tiene que estar guardada con una contraseña en \
+             «Credencial: Guardada en Túnel».",
+        )
+    } else if targets.is_empty() {
+        Some(
+            "No hay adónde moverla: no tienes ninguna colección de Vaultwarden en la que puedas \
+             escribir, o aún no ha sincronizado.",
+        )
+    } else {
+        None
+    };
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(blocked.unwrap_or(
             "Crea un elemento con este usuario y contraseña, deja la identidad vinculada a él y \
              borra la contraseña de Túnel.",
-        )
+        ))
         .size(12.0)
-        .color(p.muted),
+        .color(if blocked.is_some() {
+            p.warning
+        } else {
+            p.muted
+        }),
     );
+    if blocked.is_some() {
+        return;
+    }
     let index_id = ui.make_persistent_id("vaultwarden-destino");
     let mut index: usize = ui
         .data(|d| d.get_temp(index_id))
