@@ -207,8 +207,9 @@ pub struct TunelApp {
 
 impl TunelApp {
     pub fn new(cc: &eframe::CreationContext<'_>, vault_path: PathBuf) -> anyhow::Result<Self> {
-        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         crate::biometric::probe(&cc.egui_ctx);
+        // `mut` solo hace falta para los ajustes de depuración de abajo.
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut app = Self::build(cc, vault_path)?;
         #[cfg(debug_assertions)]
         app.apply_dev_overrides(&cc.egui_ctx);
