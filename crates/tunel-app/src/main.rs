@@ -12,6 +12,7 @@ mod chrome;
 mod cloud;
 mod containers;
 mod editor;
+mod enable;
 mod engine;
 mod fonts;
 mod layout;

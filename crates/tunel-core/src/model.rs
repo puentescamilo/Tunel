@@ -193,6 +193,10 @@ pub struct Identity {
     /// las versiones anteriores lean la identidad igual (al editarla la guardan sin él).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vaultwarden: Option<VaultwardenLink>,
+    /// Contraseña *enable* de switches y routers, que se envía a mano desde la pestaña.
+    /// Opcional para que las versiones anteriores lean la identidad igual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_password: Option<String>,
 }
 
 /// Elemento de Vaultwarden del que sale el secreto de una identidad. Solo referencias: el
@@ -216,6 +220,7 @@ impl Identity {
             key: None,
             use_agent: false,
             vaultwarden: None,
+            enable_password: None,
         }
     }
 
@@ -301,6 +306,7 @@ impl Zeroize for ProxyConfig {
 impl Zeroize for Identity {
     fn zeroize(&mut self) {
         self.password.zeroize();
+        self.enable_password.zeroize();
     }
 }
 
@@ -368,6 +374,7 @@ impl std::fmt::Debug for Identity {
             .field("key", &self.key)
             .field("use_agent", &self.use_agent)
             .field("vaultwarden", &self.vaultwarden)
+            .field("enable_password", &redact(&self.enable_password))
             .finish()
     }
 }

@@ -126,6 +126,23 @@ otra vez la contraseña maestra de Vaultwarden.
   cambió después en Túnel se respeta. Para compartir los hosts, se mueven a un Team como
   cualquier otro (los vínculos a elementos de una organización se conservan).
 
+## Contraseña *enable* (8f)
+
+Los switches y routers piden una segunda contraseña al escribir `enable`. Túnel la envía solo
+cuando la persona lo pide, con **Enviar contraseña enable** en el menú de clic derecho de la
+pestaña o con ⌘⇧E (Ctrl+Shift+E en Windows y Linux): escribe la contraseña y Enter en esa
+terminal. No mira lo que muestra el equipo, así que nunca la envía por su cuenta.
+
+- **Sin Vaultwarden:** la identidad tiene el campo «Contraseña enable», guardado cifrado en la
+  bóveda como la contraseña.
+- **Con una identidad vinculada:** sale del campo personalizado oculto `enable` del elemento
+  (sin distinguir mayúsculas). Al mover una identidad a Vaultwarden (8c), su contraseña
+  *enable* pasa a ese campo y se borra de Túnel.
+- No se repite en las terminales marcadas para escribir a la vez, ni se graba: las grabaciones
+  guardan solo lo que muestra la terminal.
+- Las versiones anteriores a 0.14.0 leen la identidad igual, pero si la editan la guardan sin
+  la contraseña *enable*.
+
 ## Correspondencia de datos
 
 | En Vaultwarden | En Túnel |
@@ -133,7 +150,7 @@ otra vez la contraseña maestra de Vaultwarden.
 | Elemento *Login*: usuario y contraseña | Secreto de una `Identity` |
 | URI `ssh://host:22`, `telnet://host`, `mosh://host` | Dirección, puerto y protocolo (8d); el usuario de la URI si el elemento no tiene |
 | Elemento *SSH Key* | `SshKey` de la identidad |
-| Campo personalizado `enable` (oculto) | Contraseña *enable* de switches (pendiente: Túnel aún no la usa) |
+| Campo personalizado `enable` (oculto) | Contraseña *enable* de la identidad, que se envía con «Enviar contraseña enable» |
 | Colección | Grupo al importar, dentro de «Vaultwarden» y anidado por `/` (8d) |
 | Notas | Notas del host (8d) |
 
@@ -197,7 +214,8 @@ elemento se ve bien también en la web y en las extensiones de Vaultwarden.
 | 8a | Crate `tunel-vaultwarden`: inicio de sesión con segundo factor, sincronización, descifrado y creación de elementos, con pruebas contra un servidor real | hecho |
 | 8b | **Ajustes → Vaultwarden** y credenciales de Vaultwarden en las identidades, con copia local y avisos | hecho |
 | 8c | «Mover a Vaultwarden» desde una identidad, a la bóveda personal o a una colección | hecho (contraseñas; las claves SSH, más adelante) |
-| 8d | Hosts desde las colecciones (URI, puerto, protocolo, notas y grupo por colección) | hecho (sin `enable`) |
+| 8d | Hosts desde las colecciones (URI, puerto, protocolo, notas y grupo por colección) | hecho |
+| 8f | Contraseña *enable*: campo en la identidad o campo oculto `enable` del elemento, enviada a mano desde la pestaña | hecho |
 | 8e | Editar y rotar credenciales desde Túnel | más adelante |
 
 ## Pruebas

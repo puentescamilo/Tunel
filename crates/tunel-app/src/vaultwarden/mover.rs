@@ -8,7 +8,7 @@ use super::{AppEvent, VwEvent, VwStatus, synced};
 use crate::app::TunelApp;
 use tunel_core::model::{Identity, IdentityId, Protocol, VaultwardenLink};
 use tunel_core::vault::VaultData;
-use tunel_vaultwarden::{Collection, NewLogin, Place, Session, Vault, VwError};
+use tunel_vaultwarden::{Collection, Field, NewLogin, Place, Session, Vault, VwError};
 use zeroize::Zeroize;
 
 /// Adónde se puede mover una credencial.
@@ -115,7 +115,17 @@ pub fn new_login(data: &VaultData, identity: &Identity) -> Option<NewLogin> {
         password: Some(password),
         uris,
         notes: Some("Movido desde Túnel".into()),
-        fields: Vec::new(),
+        // La contraseña *enable* va como campo oculto, donde la busca Túnel al conectar.
+        fields: identity
+            .enable_password
+            .iter()
+            .filter(|e| !e.is_empty())
+            .map(|e| Field {
+                name: super::ENABLE_FIELD.into(),
+                value: e.clone(),
+                hidden: true,
+            })
+            .collect(),
     })
 }
 
@@ -185,6 +195,8 @@ fn link(identity: &Identity, link: &VaultwardenLink) -> Identity {
     let mut linked = identity.clone();
     linked.password.zeroize();
     linked.password = None;
+    linked.enable_password.zeroize();
+    linked.enable_password = None;
     linked.vaultwarden = Some(link.clone());
     linked
 }
@@ -234,7 +246,8 @@ mod tests {
 
     #[test]
     fn the_new_item_carries_the_credential_and_the_hosts_that_use_it() {
-        let identity = Identity::new("Switches", "admin").with_password("cisco");
+        let mut identity = Identity::new("Switches", "admin").with_password("cisco");
+        identity.enable_password = Some("en4ble".into());
         let group = Group {
             identity: Some(identity.id),
             port: Some(2222),
@@ -266,6 +279,11 @@ mod tests {
         assert_eq!(login.name, "Switches");
         assert_eq!(login.username.as_deref(), Some("admin"));
         assert_eq!(login.password.as_deref(), Some("cisco"));
+        let enable = &login.fields[0];
+        assert_eq!(
+            (enable.name.as_str(), enable.value.as_str(), enable.hidden),
+            ("enable", "en4ble", true)
+        );
         assert_eq!(
             login.uris,
             [
@@ -326,7 +344,8 @@ mod tests {
 
     #[test]
     fn linking_clears_the_local_password() {
-        let identity = Identity::new("sw", "admin").with_password("cisco");
+        let mut identity = Identity::new("sw", "admin").with_password("cisco");
+        identity.enable_password = Some("en4ble".into());
         let linked = link(
             &identity,
             &VaultwardenLink {
@@ -335,6 +354,7 @@ mod tests {
             },
         );
         assert!(linked.password.is_none());
+        assert!(linked.enable_password.is_none());
         assert_eq!(linked.vaultwarden.as_ref().unwrap().item_id, "i");
         assert_eq!((linked.id, linked.label.as_str()), (identity.id, "sw"));
     }

@@ -292,6 +292,9 @@ fn describe(item: &Item, vault: &Vault) -> String {
     format!("{} · {what} · {place}", item.name)
 }
 
+/// Campo personalizado del elemento con la contraseña *enable* (sin distinguir mayúsculas).
+pub const ENABLE_FIELD: &str = "enable";
+
 /// El secreto que usa una conexión, a partir de un elemento descifrado.
 pub fn secret_of(item: &Item) -> ExternalSecret {
     let (username, password, private_key) = match &item.content {
@@ -306,6 +309,10 @@ pub fn secret_of(item: &Item) -> ExternalSecret {
         username,
         password,
         private_key,
+        enable: item
+            .field(ENABLE_FIELD)
+            .map(|f| f.value.clone())
+            .filter(|v| !v.is_empty()),
     }
 }
 
@@ -756,7 +763,36 @@ mod tests {
             username: None,
             password: Some(format!("{name}-pw")),
             private_key: None,
+            enable: None,
         }
+    }
+
+    #[test]
+    fn the_enable_password_comes_from_the_hidden_enable_field() {
+        let item = |fields: Vec<tunel_vaultwarden::Field>| Item {
+            id: "sw".into(),
+            organization_id: Some("org".into()),
+            collection_ids: Vec::new(),
+            name: "SW-Core".into(),
+            notes: None,
+            fields,
+            content: Content::Login {
+                username: Some("admin".into()),
+                password: Some("cisco".into()),
+                uris: Vec::new(),
+            },
+            view_password: true,
+        };
+        let field = |name: &str, value: &str| tunel_vaultwarden::Field {
+            name: name.into(),
+            value: value.into(),
+            hidden: true,
+        };
+        let with = secret_of(&item(vec![field("Enable", "en4ble")]));
+        assert_eq!(with.enable.as_deref(), Some("en4ble"));
+        assert_eq!(with.password.as_deref(), Some("cisco"));
+        assert!(secret_of(&item(vec![field("enable", "")])).enable.is_none());
+        assert!(secret_of(&item(vec![field("otro", "x")])).enable.is_none());
     }
 
     #[test]

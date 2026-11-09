@@ -681,6 +681,7 @@ mod tests {
             username: Some("admin".into()),
             password: Some("cisco-secreta".into()),
             private_key: None,
+            enable: None,
         };
         let mut local = VaultwardenLocal::default().with_cache(vec![("i".into(), secret)], 5);
         local.email = "ana@ejemplo.com".into();
