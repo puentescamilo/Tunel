@@ -42,7 +42,9 @@ fn password_for(app: &TunelApp, index: usize) -> Result<Zeroizing<String>, Strin
     match identity.and_then(|i| i.enable_password.as_deref()) {
         Some(password) if !password.is_empty() => Ok(Zeroizing::new(password.to_string())),
         _ if identity.is_some_and(|i| i.vaultwarden.is_some()) => Err(format!(
-            "El elemento de Vaultwarden no tiene un campo oculto «{}» con la contraseña",
+            "Falta la contraseña enable: en Vaultwarden, edita el elemento y añade un campo \
+             personalizado de tipo Oculto llamado «{}» con la contraseña; luego pulsa \
+             «Sincronizar ahora» en Ajustes",
             crate::vaultwarden::ENABLE_FIELD
         )),
         _ if identity.is_some() => Err(
