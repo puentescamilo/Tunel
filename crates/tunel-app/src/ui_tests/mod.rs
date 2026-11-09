@@ -3,6 +3,7 @@
 //! usa una bóveda nueva en una carpeta temporal y no sale a internet.
 
 mod editing;
+mod enable;
 mod lock;
 mod navigation;
 mod panes;

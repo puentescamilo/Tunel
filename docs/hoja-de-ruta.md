@@ -145,8 +145,9 @@ que siempre. El diseño completo está en [vaultwarden.md](vaultwarden.md).
 - **8c. Mover a Vaultwarden:** pasar la credencial de una identidad a la bóveda personal o a una
   colección, y dejar la identidad vinculada.
 - **8d. Hosts desde las colecciones:** los elementos con URI `ssh://`, `telnet://` o `mosh://`
-  se importan como hosts, con su puerto, sus notas y un grupo por colección. La contraseña
-  *enable* de los switches queda pendiente: Túnel aún no la usa.
+  se importan como hosts, con su puerto, sus notas y un grupo por colección.
+- **8f. Contraseña *enable*:** guardada en la identidad o en el campo oculto `enable` del
+  elemento de Vaultwarden, y enviada a mano desde el menú de la pestaña o con ⌘⇧E.
 
 ## Pendiente de fases anteriores
 

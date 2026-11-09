@@ -100,6 +100,7 @@ enum TabAction {
     Duplicate(usize),
     Rename(usize),
     Broadcast(usize),
+    SendEnable(usize),
 }
 
 /// Contenido de una pestaña.
@@ -308,6 +309,20 @@ fn context_menu(
         };
         item(ui, icons::KEYBOARD, label, TabAction::Broadcast(i));
     }
+    if crate::enable::available(app, i) {
+        let shortcut = ui.ctx().format_shortcut(&crate::enable::SHORTCUT);
+        if ui
+            .button(ui::with_icon(icons::LOCK, "Enviar contraseña enable"))
+            .on_hover_text(format!(
+                "Escribe la contraseña enable de la identidad y Enter ({shortcut}). Úsala cuando \
+                 el equipo la pida tras el comando enable."
+            ))
+            .clicked()
+        {
+            *action = Some(TabAction::SendEnable(i));
+            ui.close();
+        }
+    }
     ui.separator();
     share_menu(ui, &app.tabs[i], teams, action);
     ui.separator();
@@ -405,6 +420,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
         Some(TabAction::Reconnect(i)) => app.reconnect_tab(i),
         Some(TabAction::Duplicate(i)) => app.duplicate_tab(i),
         Some(TabAction::Broadcast(i)) => crate::broadcast::toggle(app, i),
+        Some(TabAction::SendEnable(i)) => crate::enable::send(app, i),
         Some(TabAction::Rename(i)) => {
             app.tab_rename = Some(TabRename {
                 index: i,

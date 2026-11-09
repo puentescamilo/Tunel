@@ -24,6 +24,9 @@ pub struct ExternalSecret {
     pub password: Option<String>,
     /// Clave privada de un elemento *SSH Key*, en formato OpenSSH.
     pub private_key: Option<String>,
+    /// Campo personalizado `enable` del elemento: la contraseña *enable* de un switch.
+    #[serde(default)]
+    pub enable: Option<String>,
 }
 
 impl std::fmt::Debug for ExternalSecret {
@@ -31,6 +34,7 @@ impl std::fmt::Debug for ExternalSecret {
         f.debug_struct("ExternalSecret")
             .field("password", &self.password.as_ref().map(|_| "***"))
             .field("private_key", &self.private_key.as_ref().map(|_| "***"))
+            .field("enable", &self.enable.as_ref().map(|_| "***"))
             .finish_non_exhaustive()
     }
 }
@@ -67,6 +71,9 @@ impl ResolvedHost {
         }
         if secret.password.is_some() {
             identity.password = secret.password.clone();
+        }
+        if secret.enable.is_some() {
+            identity.enable_password = secret.enable.clone();
         }
         let key = match &secret.private_key {
             Some(private_key) => {
@@ -196,6 +203,7 @@ mod tests {
             username: Some("admin".into()),
             password: Some("cisco".into()),
             private_key: None,
+            enable: Some("en4ble".into()),
         }
     }
 
@@ -218,6 +226,7 @@ mod tests {
         let identity = after.identity.unwrap();
         assert_eq!(identity.username, "camilo");
         assert_eq!(identity.password.as_deref(), Some("cisco"));
+        assert_eq!(identity.enable_password.as_deref(), Some("en4ble"));
 
         let empty = resolved(Some(linked(" ")), None).with_external(|_| Some(secret()));
         assert_eq!(empty.identity.unwrap().username, "admin");
@@ -239,6 +248,7 @@ mod tests {
             username: None,
             password: None,
             private_key: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+            enable: None,
         };
         let mut identity = linked("deploy").with_team("acme");
         if let Some(link) = identity.vaultwarden.as_mut() {

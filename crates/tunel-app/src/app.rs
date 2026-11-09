@@ -794,14 +794,18 @@ impl TunelApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let (new_tab, close_tab, palette) = ctx.input_mut(|i| {
+        let (new_tab, close_tab, palette, enable) = ctx.input_mut(|i| {
             let cmd = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
             (
                 i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::T)),
                 i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::W)),
                 i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::K)),
+                i.consume_shortcut(&crate::enable::SHORTCUT),
             )
         });
+        if enable && let Some(i) = self.active {
+            crate::enable::send(self, i);
+        }
         if new_tab {
             self.open_local();
         }

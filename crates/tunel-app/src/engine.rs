@@ -945,6 +945,7 @@ mod tests {
                 username: Some("otro".into()),
                 password: Some("cisco".into()),
                 private_key: None,
+                enable: None,
             },
         );
         let (data, host) = linked_switch();

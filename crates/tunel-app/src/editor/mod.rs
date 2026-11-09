@@ -219,27 +219,23 @@ fn identity_form(
                 vaultwarden_item(ui, link, team.as_deref(), vaultwarden).labelled_by(label.id);
                 ui.end_row();
             } else {
-                let label = ui.label("Contraseña");
-                let mut password = identity.password.clone().unwrap_or_default();
                 let can_reveal = secrets.can_reveal(identity.team.as_deref());
-                let changed = ui
-                    .horizontal(|ui| {
-                        crate::ui::password_field(
-                            ui,
-                            "identidad",
-                            &mut password,
-                            "",
-                            220.0,
-                            can_reveal,
-                        )
-                    })
-                    .inner
-                    .labelled_by(label.id)
-                    .changed();
-                if changed {
-                    identity.password = Some(password).filter(|p| !p.is_empty());
-                }
-                ui.end_row();
+                secret_row(
+                    ui,
+                    "Contraseña",
+                    "identidad",
+                    "",
+                    &mut identity.password,
+                    can_reveal,
+                );
+                secret_row(
+                    ui,
+                    "Contraseña enable",
+                    "identidad-enable",
+                    "Solo switches y routers",
+                    &mut identity.enable_password,
+                    can_reveal,
+                );
             }
             let label = ui.label("Clave");
             let keys: Vec<(KeyId, String)> =
@@ -256,6 +252,10 @@ fn identity_form(
             "La contraseña no se guarda en Túnel: se usa la de Vaultwarden, con una copia local \
              de hasta 7 días por si el servidor no responde."
         };
+        let help = format!(
+            "{help} La contraseña enable sale del campo oculto «{}» del elemento.",
+            crate::vaultwarden::ENABLE_FIELD
+        );
         ui.label(
             egui::RichText::new(help)
                 .size(12.0)
@@ -267,6 +267,29 @@ fn identity_form(
         "Probar también las claves del agente SSH del sistema",
     );
     move_to_vaultwarden(ui, identity, data, vaultwarden, move_request);
+}
+
+/// Una fila del formulario con un secreto opcional: vacío es `None`.
+fn secret_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    id: &str,
+    hint: &str,
+    secret: &mut Option<String>,
+    can_reveal: bool,
+) {
+    let label = ui.label(label);
+    let mut text = secret.clone().unwrap_or_default();
+    let changed = ui
+        .horizontal(|ui| crate::ui::password_field(ui, id, &mut text, hint, 220.0, can_reveal))
+        .inner
+        .labelled_by(label.id)
+        .changed();
+    if changed {
+        *secret = Some(text.clone()).filter(|t| !t.is_empty());
+    }
+    text.zeroize();
+    ui.end_row();
 }
 
 /// «Mover a Vaultwarden»: solo para una identidad ya guardada con contraseña.
@@ -371,6 +394,8 @@ fn credential_source(ui: &mut egui::Ui, identity: &mut Identity) {
     if use_vaultwarden {
         identity.password.zeroize();
         identity.password = None;
+        identity.enable_password.zeroize();
+        identity.enable_password = None;
         identity.vaultwarden = Some(VaultwardenLink::default());
     } else {
         identity.vaultwarden = None;
