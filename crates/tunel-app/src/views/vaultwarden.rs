@@ -227,6 +227,18 @@ fn connected(app: &mut TunelApp, ui: &mut egui::Ui, status: &VwStatus) {
         {
             vaultwarden::sync_now(app);
         }
+        // El mismo acceso que en Ajustes → Importar, donde cuesta encontrarlo.
+        if matches!(status, VwStatus::Ready { .. })
+            && ui
+                .add_enabled_ui(!busy, |ui| ui::secondary_button(ui, "Importar hosts…"))
+                .inner
+                .on_hover_text(
+                    "Crea hosts con los elementos que tienen URI ssh://, telnet:// o mosh://",
+                )
+                .clicked()
+        {
+            vaultwarden::import::open(app);
+        }
         if ui::secondary_button(ui, "Desconectar")
             .on_hover_text(
                 "Borra la sesión y la copia de las credenciales de este equipo. Las identidades \
