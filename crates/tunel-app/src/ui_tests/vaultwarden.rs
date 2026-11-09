@@ -275,3 +275,78 @@ fn a_password_moves_from_tunel_to_a_vaultwarden_collection() {
         "la contraseña no queda en la bóveda"
     );
 }
+
+#[test]
+fn hosts_are_imported_from_the_items_of_a_real_vaultwarden() {
+    let Some(account) = account() else { return };
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut helper = helper_session(&runtime, &account);
+    let name: &'static str =
+        Box::leak(format!("Túnel importar {}", uuid::Uuid::new_v4()).into_boxed_str());
+    let item_id = runtime.block_on(async {
+        let vault = helper.sync().await.unwrap();
+        let collection = vault
+            .collections
+            .iter()
+            .find(|c| c.name == account.collection)
+            .expect("colección de pruebas");
+        let place = vw::Place::Organization {
+            organization_id: collection.organization_id.clone(),
+            collection_ids: vec![collection.id.clone()],
+        };
+        let login = vw::NewLogin {
+            name: name.to_string(),
+            username: Some("admin".into()),
+            password: Some("importada".into()),
+            uris: vec!["ssh://10.255.0.5:2222".into(), "https://10.255.0.5".into()],
+            notes: Some("rack de pruebas".into()),
+            fields: Vec::new(),
+        };
+        helper.create_login(&vault, &login, &place).await.unwrap()
+    });
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut app = TestApp::unlocked(VaultData::default());
+        connect(&mut app, &account);
+        app.click(&button("Importar de Vaultwarden…"));
+        assert!(app.exists(&text("Importar de Vaultwarden")));
+        app.click(&button("Ninguno"));
+        app.fill(&placeholder("Buscar…"), name);
+        app.click(
+            &by()
+                .role(egui::accesskit::Role::CheckBox)
+                .predicate(move |n| n.label().is_some_and(|l| l.starts_with(name))),
+        );
+        app.click(&button("Importar (1)"));
+
+        let state = app.harness.state();
+        let data = state.data().unwrap();
+        let host = data
+            .hosts
+            .iter()
+            .find(|h| h.label == name)
+            .expect("host importado");
+        assert_eq!(
+            (host.address.as_str(), host.port),
+            ("10.255.0.5", Some(2222))
+        );
+        assert_eq!(host.notes, "rack de pruebas");
+        let group = data.group(host.group.unwrap()).unwrap();
+        assert_eq!(group.name, account.collection);
+        assert_eq!(
+            data.group(group.parent.unwrap()).unwrap().name,
+            "Vaultwarden"
+        );
+        let (target, _) = state.engine.resolve(data, host.id).unwrap();
+        let identity = target.identity.unwrap();
+        assert_eq!(identity.username, "admin");
+        assert_eq!(identity.password.as_deref(), Some("importada"));
+        assert_eq!(data.hosts.len(), 1, "solo lo elegido");
+    }));
+    runtime
+        .block_on(helper.delete_item(&item_id))
+        .expect("borra el elemento de la prueba");
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}

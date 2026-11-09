@@ -245,6 +245,20 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                     super::cloud_import::open(app);
                 }
             });
+            // Solo con una cuenta de Vaultwarden conectada.
+            if app.vaultwarden.account().is_some() {
+                let synced = app.vaultwarden.vault().is_some();
+                setting_row(ui, "Hosts de Vaultwarden", "Los elementos con URI ssh://, telnet:// o mosh://, con su credencial vinculada", |ui| {
+                    let clicked = ui
+                        .add_enabled_ui(synced, |ui| ui::secondary_button(ui, "Importar de Vaultwarden…"))
+                        .inner
+                        .on_disabled_hover_text("Espera a que Vaultwarden sincronice")
+                        .clicked();
+                    if clicked {
+                        crate::vaultwarden::import::open(app);
+                    }
+                });
+            }
         });
         card(ui, icons::FILE_TEXT, "Registro de sesiones", |ui| log_controls(app, ui));
         card(ui, icons::LOCK, "Seguridad", |ui| {
