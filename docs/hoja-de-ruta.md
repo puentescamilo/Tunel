@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 2 de noviembre de 2026, con Túnel 0.13.1.
+Actualizada el 10 de noviembre de 2026, con Túnel 0.14.0.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -31,6 +31,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 8b | Vaultwarden: ajustes y credenciales de Vaultwarden en las identidades | 0.14.0 | ✅ |
 | 8c | Vaultwarden: mover una credencial de Túnel a Vaultwarden | 0.14.0 | ✅ |
 | 8d | Vaultwarden: hosts desde las colecciones | 0.14.0 | ✅ |
+| 8f | Vaultwarden: contraseña *enable* desde la pestaña | 0.14.0 | ✅ |
+| — | La ventana cabe en la pantalla al pasarla a otra con distinta escala (Windows) | 0.14.0 | ✅ |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
