@@ -250,6 +250,7 @@ impl TunelApp {
                     self.show_tab(ui, tab);
                     return false;
                 }
+                crate::window_fit::tick(ui.ctx());
                 let frame = egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::ZERO);
                 egui::CentralPanel::default()
                     .frame(frame)
