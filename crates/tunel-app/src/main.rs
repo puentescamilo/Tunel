@@ -32,6 +32,7 @@ mod ui;
 mod updates;
 mod vaultwarden;
 mod views;
+mod window_fit;
 mod workspace;
 
 #[cfg(test)]

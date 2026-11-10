@@ -942,6 +942,7 @@ impl eframe::App for TunelApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::window_fit::tick(&ctx);
         if self.vault.is_none() {
             if let Some(vault) = self.lock.show(ui) {
                 self.vault = Some(vault);
