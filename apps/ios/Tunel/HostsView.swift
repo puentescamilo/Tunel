@@ -50,6 +50,7 @@ struct HostsView: View {
         } detail: {
             NavigationStack {
                 HostList(
+                    store: store,
                     hosts: tree.hosts(in: groupId, matching: query),
                     hasAccount: store.account != nil,
                     onSignIn: { showingAccount = true }
@@ -73,6 +74,7 @@ struct HostsView: View {
 }
 
 private struct HostList: View {
+    let store: VaultStore
     let hosts: [HostSummary]
     let hasAccount: Bool
     let onSignIn: () -> Void
@@ -94,7 +96,7 @@ private struct HostList: View {
             List(hosts, id: \.id) { host in
                 NavigationLink(value: host) { HostRow(host: host) }
             }
-            .navigationDestination(for: HostSummary.self) { HostDetailView(host: $0) }
+            .navigationDestination(for: HostSummary.self) { HostDetailView(host: $0, store: store) }
         }
     }
 }

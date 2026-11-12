@@ -27,11 +27,29 @@ struct TunelApp: App {
                         description: Text(startupError ?? ""))
                 }
             }
+            // En el selector de apps no se ve lo que hay en pantalla.
+            .overlay { if scenePhase != .active { PrivacyCover() } }
             .onChange(of: scenePhase) { _, phase in
-                // Al salir de la app se bloquea: en el selector de apps no se ven los hosts.
-                if phase == .background { store?.lock() }
+                // Un viaje corto a otra app no bloquea, para no perder la terminal; uno largo, sí.
+                switch phase {
+                case .background: store?.didEnterBackground()
+                case .active: store?.didBecomeActive()
+                default: break
+                }
             }
         }
+    }
+}
+
+private struct PrivacyCover: View {
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.background)
+            Image(systemName: "lock.shield")
+                .font(.system(size: 56))
+                .foregroundStyle(.tint)
+        }
+        .ignoresSafeArea()
     }
 }
 

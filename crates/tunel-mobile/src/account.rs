@@ -4,27 +4,14 @@
 //! El móvil solo recibe: se une con la bóveda vacía, así que no sube nada, y lo que llega
 //! sustituye a lo que había. No crea cuentas: eso se hace desde el escritorio.
 
+use crate::runtime::{capitalize, runtime};
 use crate::{TunelError, Vault};
-use std::sync::{Arc, Mutex, OnceLock};
-use tokio::runtime::Runtime;
+use std::sync::{Arc, Mutex};
 use tunel_core::VaultData;
 use tunel_core::sync::protocol::AuthProvider;
 use tunel_sync::oauth::{self, AppOAuthStart, OAuthSignIn};
 use tunel_sync::{ServerUrl, SyncError, check_server_url};
 use zeroize::Zeroizing;
-
-/// Tokio para las llamadas de red. Las funciones de aquí bloquean: la app las llama fuera
-/// del hilo principal.
-fn runtime() -> &'static Runtime {
-    static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("no se pudo iniciar el entorno de red")
-    })
-}
 
 fn server_url(server: &str) -> Result<ServerUrl, TunelError> {
     Ok(check_server_url(server.trim())?)
@@ -285,12 +272,4 @@ impl From<SyncError> for TunelError {
             },
         }
     }
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().chain(chars).collect())
-        .unwrap_or_default()
 }

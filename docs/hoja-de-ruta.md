@@ -36,8 +36,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 8f | Vaultwarden: contraseña *enable* | 0.14.0 | ✅ |
 | 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
-| 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | en curso |
-| 9d | iOS/iPadOS: terminal SSH | 0.15.0 | |
+| 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
+| 9d | iOS/iPadOS: terminal SSH | 0.15.0 | en curso |
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | |
 | 9f | Android: app Kotlin con Jetpack Compose sobre el mismo núcleo | más adelante | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
@@ -181,9 +181,15 @@ después.
   servidor acepta `redirect=tunel://oauth` en lugar de un puerto local para volver a la app
   (necesita la versión nueva del servidor). Las invitaciones a Teams se aceptan desde el
   escritorio.
-- **9d. Terminal SSH:** la conexión la hace el núcleo; la pantalla es SwiftTerm (MIT). Barra
-  sobre el teclado con Esc, Ctrl, Tab y flechas, y aviso de huella de host nueva. iOS corta
-  las conexiones poco después de pasar la app a segundo plano: al volver se reconecta.
+- **9d. Terminal SSH:** la conexión, la autenticación (clave, contraseña, keyboard-interactive)
+  y los jump hosts son los de `tunel-ssh`; la pantalla es SwiftTerm (MIT), con su barra sobre
+  el teclado (Esc, Ctrl, Tab y flechas). Una clave de servidor nueva o cambiada se pregunta y,
+  si se acepta, se guarda en la bóveda y se sincroniza como en el escritorio. iOS corta las
+  conexiones poco después de pasar la app a segundo plano: al volver se reconecta. Para no
+  perder la terminal al copiar algo de otra app, la bóveda ya no se bloquea al salir sino al
+  volver tras más de 3 minutos fuera; mientras tanto, el selector de apps muestra una
+  cubierta en lugar de la pantalla. Los hosts Mosh se abren por SSH; Telnet y serie, aún no.
+  Sin llaves FIDO2, reenvío de agente, X11 ni túneles en esta entrega.
 - **9e. Face ID o Touch ID:** la clave de la bóveda en el llavero de iOS, protegida con
   biometría, con la misma regla de pedir la contraseña maestra una vez al día.
 - **9f. Android:** el mismo núcleo compilado con `cargo-ndk`, interfaz en Compose y desbloqueo

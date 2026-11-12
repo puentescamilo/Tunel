@@ -6473,13 +6473,16 @@ name = "tunel-mobile"
 version = "0.14.0"
 dependencies = [
  "axum",
+ "russh",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tunel-core",
  "tunel-server",
+ "tunel-ssh",
  "tunel-sync",
  "uniffi",
+ "uuid",
  "zeroize",
 ]
 
