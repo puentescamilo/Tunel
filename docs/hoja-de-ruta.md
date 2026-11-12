@@ -34,8 +34,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 8f | Vaultwarden: contraseña *enable* desde la pestaña | 0.14.0 | ✅ |
 | — | La ventana cabe en la pantalla al pasarla a otra con distinta escala (Windows) | 0.14.0 | ✅ |
 | 8f | Vaultwarden: contraseña *enable* | 0.14.0 | ✅ |
-| 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | en curso |
-| 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | |
+| 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
+| 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | en curso |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | |
 | 9d | iOS/iPadOS: terminal SSH | 0.15.0 | |
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | |
@@ -172,8 +172,8 @@ después.
 - **9a. Núcleo compartido:** crate `tunel-mobile` que expone el núcleo a Swift y Kotlin con
   UniFFI, y un script que lo empaqueta como XCFramework para iOS. Las llaves FIDO2 por USB no
   se ofrecen en móvil (no hay acceso a USB HID).
-- **9b. App de iOS y iPadOS:** proyecto en `apps/ios`. Desbloquear la bóveda y ver hosts y
-  grupos; en iPad, con barra lateral.
+- **9b. App de iOS y iPadOS:** proyecto en `apps/ios`. Crear o desbloquear la bóveda y ver
+  hosts y grupos, con búsqueda; en iPad, con barra lateral. Se bloquea al salir de la app.
 - **9c. Cuenta y sincronización:** inicio de sesión con contraseña o con Google o Microsoft
   (con `ASWebAuthenticationSession`), y descarga de la bóveda y los Teams.
 - **9d. Terminal SSH:** la conexión la hace el núcleo; la pantalla es SwiftTerm (MIT). Barra
