@@ -40,3 +40,24 @@ impl From<StoreError> for TunelError {
         }
     }
 }
+
+/// El mensaje de un error para mostrarlo tal cual: así Swift y Kotlin no lo repiten.
+#[uniffi::export]
+pub fn error_message(error: TunelError) -> String {
+    error.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_message_includes_the_minimum_length() {
+        let message = error_message(TunelError::WeakPassword { min: 8 });
+
+        assert_eq!(
+            message,
+            "La contraseña maestra debe tener al menos 8 caracteres"
+        );
+    }
+}
