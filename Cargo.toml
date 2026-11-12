@@ -8,6 +8,7 @@ members = [
     "crates/tunel-server",
     "crates/tunel-sync",
     "crates/tunel-vaultwarden",
+    "crates/tunel-mobile",
 ]
 
 [workspace.package]

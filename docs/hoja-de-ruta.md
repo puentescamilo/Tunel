@@ -33,6 +33,13 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 8d | Vaultwarden: hosts desde las colecciones | 0.14.0 | ✅ |
 | 8f | Vaultwarden: contraseña *enable* desde la pestaña | 0.14.0 | ✅ |
 | — | La ventana cabe en la pantalla al pasarla a otra con distinta escala (Windows) | 0.14.0 | ✅ |
+| 8f | Vaultwarden: contraseña *enable* | 0.14.0 | ✅ |
+| 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | en curso |
+| 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | |
+| 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | |
+| 9d | iOS/iPadOS: terminal SSH | 0.15.0 | |
+| 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | |
+| 9f | Android: app Kotlin con Jetpack Compose sobre el mismo núcleo | más adelante | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -150,6 +157,38 @@ que siempre. El diseño completo está en [vaultwarden.md](vaultwarden.md).
   se importan como hosts, con su puerto, sus notas y un grupo por colección.
 - **8f. Contraseña *enable*:** guardada en la identidad o en el campo oculto `enable` del
   elemento de Vaultwarden, y enviada a mano desde el menú de la pestaña o con ⌘⇧E.
+
+## 9. Túnel en iPhone, iPad y Android
+
+Interfaz nativa en cada sistema (SwiftUI en iOS y iPadOS, Jetpack Compose en Android) sobre el
+mismo núcleo en Rust que usa el escritorio: bóveda, cifrado, SSH, sincronización, Teams y
+Vaultwarden. Así hay una sola implementación del formato de la bóveda y del protocolo con el
+servidor, y lo que se guarda en un equipo se abre igual en los demás.
+
+La primera versión móvil es un **cliente sincronizado**: se inicia sesión en la cuenta, llegan
+los hosts, las identidades y los Teams, y se abren terminales SSH. Editar desde el móvil llega
+después.
+
+- **9a. Núcleo compartido:** crate `tunel-mobile` que expone el núcleo a Swift y Kotlin con
+  UniFFI, y un script que lo empaqueta como XCFramework para iOS. Las llaves FIDO2 por USB no
+  se ofrecen en móvil (no hay acceso a USB HID).
+- **9b. App de iOS y iPadOS:** proyecto en `apps/ios`. Desbloquear la bóveda y ver hosts y
+  grupos; en iPad, con barra lateral.
+- **9c. Cuenta y sincronización:** inicio de sesión con contraseña o con Google o Microsoft
+  (con `ASWebAuthenticationSession`), y descarga de la bóveda y los Teams.
+- **9d. Terminal SSH:** la conexión la hace el núcleo; la pantalla es SwiftTerm (MIT). Barra
+  sobre el teclado con Esc, Ctrl, Tab y flechas, y aviso de huella de host nueva. iOS corta
+  las conexiones poco después de pasar la app a segundo plano: al volver se reconecta.
+- **9e. Face ID o Touch ID:** la clave de la bóveda en el llavero de iOS, protegida con
+  biometría, con la misma regla de pedir la contraseña maestra una vez al día.
+- **9f. Android:** el mismo núcleo compilado con `cargo-ndk`, interfaz en Compose y desbloqueo
+  con huella (BiometricPrompt y Android Keystore). Necesita Android Studio en el equipo de
+  compilación.
+
+Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
+días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.
+Túnel es GPL-3.0: si alguna vez se publica en la App Store, hay que revisar antes la
+compatibilidad de la licencia con sus condiciones.
 
 ## Pendiente de fases anteriores
 

@@ -1,0 +1,29 @@
+[package]
+name = "tunel-mobile"
+description = "Núcleo de Túnel para las apps de iOS, iPadOS y Android (UniFFI)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# `staticlib` para el XCFramework de iOS, `cdylib` para Android y para generar los enlaces.
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "tunel_mobile"
+
+[[bin]]
+# Genera los enlaces de Swift y Kotlin: `cargo run -p tunel-mobile --bin uniffi-bindgen`.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+tunel-core.workspace = true
+thiserror.workspace = true
+uniffi = "0.32"
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -259,10 +259,10 @@ impl russh::Signer for SkSigner {
 }
 
 /// Llave de seguridad conectada por USB (CTAP2 sobre HID).
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "ios", target_os = "android")))]
 pub struct UsbAuthenticator;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "ios", target_os = "android")))]
 impl Authenticator for UsbAuthenticator {
     fn get_assertion(&self, request: &AssertionRequest) -> Result<Assertion, FidoError> {
         use ctap_hid_fido2::fidokey::GetAssertionArgsBuilder;
@@ -297,9 +297,13 @@ impl Authenticator for UsbAuthenticator {
 
 /// La llave del sistema, si este sistema la admite.
 pub fn system_authenticator() -> Result<Arc<dyn Authenticator>, FidoError> {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "ios", target_os = "android")))]
     {
         Ok(Arc::new(UsbAuthenticator))
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        Err(FidoError::Unsupported)
     }
     #[cfg(windows)]
     {
