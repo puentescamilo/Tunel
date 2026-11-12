@@ -16,10 +16,14 @@ public final class VaultStore {
     public private(set) var tree = HostTree(hosts: [], groups: [])
     /// Mientras se deriva la clave (tarda un momento): la interfaz desactiva el botón.
     public private(set) var isWorking = false
+    /// La cuenta a la que está unido el dispositivo; `nil` si no lo está.
+    public internal(set) var account: AccountInfo?
+    public internal(set) var syncStatus: SyncStatus = .idle
     public var errorMessage: String?
 
     private let path: String
-    private var vault: Vault?
+    /// Abierta mientras `state` es `.unlocked`; la usa también la parte de la cuenta.
+    var vault: Vault?
 
     public init(path: String) {
         self.path = path
@@ -56,7 +60,16 @@ public final class VaultStore {
         guard state == .unlocked else { return }
         vault = nil
         tree = HostTree(hosts: [], groups: [])
+        account = nil
+        syncStatus = .idle
         state = .locked
+    }
+
+    /// Vuelve a leer hosts, grupos y cuenta de la bóveda abierta.
+    func reload() {
+        guard let vault else { return }
+        tree = HostTree(hosts: vault.hosts(), groups: vault.groups())
+        account = try? vault.account()
     }
 
     private func open(_ action: @escaping @Sendable () throws -> Vault) async {
@@ -68,7 +81,7 @@ public final class VaultStore {
             // Argon2id tarda: fuera del hilo principal para no congelar la interfaz.
             let opened = try await Task.detached(priority: .userInitiated, operation: action).value
             vault = opened
-            tree = HostTree(hosts: opened.hosts(), groups: opened.groups())
+            reload()
             state = .unlocked
         } catch {
             errorMessage = userMessage(for: error)

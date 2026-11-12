@@ -17,6 +17,10 @@ if [[ "${1:-}" == "--debug" ]]; then
 fi
 
 package=apps/ios/TunelCore
+# Las mismas versiones mínimas que el proyecto de Xcode y Package.swift. Sin ellas, la
+# librería TLS (aws-lc) se compila para la versión del SDK y no enlaza.
+export IPHONEOS_DEPLOYMENT_TARGET=17.0
+export MACOSX_DEPLOYMENT_TARGET=14.0
 targets=(aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin)
 lib=libtunel_mobile.a
 

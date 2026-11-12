@@ -22,8 +22,14 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 tunel-core.workspace = true
+tunel-sync.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
 thiserror.workspace = true
 uniffi = "0.32"
 
 [dev-dependencies]
 tempfile.workspace = true
+# Un servidor real en memoria para las pruebas de la cuenta.
+tunel-server.workspace = true
+axum.workspace = true

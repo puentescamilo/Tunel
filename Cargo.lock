@@ -6472,10 +6472,15 @@ dependencies = [
 name = "tunel-mobile"
 version = "0.14.0"
 dependencies = [
+ "axum",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
  "tunel-core",
+ "tunel-server",
+ "tunel-sync",
  "uniffi",
+ "zeroize",
 ]
 
 [[package]]

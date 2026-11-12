@@ -3,14 +3,16 @@ import TunelCore
 
 /// Grupos a la izquierda y hosts a la derecha en iPad; en iPhone, una pantalla tras otra.
 struct HostsView: View {
-    let tree: HostTree
-    let onLock: () -> Void
+    let store: VaultStore
+    @State private var showingAccount = false
 
     /// `allHosts` es la entrada «Todos los hosts»; el resto, el id de un grupo.
     @State private var selection: String? = Self.allHosts
     @State private var query = ""
 
     private static let allHosts = "todos"
+
+    private var tree: HostTree { store.tree }
 
     var body: some View {
         NavigationSplitView {
@@ -28,17 +30,38 @@ struct HostsView: View {
             }
             .navigationTitle("Túnel")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cuenta", systemImage: "person.crop.circle") { showingAccount = true }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Bloquear", systemImage: "lock", action: onLock)
+                    Button("Bloquear", systemImage: "lock", action: store.lock)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if store.account != nil {
+                    SyncStatusRow(status: store.syncStatus)
+                        .font(.footnote)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.bar)
                 }
             }
         } detail: {
             NavigationStack {
-                HostList(hosts: tree.hosts(in: groupId, matching: query))
-                    .navigationTitle(title)
-                    .searchable(text: $query, prompt: "Nombre, dirección o etiqueta")
+                HostList(
+                    hosts: tree.hosts(in: groupId, matching: query),
+                    hasAccount: store.account != nil,
+                    onSignIn: { showingAccount = true }
+                )
+                .navigationTitle(title)
+                .searchable(text: $query, prompt: "Nombre, dirección o etiqueta")
+                .refreshable { await store.sync() }
             }
         }
+        .sheet(isPresented: $showingAccount) { AccountView(store: store) }
+        // Al desbloquear, lo nuevo de la cuenta.
+        .task { await store.sync() }
     }
 
     private var groupId: String? { selection == Self.allHosts ? nil : selection }
@@ -51,13 +74,22 @@ struct HostsView: View {
 
 private struct HostList: View {
     let hosts: [HostSummary]
+    let hasAccount: Bool
+    let onSignIn: () -> Void
 
     var body: some View {
-        if hosts.isEmpty {
+        if hosts.isEmpty && !hasAccount {
+            ContentUnavailableView {
+                Label("Une tu cuenta de Túnel", systemImage: "person.crop.circle.badge.plus")
+            } description: {
+                Text("Tus hosts, identidades y Teams llegan desde tu cuenta.")
+            } actions: {
+                Button("Iniciar sesión", action: onSignIn).buttonStyle(.borderedProminent)
+            }
+        } else if hosts.isEmpty {
             ContentUnavailableView(
-                "No hay hosts",
-                systemImage: "server.rack",
-                description: Text("Los hosts de tu cuenta de Túnel aparecerán aquí."))
+                "No hay hosts", systemImage: "server.rack",
+                description: Text("Desliza hacia abajo para sincronizar."))
         } else {
             List(hosts, id: \.id) { host in
                 NavigationLink(value: host) { HostRow(host: host) }

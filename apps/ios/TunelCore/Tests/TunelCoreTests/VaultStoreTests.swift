@@ -65,3 +65,26 @@ private func temporaryPath() throws -> String {
 
     #expect(VaultStore(path: path).state == .locked)
 }
+
+@MainActor
+@Test func aNewVaultHasNoAccountAndSyncingDoesNothing() async throws {
+    let store = VaultStore(path: try temporaryPath())
+    await store.create(password: "correcta-caballo", confirmation: "correcta-caballo")
+
+    await store.sync()
+
+    #expect(store.account == nil)
+    #expect(store.syncStatus == .idle)
+}
+
+@MainActor
+@Test func aServerWithoutHttpsOnTheInternetIsRejectedWithAMessage() async throws {
+    let store = VaultStore(path: try temporaryPath())
+
+    await #expect {
+        try await store.signInOptions(server: "http://tunel.example.com")
+    } throws: { error in
+        guard case TunelError.Sync(let message) = error else { return false }
+        return !message.isEmpty
+    }
+}

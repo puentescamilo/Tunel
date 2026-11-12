@@ -43,7 +43,7 @@ struct RootView: View {
         case .needsSetup, .locked:
             LockView(store: store)
         case .unlocked:
-            HostsView(tree: store.tree, onLock: store.lock)
+            HostsView(store: store)
         }
     }
 }
