@@ -10,6 +10,11 @@
 //!    `state` y lo canjea demostrando el PKCE.
 //! 3. [`complete`] abre la clave de bóveda con la contraseña maestra, o crea la cuenta.
 //!
+//! En iPhone, iPad y Android no se puede escuchar en un puerto mientras el navegador del
+//! sistema está delante: [`begin_app`] pide al servidor que vuelva a [`APP_REDIRECT`], el
+//! sistema le da esa dirección a la app y [`AppOAuthStart::finish`] la comprueba y canjea
+//! el código igual que [`OAuthStart::wait`].
+//!
 //! Una cuenta con contraseña ya unida pasa a un proveedor con [`begin_link`] y [`link`]:
 //! conserva sus Teams, sus datos y su clave de bóveda, que pasa a envolverse con la que
 //! sale de la contraseña maestra.
@@ -38,6 +43,9 @@ const BROWSER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Tope de una petición del navegador a la dirección local.
 const MAX_REQUEST: usize = 16 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Dirección a la que el servidor devuelve el navegador en las apps móviles.
+pub const APP_REDIRECT: &str = "tunel://oauth";
 
 /// Proveedores de identidad del servidor; vacío si no tiene ninguno.
 pub async fn providers(server: &ServerUrl) -> Result<AuthProviders, SyncError> {
@@ -82,9 +90,7 @@ async fn start(
         .local_addr()
         .map_err(|e| SyncError::Internal(e.to_string()))?
         .port();
-    let verifier = Zeroizing::new(B64_URL.encode(rand::random::<[u8; 32]>()));
-    let challenge = B64_URL.encode(Sha256::digest(verifier.as_bytes()));
-    let state = B64_URL.encode(rand::random::<[u8; 16]>());
+    let (verifier, challenge, state) = pkce();
     Ok(OAuthStart {
         url: api.oauth_start_url(&provider.id, port, &challenge, &state, link),
         server: server.clone(),
@@ -95,7 +101,80 @@ async fn start(
     })
 }
 
+/// Verificador PKCE, su reto y un `state` nuevos.
+fn pkce() -> (Zeroizing<String>, String, String) {
+    let verifier = Zeroizing::new(B64_URL.encode(rand::random::<[u8; 32]>()));
+    let challenge = B64_URL.encode(Sha256::digest(verifier.as_bytes()));
+    let state = B64_URL.encode(rand::random::<[u8; 16]>());
+    (verifier, challenge, state)
+}
+
+/// Un inicio de sesión de una app móvil esperando a que el sistema le devuelva
+/// [`APP_REDIRECT`].
+pub struct AppOAuthStart {
+    /// Dirección que hay que abrir en el navegador del sistema.
+    pub url: String,
+    server: ServerUrl,
+    provider: AuthProvider,
+    verifier: Zeroizing<String>,
+    state: String,
+}
+
+/// Empieza a iniciar sesión con `provider` desde una app móvil.
+pub fn begin_app(server: &ServerUrl, provider: AuthProvider) -> Result<AppOAuthStart, SyncError> {
+    let api = Api::new(server)?;
+    let (verifier, challenge, state) = pkce();
+    Ok(AppOAuthStart {
+        url: api.oauth_app_start_url(&provider.id, &challenge, &state),
+        server: server.clone(),
+        provider,
+        verifier,
+        state,
+    })
+}
+
+impl AppOAuthStart {
+    /// Canjea el código de la dirección con la que volvió el navegador (`callback`). Falla
+    /// si no es la de este inicio de sesión o si el proveedor dijo que no.
+    pub async fn finish(self, callback: &str) -> Result<OAuthSignIn, SyncError> {
+        let url = reqwest::Url::parse(callback)
+            .map_err(|_| SyncError::Provider("la vuelta del navegador no es válida".into()))?;
+        let is_app = url.scheme() == "tunel" && url.host_str() == Some("oauth");
+        let code = match parse_back(&url, &self.state) {
+            Return::Code(code) if is_app => code,
+            Return::Error(error) if is_app => return Err(SyncError::Provider(error)),
+            _ => {
+                return Err(SyncError::Provider(
+                    "la vuelta del navegador no es de este inicio de sesión".into(),
+                ));
+            }
+        };
+        exchange(self.server, self.provider, &self.verifier, code).await
+    }
+}
+
+/// Canjea en el servidor el código de un solo uso demostrando el reto PKCE.
+async fn exchange(
+    server: ServerUrl,
+    provider: AuthProvider,
+    verifier: &str,
+    code: String,
+) -> Result<OAuthSignIn, SyncError> {
+    let login = Api::new(&server)?
+        .oauth_token(&OAuthTokenRequest {
+            code,
+            verifier: verifier.to_string(),
+        })
+        .await?;
+    Ok(OAuthSignIn {
+        server,
+        provider,
+        login,
+    })
+}
+
 /// Quién inició sesión y qué dijo el servidor: si la cuenta ya existía o hay que crearla.
+#[derive(Clone)]
 pub struct OAuthSignIn {
     server: ServerUrl,
     provider: AuthProvider,
@@ -147,6 +226,11 @@ fn parse_return(request_line: &str, expected_state: &str) -> Return {
     if url.path() != "/oauth" {
         return Return::Ignored;
     }
+    parse_back(&url, expected_state)
+}
+
+/// El código o el error de la dirección de vuelta, si trae el `state` esperado.
+fn parse_back(url: &reqwest::Url, expected_state: &str) -> Return {
     let get = |name: &str| {
         url.query_pairs()
             .find(|(k, _)| k == name)
@@ -215,18 +299,7 @@ impl OAuthStart {
         let code = tokio::time::timeout(BROWSER_TIMEOUT, self.accept())
             .await
             .map_err(|_| SyncError::Provider("no se completó a tiempo en el navegador".into()))??;
-        let api = Api::new(&self.server)?;
-        let login = api
-            .oauth_token(&OAuthTokenRequest {
-                code,
-                verifier: self.verifier.to_string(),
-            })
-            .await?;
-        Ok(OAuthSignIn {
-            server: self.server,
-            provider: self.provider,
-            login,
-        })
+        exchange(self.server, self.provider, &self.verifier, code).await
     }
 
     async fn accept(&self) -> Result<String, SyncError> {

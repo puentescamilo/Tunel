@@ -4,9 +4,13 @@
 //! La interfaz es nativa en cada sistema; el formato de la bóveda, el cifrado y, más
 //! adelante, SSH y la sincronización salen de aquí, igual que en el escritorio.
 
+mod account;
 mod error;
 mod vault;
 
+pub use account::{
+    AccountInfo, Provider, ProviderSignIn, SignInOptions, SyncReport, sign_in_options,
+};
 pub use error::{TunelError, error_message};
 pub use vault::{GroupSummary, HostSummary, Vault, vault_exists};
 

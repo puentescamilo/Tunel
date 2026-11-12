@@ -453,6 +453,16 @@ impl Api {
         )
     }
 
+    /// Como [`Self::oauth_start_url`], para una app móvil: el servidor vuelve a
+    /// `tunel://oauth` en lugar de a un puerto local.
+    pub fn oauth_app_start_url(&self, provider: &str, challenge: &str, state: &str) -> String {
+        format!(
+            "{}/v1/auth/{}/start?redirect=tunel%3A%2F%2Foauth&challenge={challenge}&state={state}",
+            self.base,
+            segment(provider)
+        )
+    }
+
     pub async fn oauth_token(&self, request: &OAuthTokenRequest) -> Result<OAuthLogin, SyncError> {
         self.send(self.post("/v1/auth/token", request)).await
     }

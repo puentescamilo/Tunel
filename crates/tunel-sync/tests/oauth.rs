@@ -135,8 +135,16 @@ impl World {
         .unwrap();
         let url = start.url.clone();
         let waiting = tokio::spawn(start.wait());
-        // El navegador: servidor → proveedor (que da el visto bueno) → servidor → Túnel.
-        let to_idp = self.browser.get(&url).send().await.unwrap();
+        let back = self.browse(&url, sub, email).await;
+        assert!(back.starts_with("http://127.0.0.1:"), "{back}");
+        self.browser.get(&back).send().await.unwrap();
+        waiting.await.unwrap()
+    }
+
+    /// El navegador: servidor → proveedor (que da el visto bueno) → servidor. Devuelve la
+    /// dirección a la que el servidor manda de vuelta a Túnel.
+    async fn browse(&self, url: &str, sub: &str, email: &str) -> String {
+        let to_idp = self.browser.get(url).send().await.unwrap();
         let authorize = location(&to_idp);
         assert!(authorize.starts_with(&self.issuer));
         *self.claims.lock().unwrap() = json!({
@@ -153,11 +161,16 @@ impl World {
             self.server.base,
             param(&authorize, "state")
         );
-        let to_app = self.browser.get(&callback).send().await.unwrap();
-        let back = location(&to_app);
-        assert!(back.starts_with("http://127.0.0.1:"), "{back}");
-        self.browser.get(&back).send().await.unwrap();
-        waiting.await.unwrap()
+        location(&self.browser.get(&callback).send().await.unwrap())
+    }
+
+    /// Como `sign_in`, desde una app móvil: el servidor vuelve a `tunel://oauth`.
+    async fn sign_in_app(&self, sub: &str, email: &str) -> Result<OAuthSignIn, SyncError> {
+        let provider = oauth::providers(&self.server).await.unwrap().providers[0].clone();
+        let start = oauth::begin_app(&self.server, provider).unwrap();
+        let back = self.browse(&start.url.clone(), sub, email).await;
+        assert!(back.starts_with(oauth::APP_REDIRECT), "{back}");
+        start.finish(&back).await
     }
 }
 
@@ -417,4 +430,85 @@ async fn the_move_also_works_when_only_providers_are_allowed() {
         .unwrap();
     let (_, received) = sync(&desktop, &VaultData::default()).await;
     assert!(received.hosts.iter().any(|h| h.label == "db-01"));
+}
+
+#[tokio::test]
+async fn a_phone_joins_through_the_app_redirect_and_receives_the_hosts() {
+    let w = world().await;
+    let first = w.sign_in("ana-1", "ana@empresa.com").await;
+    let data = hosts(&["web-01"]);
+    let laptop = oauth::complete(first, Zeroizing::new(MASTER.into()), &data)
+        .await
+        .unwrap();
+    sync(&laptop, &data).await;
+
+    let phone = w.sign_in_app("ana-1", "ana@empresa.com").await.unwrap();
+    assert!(!phone.is_new());
+    let phone = oauth::complete(phone, Zeroizing::new(MASTER.into()), &VaultData::default())
+        .await
+        .unwrap();
+    let (phone, received) = sync(&phone, &VaultData::default()).await;
+
+    assert!(received.hosts.iter().any(|h| h.label == "web-01"));
+    assert_eq!(phone.pending(), 0);
+}
+
+#[tokio::test]
+async fn the_app_rejects_a_return_from_another_sign_in() {
+    let w = world().await;
+    let provider = oauth::providers(&w.server).await.unwrap().providers[0].clone();
+    let start = oauth::begin_app(&w.server, provider.clone()).unwrap();
+    let other = oauth::begin_app(&w.server, provider).unwrap();
+    let back = w
+        .browse(&other.url.clone(), "ana-1", "ana@empresa.com")
+        .await;
+
+    let error = start.finish(&back).await.err().unwrap();
+
+    assert!(matches!(error, SyncError::Provider(_)), "{error:?}");
+}
+
+#[tokio::test]
+async fn the_app_rejects_a_return_to_another_address() {
+    let w = world().await;
+    let provider = oauth::providers(&w.server).await.unwrap().providers[0].clone();
+    let start = oauth::begin_app(&w.server, provider).unwrap();
+    let back = w
+        .browse(&start.url.clone(), "ana-1", "ana@empresa.com")
+        .await;
+    let elsewhere = back.replacen("tunel://oauth", "https://otro.example/oauth", 1);
+
+    let error = start.finish(&elsewhere).await.err().unwrap();
+
+    assert!(matches!(error, SyncError::Provider(_)), "{error:?}");
+}
+
+#[tokio::test]
+async fn the_server_only_returns_to_the_app_address() {
+    let w = world().await;
+    let challenge = "a".repeat(43);
+    let start = |extra: &str| {
+        format!(
+            "{}/v1/auth/google/start?challenge={challenge}&state=0123456789abcdef{extra}",
+            w.server.base
+        )
+    };
+
+    let elsewhere = w
+        .browser
+        .get(start("&redirect=https%3A%2F%2Fotro.example%2Foauth"))
+        .send()
+        .await
+        .unwrap();
+    let both = w
+        .browser
+        .get(start("&redirect=tunel%3A%2F%2Foauth&port=50000"))
+        .send()
+        .await
+        .unwrap();
+    let neither = w.browser.get(start("")).send().await.unwrap();
+
+    assert_eq!(elsewhere.status(), 400);
+    assert_eq!(both.status(), 400);
+    assert_eq!(neither.status(), 400);
 }

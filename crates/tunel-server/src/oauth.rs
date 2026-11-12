@@ -17,6 +17,11 @@
 //!    `/v1/auth/token` demostrando el reto PKCE. Así, otro programa que vea esa dirección
 //!    no puede usar el código.
 //!
+//! Las apps de iPhone, iPad y Android no pueden escuchar en un puerto mientras el navegador
+//! del sistema está delante: piden `redirect=tunel://oauth` en lugar de `port`, y el sistema
+//! les devuelve esa dirección. Solo se acepta esa, nunca una elegida por quien llama, y el
+//! código sigue sin servir sin el reto PKCE.
+//!
 //! Cada cuenta queda ligada al identificador estable de la persona en su proveedor (`sub`,
 //! o `tid` + `oid` en Microsoft), no al correo: un correo reasignado, cambiado o afirmado
 //! por otro proveedor no da acceso a la cuenta de otra persona.
@@ -213,11 +218,23 @@ struct Discovery {
 }
 
 /// Un inicio de sesión a medias, mientras la persona está en el navegador.
+/// Adónde vuelve el navegador al terminar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Back {
+    /// El escritorio, que escucha en este puerto de `127.0.0.1`.
+    Loopback(u16),
+    /// Una app móvil, por [`APP_REDIRECT`].
+    App,
+}
+
+/// La única dirección de vuelta que se acepta para las apps móviles.
+pub const APP_REDIRECT: &str = "tunel://oauth";
+
 struct Flow {
     provider: String,
     /// Reto PKCE de Túnel.
     challenge: String,
-    port: u16,
+    back: Back,
     /// Lo que Túnel mandó como `state`: se le devuelve para que compruebe que la vuelta es
     /// la del inicio de sesión que empezó.
     app_state: String,
@@ -554,7 +571,11 @@ async fn list_providers(State(state): State<Arc<AppState>>) -> Json<AuthProvider
 
 #[derive(Deserialize)]
 struct StartQuery {
-    port: u16,
+    /// Puerto local del escritorio; las apps móviles mandan `redirect`.
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    redirect: Option<String>,
     challenge: String,
     /// Valor aleatorio de Túnel que vuelve con la respuesta.
     state: String,
@@ -596,9 +617,12 @@ async fn start(
     take_unauthenticated(&state)?;
     let oauth = oauth(&state)?;
     let config = oauth.config.provider(&provider)?.clone();
-    if query.port < 1024 {
-        return Err(ApiError::bad_request("puerto no válido"));
-    }
+    let back = match (query.port, query.redirect.as_deref()) {
+        (Some(port), None) if port >= 1024 => Back::Loopback(port),
+        (None, Some(APP_REDIRECT)) => Back::App,
+        (Some(_), None) => return Err(ApiError::bad_request("puerto no válido")),
+        _ => return Err(ApiError::bad_request("dirección de vuelta no válida")),
+    };
     if !url_token(&query.challenge, 43, 43) || !url_token(&query.state, 16, 64) {
         return Err(ApiError::bad_request("reto no válido"));
     }
@@ -619,7 +643,7 @@ async fn start(
     let flow = Flow {
         provider: provider.clone(),
         challenge: query.challenge,
-        port: query.port,
+        back,
         app_state: query.state,
         nonce: random_token(),
         verifier: random_token(),
@@ -661,7 +685,10 @@ struct CallbackQuery {
 
 /// Devuelve el navegador a Túnel, con el código o con el motivo del error, y su `state`.
 fn back_to_app(flow: &Flow, param: (&str, &str)) -> Response {
-    let base = format!("http://127.0.0.1:{}/oauth", flow.port);
+    let base = match flow.back {
+        Back::Loopback(port) => format!("http://127.0.0.1:{port}/oauth"),
+        Back::App => APP_REDIRECT.to_string(),
+    };
     let params = [param, ("state", flow.app_state.as_str())];
     match reqwest::Url::parse_with_params(&base, &params) {
         Ok(url) => Redirect::to(url.as_str()).into_response(),

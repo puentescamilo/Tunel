@@ -19,6 +19,15 @@ pub enum TunelError {
     UnsupportedVersion,
     #[error("No se pudo leer o escribir la bóveda: {message}")]
     Io { message: String },
+    #[error("La contraseña maestra no es la de esta cuenta")]
+    WrongMasterPassword,
+    #[error("No hay ninguna cuenta de Túnel de {email}; créala desde Túnel en el escritorio")]
+    NoAccount { email: String },
+    #[error("Este dispositivo no está unido a ninguna cuenta")]
+    NotSignedIn,
+    /// Un error de la red o del servidor, con el mensaje de la sincronización.
+    #[error("{message}")]
+    Sync { message: String },
 }
 
 impl From<StoreError> for TunelError {

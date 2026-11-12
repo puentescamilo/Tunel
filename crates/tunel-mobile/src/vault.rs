@@ -104,7 +104,7 @@ impl Vault {
 
     /// Un pánico con el cerrojo tomado no deja la bóveda a medias (solo se lee), así que se
     /// sigue usando.
-    fn lock(&self) -> MutexGuard<'_, UnlockedVault> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, UnlockedVault> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
