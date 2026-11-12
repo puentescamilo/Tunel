@@ -19,7 +19,8 @@ rand10 = { package = "rand", version = "0.10" }
 
 # Llaves FIDO2 por USB. En Windows el acceso directo por HID está bloqueado, así que allí se
 # usa la API WebAuthn del sistema (ver src/webauthn.rs).
-[target.'cfg(not(windows))'.dependencies]
+# En iOS y Android no hay acceso a USB HID: allí no se ofrecen llaves por USB.
+[target.'cfg(not(any(windows, target_os = "ios", target_os = "android")))'.dependencies]
 ctap-hid-fido2 = { version = "3.6.0", default-features = false, features = ["aws-lc-rs"] }
 
 [target.'cfg(windows)'.dependencies]
