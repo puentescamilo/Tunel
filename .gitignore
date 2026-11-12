@@ -10,3 +10,5 @@ vault.tmp
 /apps/ios/TunelCore/Sources/TunelCore/tunel_mobile.swift
 /apps/ios/TunelCore/.build
 /apps/ios/TunelCore/.swiftpm
+/apps/ios/Config/Local.xcconfig
+xcuserdata/

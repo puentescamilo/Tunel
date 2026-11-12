@@ -7,7 +7,7 @@
 mod error;
 mod vault;
 
-pub use error::TunelError;
+pub use error::{TunelError, error_message};
 pub use vault::{GroupSummary, HostSummary, Vault, vault_exists};
 
 uniffi::setup_scaffolding!();
