@@ -5,3 +5,8 @@ vault.tmp
 /dist
 .DS_Store
 /crates/tunel-server/.env
+# Lo genera scripts/compilar-ios.sh.
+/apps/ios/TunelCore/TunelCoreFFI.xcframework
+/apps/ios/TunelCore/Sources/TunelCore/tunel_mobile.swift
+/apps/ios/TunelCore/.build
+/apps/ios/TunelCore/.swiftpm
