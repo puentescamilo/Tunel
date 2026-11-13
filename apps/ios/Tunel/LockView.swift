@@ -55,6 +55,15 @@ struct LockView: View {
             }
             .textFieldStyle(.roundedBorder)
 
+            if store.biometricWaitsForPassword, let kind = store.biometricKind {
+                Label(
+                    "La primera vez de cada día se entra con la contraseña; después, con \(kind.name).",
+                    systemImage: kind.symbol
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
             if let message = store.errorMessage {
                 Label(message, systemImage: "exclamationmark.circle")
                     .font(.callout)
@@ -74,11 +83,24 @@ struct LockView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(!canSubmit)
+
+            if store.biometricReady, let kind = store.biometricKind {
+                Button("Desbloquear con \(kind.name)", systemImage: kind.symbol) {
+                    Task { await store.unlockWithBiometrics() }
+                }
+                .disabled(store.isWorking)
+            }
             Spacer()
         }
         .padding(24)
         .frame(maxWidth: 420)
-        .onAppear { focused = .password }
+        .onAppear {
+            if store.biometricReady, store.promptsBiometricsOnAppear {
+                Task { await store.unlockWithBiometrics() }
+            } else {
+                focused = .password
+            }
+        }
     }
 
     private func submit() {

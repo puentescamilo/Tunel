@@ -38,7 +38,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
 | 9d | iOS/iPadOS: terminal SSH | 0.15.0 | en curso |
-| 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | |
+| 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | en curso |
 | 9f | Android: app Kotlin con Jetpack Compose sobre el mismo núcleo | más adelante | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
@@ -190,8 +190,13 @@ después.
   volver tras más de 3 minutos fuera; mientras tanto, el selector de apps muestra una
   cubierta en lugar de la pantalla. Los hosts Mosh se abren por SSH; Telnet y serie, aún no.
   Sin llaves FIDO2, reenvío de agente, X11 ni túneles en esta entrega.
-- **9e. Face ID o Touch ID:** la clave de la bóveda en el llavero de iOS, protegida con
-  biometría, con la misma regla de pedir la contraseña maestra una vez al día.
+- **9e. Face ID o Touch ID:** el mismo archivo `<bóveda>.biometria` del escritorio guarda la
+  clave de la bóveda sellada; la clave que abre ese sello la genera el núcleo y la app la
+  guarda en el llavero de iOS con `biometryCurrentSet`, solo en este dispositivo y sin copia
+  de seguridad. Si cambian las caras o huellas registradas, iOS la invalida y hay que entrar
+  con la contraseña y volver a activarlo. La primera vez de cada día se pide la contraseña
+  maestra, como en el escritorio. Se activa en Ajustes (pide la cara una vez para
+  comprobarlo); al volver tras el bloqueo por tiempo, Face ID se pide solo.
 - **9f. Android:** el mismo núcleo compilado con `cargo-ndk`, interfaz en Compose y desbloqueo
   con huella (BiometricPrompt y Android Keystore). Necesita Android Studio en el equipo de
   compilación.

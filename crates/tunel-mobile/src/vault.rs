@@ -57,8 +57,10 @@ impl Vault {
     /// la app la llama fuera del hilo principal.
     #[uniffi::constructor]
     pub fn unlock(path: String, password: String) -> Result<Arc<Self>, TunelError> {
-        let vault = UnlockedVault::unlock(path, &password)?;
-        Ok(Self::wrap(vault))
+        let vault = Self::wrap(UnlockedVault::unlock(path, &password)?);
+        // Desde ahora, y hasta que acabe el día, sirve Face ID.
+        vault.record_password_unlock(crate::biometric::today());
+        Ok(vault)
     }
 
     /// Hosts ordenados por nombre, sin distinguir mayúsculas.
@@ -96,7 +98,7 @@ impl Vault {
 }
 
 impl Vault {
-    fn wrap(vault: UnlockedVault) -> Arc<Self> {
+    pub(crate) fn wrap(vault: UnlockedVault) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(vault),
         })

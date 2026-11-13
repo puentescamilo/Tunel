@@ -5,6 +5,7 @@ import TunelCore
 struct HostsView: View {
     let store: VaultStore
     @State private var showingAccount = false
+    @State private var showingSettings = false
 
     /// `allHosts` es la entrada «Todos los hosts»; el resto, el id de un grupo.
     @State private var selection: String? = Self.allHosts
@@ -33,7 +34,8 @@ struct HostsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cuenta", systemImage: "person.crop.circle") { showingAccount = true }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Ajustes", systemImage: "gear") { showingSettings = true }
                     Button("Bloquear", systemImage: "lock", action: store.lock)
                 }
             }
@@ -61,6 +63,7 @@ struct HostsView: View {
             }
         }
         .sheet(isPresented: $showingAccount) { AccountView(store: store) }
+        .sheet(isPresented: $showingSettings) { SettingsView(store: store) }
         // Al desbloquear, lo nuevo de la cuenta.
         .task { await store.sync() }
     }
