@@ -38,7 +38,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
 | 9d | iOS/iPadOS: terminal SSH | 0.15.0 | ✅ |
-| 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | en curso |
+| 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | ✅ |
+| 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | en curso |
 | 9f | Android: app Kotlin con Jetpack Compose sobre el mismo núcleo | más adelante | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
@@ -176,8 +177,8 @@ después.
   hosts y grupos, con búsqueda; en iPad, con barra lateral. Se bloquea al salir de la app.
 - **9c. Cuenta y sincronización:** unir el dispositivo a la cuenta con correo y contraseña o
   con Google o Microsoft (con el navegador del sistema, `ASWebAuthenticationSession`), y
-  descargar la bóveda y los Teams al desbloquear o al deslizar hacia abajo. El móvil solo
-  recibe: no sube cambios ni crea cuentas, y al salir de la cuenta borra lo descargado. El
+  descargar la bóveda y los Teams al desbloquear o al deslizar hacia abajo. El móvil no
+  crea cuentas (lo que cambia en él sube con la sincronización, ver 9g), y al salir de la cuenta borra lo descargado. El
   servidor acepta `redirect=tunel://oauth` en lugar de un puerto local para volver a la app
   (necesita la versión nueva del servidor). Las invitaciones a Teams se aceptan desde el
   escritorio.
@@ -197,6 +198,13 @@ después.
   con la contraseña y volver a activarlo. La primera vez de cada día se pide la contraseña
   maestra, como en el escritorio. Se activa en Ajustes (pide la cara una vez para
   comprobarlo); al volver tras el bloqueo por tiempo, Face ID se pide solo.
+- **9g. Editar hosts:** crear, editar y borrar hosts personales: nombre, dirección,
+  puerto, protocolo (SSH, Mosh o Telnet), grupo, credencial (una identidad existente o una
+  nueva con usuario y contraseña), jump hosts en orden, etiquetas y notas. Lo que el móvil
+  no muestra (variables de entorno, proxy, script de inicio, reenvíos) se conserva al
+  editar. Los hosts de un Team se editan desde el escritorio, donde están los permisos y el
+  registro de auditoría. Cada cambio guardado en el móvil, también una clave de servidor
+  aceptada en la terminal, queda en la cola de sincronización y sube enseguida.
 - **9f. Android:** el mismo núcleo compilado con `cargo-ndk`, interfaz en Compose y desbloqueo
   con huella (BiometricPrompt y Android Keystore). Necesita Android Studio en el equipo de
   compilación.

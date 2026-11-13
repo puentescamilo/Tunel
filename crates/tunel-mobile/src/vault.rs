@@ -3,7 +3,7 @@
 use crate::TunelError;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tunel_core::crypto::KdfParams;
-use tunel_core::{Group, Host, Protocol, UnlockedVault};
+use tunel_core::{Group, Host, Protocol, UnlockedVault, VaultData};
 
 /// Un host tal como lo muestra la lista. Sin secretos: esos se quedan en el núcleo.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -111,6 +111,32 @@ impl Vault {
     }
 }
 
+/// Guarda un cambio hecho en este dispositivo. Si está unido a una cuenta, lo deja además en
+/// la cola para subirlo en la siguiente sincronización, como hace el escritorio al guardar.
+pub(crate) fn commit_local(vault: &mut UnlockedVault, data: VaultData) -> Result<(), TunelError> {
+    let queued = match vault.load_sync()? {
+        Some(local) => Some(
+            local
+                .record_local(&vault.data, &data, now_millis())
+                .map_err(|e| TunelError::Io {
+                    message: format!("no se pudo anotar el cambio para sincronizarlo: {e}"),
+                })?,
+        ),
+        None => None,
+    };
+    vault.commit(data)?;
+    if let Some(local) = queued {
+        vault.save_sync(&local)?;
+    }
+    Ok(())
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
 fn default_port(protocol: Option<&Protocol>) -> u16 {
     match protocol {
         Some(Protocol::Telnet) => 23,
@@ -119,7 +145,7 @@ fn default_port(protocol: Option<&Protocol>) -> u16 {
     }
 }
 
-fn summarize_host(host: &Host, groups: &[Group]) -> HostSummary {
+pub(crate) fn summarize_host(host: &Host, groups: &[Group]) -> HostSummary {
     let group_port = host
         .group
         .and_then(|id| groups.iter().find(|g| g.id == id))

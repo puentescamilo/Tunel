@@ -6,6 +6,7 @@ struct HostsView: View {
     let store: VaultStore
     @State private var showingAccount = false
     @State private var showingSettings = false
+    @State private var newHost: HostEditing?
 
     /// `allHosts` es la entrada «Todos los hosts»; el resto, el id de un grupo.
     @State private var selection: String? = Self.allHosts
@@ -60,10 +61,18 @@ struct HostsView: View {
                 .navigationTitle(title)
                 .searchable(text: $query, prompt: "Nombre, dirección o etiqueta")
                 .refreshable { await store.sync() }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Nuevo host", systemImage: "plus") {
+                            newHost = store.newHostDraft(inGroup: groupId).map(HostEditing.init)
+                        }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showingAccount) { AccountView(store: store) }
         .sheet(isPresented: $showingSettings) { SettingsView(store: store) }
+        .sheet(item: $newHost) { HostEditorView(store: store, draft: $0.draft) { _ in } }
         // Al desbloquear, lo nuevo de la cuenta.
         .task { await store.sync() }
     }

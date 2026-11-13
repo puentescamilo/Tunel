@@ -6,7 +6,7 @@ use tokio::runtime::Runtime;
 use tunel_core::crypto::KdfParams;
 use tunel_core::model::Host;
 use tunel_core::vault::VaultData;
-use tunel_mobile::{TunelError, Vault, sign_in_options};
+use tunel_mobile::{HostDraft, TunelError, Vault, sign_in_options};
 use tunel_server::{AppState, Config, Db, router};
 use tunel_sync::{ServerUrl, check_server_url, create_account, sync_once};
 use zeroize::Zeroizing;
@@ -72,6 +72,17 @@ impl World {
 
     fn phone(&self) -> Arc<Vault> {
         Vault::create(self.phone_path.clone(), VAULT_PASSWORD.into()).unwrap()
+    }
+
+    /// Otro dispositivo unido a la misma cuenta.
+    fn other_phone(&self) -> Arc<Vault> {
+        let path = format!("{}.otro", self.phone_path);
+        let phone = Vault::create(path, VAULT_PASSWORD.into()).unwrap();
+        phone
+            .sign_in_with_password(self.url(), EMAIL.into(), ACCOUNT_PASSWORD.into())
+            .unwrap();
+        phone.sync().unwrap();
+        phone
     }
 
     fn url(&self) -> String {
@@ -178,4 +189,34 @@ fn a_plain_http_server_on_the_internet_is_rejected() {
     let error = sign_in_options("http://tunel.example.com".into()).unwrap_err();
 
     assert!(matches!(error, TunelError::Sync { .. }), "{error:?}");
+}
+
+#[test]
+fn hosts_edited_on_the_phone_reach_the_other_devices() {
+    let w = World::new();
+    w.desktop_uploads(&["web-01", "db-01"]);
+    let phone = w.phone();
+    phone
+        .sign_in_with_password(w.url(), EMAIL.into(), ACCOUNT_PASSWORD.into())
+        .unwrap();
+    phone.sync().unwrap();
+    let hosts = phone.hosts();
+    let (db, web) = (&hosts[0], &hosts[1]);
+
+    let renamed = HostDraft {
+        label: "web-principal".into(),
+        ..phone.host_draft(web.id.clone()).unwrap()
+    };
+    phone.save_host(renamed).unwrap();
+    phone
+        .save_host(HostDraft {
+            label: "bastion".into(),
+            address: "bastion.example.com".into(),
+            ..phone.new_host_draft(None)
+        })
+        .unwrap();
+    phone.delete_host(db.id.clone()).unwrap();
+    phone.sync().unwrap();
+
+    assert_eq!(labels(&w.other_phone()), ["bastion", "web-principal"]);
 }
