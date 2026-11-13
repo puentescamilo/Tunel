@@ -5,6 +5,7 @@
 //! sincronización salen de aquí, igual que en el escritorio.
 
 mod account;
+mod biometric;
 mod error;
 mod runtime;
 mod terminal;
@@ -13,6 +14,7 @@ mod vault;
 pub use account::{
     AccountInfo, Provider, ProviderSignIn, SignInOptions, SyncReport, sign_in_options,
 };
+pub use biometric::{BiometricKey, biometric_id, biometric_ready};
 pub use error::{TunelError, error_message};
 pub use terminal::{
     HostKeyQuestion, LoginPrompt, LoginQuestion, TerminalListener, TerminalSession,

@@ -25,6 +25,8 @@ tunel-core.workspace = true
 tunel-sync.workspace = true
 tunel-ssh.workspace = true
 uuid.workspace = true
+# La fecha local, para pedir la contraseña maestra la primera vez de cada día.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true

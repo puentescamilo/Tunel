@@ -35,6 +35,12 @@ pub enum TunelError {
     /// No se puede conectar con la configuración del host, con el motivo.
     #[error("{message}")]
     Connection { message: String },
+    #[error("La primera vez de cada día hay que entrar con la contraseña maestra")]
+    PasswordRequired,
+    #[error(
+        "El desbloqueo biométrico ya no abre esta bóveda: entra con la contraseña y vuelve a activarlo"
+    )]
+    BiometricInvalid,
 }
 
 impl From<StoreError> for TunelError {
@@ -48,8 +54,7 @@ impl From<StoreError> for TunelError {
             StoreError::AlreadyExists(_) => Self::AlreadyExists,
             StoreError::Locked => Self::Locked,
             StoreError::UnsupportedVersion(_) => Self::UnsupportedVersion,
-            // En móvil no hay desbloqueo biométrico del núcleo: lo hace la app con el llavero.
-            StoreError::PasswordRequired => Self::WrongPassword,
+            StoreError::PasswordRequired => Self::PasswordRequired,
             StoreError::Io(e) => Self::Io {
                 message: e.to_string(),
             },
