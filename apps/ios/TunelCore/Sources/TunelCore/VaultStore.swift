@@ -21,7 +21,12 @@ public final class VaultStore {
     public internal(set) var syncStatus: SyncStatus = .idle
     public var errorMessage: String?
 
+    /// Cuánto puede estar la app en segundo plano sin bloquearse: lo justo para copiar algo
+    /// de otra app y volver a la terminal.
+    public static let backgroundGrace: TimeInterval = 180
+
     private let path: String
+    @ObservationIgnored private var backgroundSince: Date?
     /// Abierta mientras `state` es `.unlocked`; la usa también la parte de la cuenta.
     var vault: Vault?
 
@@ -63,6 +68,19 @@ public final class VaultStore {
         account = nil
         syncStatus = .idle
         state = .locked
+    }
+
+    public func didEnterBackground(at date: Date = .now) {
+        backgroundSince = date
+    }
+
+    /// De vuelta en primer plano: si pasó más de `backgroundGrace`, se bloquea.
+    public func didBecomeActive(at date: Date = .now) {
+        defer { backgroundSince = nil }
+        guard let since = backgroundSince,
+            date.timeIntervalSince(since) >= Self.backgroundGrace
+        else { return }
+        lock()
     }
 
     /// Vuelve a leer hosts, grupos y cuenta de la bóveda abierta.

@@ -1,7 +1,7 @@
 # Túnel para iPhone y iPad
 
-La interfaz es SwiftUI; el núcleo (bóveda, cifrado, y más adelante SSH y sincronización) es
-el mismo crate de Rust que usa el escritorio, expuesto con UniFFI desde `crates/tunel-mobile`.
+La interfaz es SwiftUI; el núcleo (bóveda, cifrado, sincronización y SSH) es el
+mismo crate de Rust que usa el escritorio, expuesto con UniFFI desde `crates/tunel-mobile`.
 El plan está en el bloque 9 de [la hoja de ruta](../../docs/hoja-de-ruta.md).
 
 ## Compilar el núcleo
@@ -38,7 +38,9 @@ de Apple Developer.
    ```
 
 2. Compila el núcleo (`scripts/compilar-ios.sh`), abre `Tunel.xcodeproj`, conecta el iPhone o
-   iPad por cable, elígelo arriba como destino y pulsa ▶.
+   iPad por cable, elígelo arriba como destino y pulsa ▶. La primera vez Xcode pide aprobar el
+   plugin `SwiftTermBuildInfoPlugin` de SwiftTerm (la terminal): genera la versión del
+   paquete y una tabla de terminfo, sin red. Pulsa «Trust & Enable».
 3. La primera vez, en el dispositivo: Ajustes → General → VPN y gestión de dispositivos →
    confía en tu cuenta de desarrollador. Y activa Ajustes → Privacidad y seguridad → Modo
    desarrollador, que pide reiniciar.

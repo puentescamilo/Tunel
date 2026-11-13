@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		7E0000000000000000000101 /* TunelCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7E0000000000000000000501 /* TunelCore */; };
+		7E0000000000000000000102 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 7E0000000000000000000502 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +26,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7E0000000000000000000101 /* TunelCore in Frameworks */,
+				7E0000000000000000000102 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +79,7 @@
 			name = Tunel;
 			packageProductDependencies = (
 				7E0000000000000000000501 /* TunelCore */,
+				7E0000000000000000000502 /* SwiftTerm */,
 			);
 			productName = Tunel;
 			productReference = 7E0000000000000000000201 /* Tunel.app */;
@@ -103,6 +106,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7E0000000000000000000C01 /* XCLocalSwiftPackageReference "TunelCore" */,
+				7E0000000000000000000C02 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7E0000000000000000000602 /* Products */;
@@ -219,10 +223,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		7E0000000000000000000C02 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = exactVersion;
+				version = 1.99.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		7E0000000000000000000501 /* TunelCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TunelCore;
+		};
+		7E0000000000000000000502 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7E0000000000000000000C02 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

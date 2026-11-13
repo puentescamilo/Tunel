@@ -28,6 +28,13 @@ pub enum TunelError {
     /// Un error de la red o del servidor, con el mensaje de la sincronización.
     #[error("{message}")]
     Sync { message: String },
+    #[error("Ese host ya no está en la bóveda")]
+    HostNotFound,
+    #[error("Los hosts {name} todavía no se pueden abrir en este dispositivo")]
+    UnsupportedProtocol { name: String },
+    /// No se puede conectar con la configuración del host, con el motivo.
+    #[error("{message}")]
+    Connection { message: String },
 }
 
 impl From<StoreError> for TunelError {

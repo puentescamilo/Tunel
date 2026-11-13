@@ -23,6 +23,8 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 tunel-core.workspace = true
 tunel-sync.workspace = true
+tunel-ssh.workspace = true
+uuid.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true
@@ -33,3 +35,5 @@ tempfile.workspace = true
 # Un servidor real en memoria para las pruebas de la cuenta.
 tunel-server.workspace = true
 axum.workspace = true
+# Un servidor SSH en memoria para las pruebas de la terminal.
+russh.workspace = true
