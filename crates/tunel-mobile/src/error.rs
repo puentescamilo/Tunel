@@ -17,8 +17,8 @@ pub enum TunelError {
     Corrupt,
     #[error("Esta bóveda es de una versión más nueva de Túnel; actualiza la app")]
     UnsupportedVersion,
-    #[error("No se pudo leer o escribir la bóveda: {message}")]
-    Io { message: String },
+    #[error("No se pudo leer o escribir la bóveda: {detail}")]
+    Io { detail: String },
     #[error("La contraseña maestra no es la de esta cuenta")]
     WrongMasterPassword,
     #[error("No hay ninguna cuenta de Túnel de {email}; créala desde Túnel en el escritorio")]
@@ -26,15 +26,15 @@ pub enum TunelError {
     #[error("Este dispositivo no está unido a ninguna cuenta")]
     NotSignedIn,
     /// Un error de la red o del servidor, con el mensaje de la sincronización.
-    #[error("{message}")]
-    Sync { message: String },
+    #[error("{detail}")]
+    Sync { detail: String },
     #[error("Ese host ya no está en la bóveda")]
     HostNotFound,
     #[error("Los hosts {name} todavía no se pueden abrir en este dispositivo")]
     UnsupportedProtocol { name: String },
     /// No se puede conectar con la configuración del host, con el motivo.
-    #[error("{message}")]
-    Connection { message: String },
+    #[error("{detail}")]
+    Connection { detail: String },
     #[error("La primera vez de cada día hay que entrar con la contraseña maestra")]
     PasswordRequired,
     #[error(
@@ -44,8 +44,8 @@ pub enum TunelError {
     #[error("Los hosts de un Team se editan desde Túnel en el escritorio")]
     TeamHostReadOnly,
     /// Un campo del formulario de host no es válido, con el motivo.
-    #[error("{message}")]
-    InvalidHost { message: String },
+    #[error("{detail}")]
+    InvalidHost { detail: String },
 }
 
 impl From<StoreError> for TunelError {
@@ -61,7 +61,7 @@ impl From<StoreError> for TunelError {
             StoreError::UnsupportedVersion(_) => Self::UnsupportedVersion,
             StoreError::PasswordRequired => Self::PasswordRequired,
             StoreError::Io(e) => Self::Io {
-                message: e.to_string(),
+                detail: e.to_string(),
             },
         }
     }

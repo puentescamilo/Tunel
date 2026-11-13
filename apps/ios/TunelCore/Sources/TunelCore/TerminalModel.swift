@@ -44,7 +44,7 @@ public final class TerminalModel {
 
     /// Conecta con el tamaño actual de la pantalla. Si ya había una sesión, la cierra antes.
     public func connect() {
-        session?.close()
+        session?.disconnect()
         session = nil
         hostKeyQuestion = nil
         loginQuestion = nil
@@ -91,7 +91,7 @@ public final class TerminalModel {
     }
 
     public func close() {
-        session?.close()
+        session?.disconnect()
         session = nil
     }
 

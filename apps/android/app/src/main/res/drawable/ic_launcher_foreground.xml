@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- La ventana de terminal con «>_», dentro de la zona segura de 66 dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#EB0F1217"
+        android:pathData="M33.5,35 h41 a5,5 0 0 1 5,5 v28 a5,5 0 0 1 -5,5 h-41 a5,5 0 0 1 -5,-5 v-28 a5,5 0 0 1 5,-5 z" />
+    <path
+        android:strokeColor="#FF36E6C2"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M40,46 L48,54 L40,62" />
+    <path
+        android:fillColor="#FF36E6C2"
+        android:pathData="M52,59.5 h16 a2,2 0 0 1 2,2 v0.5 a2,2 0 0 1 -2,2 h-16 a2,2 0 0 1 -2,-2 v-0.5 a2,2 0 0 1 2,-2 z" />
+</vector>

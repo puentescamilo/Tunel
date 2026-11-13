@@ -314,7 +314,7 @@ fn an_accepted_key_is_remembered_and_not_asked_again() {
     let (first, events) = open(&vault, &host);
     accept_key(&first, &events);
     expect_connected(&events);
-    first.close();
+    first.disconnect();
 
     let (_second, events) = open(&vault, &host);
 

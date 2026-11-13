@@ -100,7 +100,7 @@ impl ProviderSignIn {
             .into_iter()
             .find(|p| p.id == provider_id)
             .ok_or_else(|| TunelError::Sync {
-                message: "Este servidor ya no ofrece ese proveedor".into(),
+                detail: "Este servidor ya no ofrece ese proveedor".into(),
             })?;
         let start = oauth::begin_app(&server, provider)?;
         Ok(Arc::new(Self {
@@ -140,7 +140,7 @@ impl ProviderSignIn {
 
 fn already_used() -> TunelError {
     TunelError::Sync {
-        message: "Este inicio de sesión ya se usó; empieza de nuevo".into(),
+        detail: "Este inicio de sesión ya se usó; empieza de nuevo".into(),
     }
 }
 
@@ -268,7 +268,7 @@ impl From<SyncError> for TunelError {
         match error {
             SyncError::MasterPasswordMismatch => Self::WrongMasterPassword,
             other => Self::Sync {
-                message: capitalize(&other.to_string()),
+                detail: capitalize(&other.to_string()),
             },
         }
     }

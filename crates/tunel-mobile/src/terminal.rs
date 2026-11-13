@@ -147,7 +147,7 @@ impl TerminalSession {
     }
 
     /// Cierra la sesión; [`TerminalListener::closed`] llega después.
-    pub fn close(&self) {
+    pub fn disconnect(&self) {
         // Una pregunta sin responder se da por cancelada.
         drop(self.shared.take());
         let _ = self.input.send(SessionInput::Close);
@@ -156,7 +156,7 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        self.close();
+        self.disconnect();
     }
 }
 
@@ -382,7 +382,7 @@ impl From<ResolveError> for TunelError {
         match error {
             ResolveError::HostNotFound => Self::HostNotFound,
             other => Self::Connection {
-                message: capitalize(&other.to_string()),
+                detail: capitalize(&other.to_string()),
             },
         }
     }

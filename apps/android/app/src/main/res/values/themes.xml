@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Solo para la ventana mientras arranca: el resto lo pinta Compose. -->
+    <style name="Theme.Tunel" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/fondo</item>
+    </style>
+    <color name="fondo">#FFFFFFFF</color>
+</resources>
