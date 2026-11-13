@@ -144,7 +144,7 @@ fn editable<'a>(data: &'a VaultData, id: &str) -> Result<&'a Host, TunelError> {
 
 fn invalid(message: &str) -> TunelError {
     TunelError::InvalidHost {
-        message: message.into(),
+        detail: message.into(),
     }
 }
 

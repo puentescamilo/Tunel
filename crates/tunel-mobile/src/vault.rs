@@ -119,7 +119,7 @@ pub(crate) fn commit_local(vault: &mut UnlockedVault, data: VaultData) -> Result
             local
                 .record_local(&vault.data, &data, now_millis())
                 .map_err(|e| TunelError::Io {
-                    message: format!("no se pudo anotar el cambio para sincronizarlo: {e}"),
+                    detail: format!("no se pudo anotar el cambio para sincronizarlo: {e}"),
                 })?,
         ),
         None => None,

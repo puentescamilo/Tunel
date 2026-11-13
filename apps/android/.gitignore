@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Lo genera scripts/compilar-android.sh.
+/app/src/main/jniLibs/
+/app/src/main/java/uniffi/
+/nucleo-local/

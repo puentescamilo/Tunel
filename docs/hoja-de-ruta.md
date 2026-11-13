@@ -39,8 +39,12 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
 | 9d | iOS/iPadOS: terminal SSH | 0.15.0 | ✅ |
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | ✅ |
-| 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | en curso |
-| 9f | Android: app Kotlin con Jetpack Compose sobre el mismo núcleo | más adelante | |
+| 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | ✅ |
+| 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | en curso |
+| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | |
+| 9f3 | Android: terminal SSH | 0.15.0 | |
+| 9f4 | Android: desbloqueo con huella | 0.15.0 | |
+| 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -207,7 +211,14 @@ después.
   aceptada en la terminal, queda en la cola de sincronización y sube enseguida.
 - **9f. Android:** el mismo núcleo compilado con `cargo-ndk`, interfaz en Compose y desbloqueo
   con huella (BiometricPrompt y Android Keystore). Necesita Android Studio en el equipo de
-  compilación.
+  compilación. Va en cinco entregas, en el mismo orden que iOS:
+  - **9f1:** el proyecto en `apps/android` (Gradle, Kotlin, Compose, Android 10 o más nuevo),
+    `scripts/compilar-android.sh` para el núcleo y los enlaces de Kotlin, crear o desbloquear la
+    bóveda y la lista de hosts con grupos en un cajón lateral (fijo en tabletas) y búsqueda. Se
+    bloquea al salir de la app, el selector de apps no muestra su contenido y la bóveda queda
+    fuera de las copias de seguridad de Android. Las pruebas de Kotlin corren contra el núcleo
+    de verdad, compilado para el Mac.
+  - **9f2** cuenta y sincronización; **9f3** terminal; **9f4** huella; **9f5** editar hosts.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.

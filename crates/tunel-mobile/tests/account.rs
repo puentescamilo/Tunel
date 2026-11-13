@@ -140,7 +140,7 @@ fn a_wrong_account_password_is_explained_and_nothing_is_saved() {
         .sign_in_with_password(w.url(), EMAIL.into(), "otra-contraseña".into())
         .unwrap_err();
 
-    let TunelError::Sync { message } = error else {
+    let TunelError::Sync { detail: message } = error else {
         panic!("{error:?}");
     };
     assert!(
