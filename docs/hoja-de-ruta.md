@@ -37,7 +37,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
-| 9d | iOS/iPadOS: terminal SSH | 0.15.0 | en curso |
+| 9d | iOS/iPadOS: terminal SSH | 0.15.0 | ✅ |
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | en curso |
 | 9f | Android: app Kotlin con Jetpack Compose sobre el mismo núcleo | más adelante | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
