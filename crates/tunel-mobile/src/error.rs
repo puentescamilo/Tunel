@@ -41,6 +41,11 @@ pub enum TunelError {
         "El desbloqueo biométrico ya no abre esta bóveda: entra con la contraseña y vuelve a activarlo"
     )]
     BiometricInvalid,
+    #[error("Los hosts de un Team se editan desde Túnel en el escritorio")]
+    TeamHostReadOnly,
+    /// Un campo del formulario de host no es válido, con el motivo.
+    #[error("{message}")]
+    InvalidHost { message: String },
 }
 
 impl From<StoreError> for TunelError {

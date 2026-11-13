@@ -126,10 +126,11 @@ impl TerminalSession {
         if accept && let Some(vault) = self.vault.upgrade() {
             let mut vault = vault.lock();
             let data = vault.data.trust_host_key(entry);
-            if let Err(error) = vault.commit(data) {
+            // Como en el escritorio, la clave aceptada llega a los demás equipos de la cuenta.
+            if let Err(error) = crate::vault::commit_local(&mut vault, data) {
                 // Sin guardarla, la conexión no sigue: la próxima vez preguntaría otra vez.
                 drop(reply);
-                return Err(error.into());
+                return Err(error);
             }
         }
         self.shared.rejected.store(!accept, Ordering::Release);

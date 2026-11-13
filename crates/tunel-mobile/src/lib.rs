@@ -6,6 +6,7 @@
 
 mod account;
 mod biometric;
+mod editor;
 mod error;
 mod runtime;
 mod terminal;
@@ -15,6 +16,7 @@ pub use account::{
     AccountInfo, Provider, ProviderSignIn, SignInOptions, SyncReport, sign_in_options,
 };
 pub use biometric::{BiometricKey, biometric_id, biometric_ready};
+pub use editor::{HostDraft, IdentitySummary};
 pub use error::{TunelError, error_message};
 pub use terminal::{
     HostKeyQuestion, LoginPrompt, LoginQuestion, TerminalListener, TerminalSession,
