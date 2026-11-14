@@ -27,6 +27,8 @@ class VaultStore(
     private val clock: () -> Long = System::currentTimeMillis,
     /** El hilo principal: ahí llega lo que cuenta una sesión de terminal. */
     private val main: Executor = MainThreadExecutor,
+    /** Dónde se guarda la clave del desbloqueo con huella. */
+    biometricDevice: BiometricDevice = NoBiometrics,
 ) {
     enum class Phase {
         /** No hay bóveda en este dispositivo. */
@@ -45,10 +47,19 @@ class VaultStore(
         val account: AccountInfo? = null,
         val sync: SyncStatus = SyncStatus.Idle,
         val signIn: SignInState = SignInState(),
+        val biometric: BiometricState = BiometricState(),
     )
 
+    /** Desbloqueo con huella. */
+    val biometrics = BiometricActions(this, path, biometricDevice, worker)
+
     private val _state = MutableStateFlow(
-        State(if (vaultExists(path)) Phase.LOCKED else Phase.NEEDS_SETUP),
+        if (vaultExists(path)) {
+            // Al abrir la app, la huella se pide sola.
+            State(Phase.LOCKED, biometric = biometrics.locked(promptOnAppear = true))
+        } else {
+            State(Phase.NEEDS_SETUP)
+        },
     )
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -87,14 +98,17 @@ class VaultStore(
 
     /**
      * Suelta la bóveda: el núcleo borra los secretos de la memoria y libera el archivo. Si se
-     * está abriendo en ese momento, la apertura se descarta al terminar.
+     * está abriendo en ese momento, la apertura se descarta al terminar. Bloquear a mano no
+     * pide la huella sola; bloquear por estar fuera de la app, sí (`promptingBiometrics`).
      */
-    fun lock() {
+    fun lock(promptingBiometrics: Boolean = false) {
         val toClose = synchronized(guard) {
             generation++
             val open = vault
             vault = null
-            if (open != null) _state.value = State(Phase.LOCKED)
+            if (open != null) {
+                _state.value = State(Phase.LOCKED, biometric = biometrics.locked(promptingBiometrics))
+            }
             listOfNotNull(open) + account.forget()
         }
         // Sin esperar al recolector de basura: los secretos se borran ya.
@@ -132,7 +146,7 @@ class VaultStore(
     fun didBecomeActive(now: Long) {
         val since = backgroundSince ?: return
         backgroundSince = null
-        if (now - since >= BACKGROUND_GRACE_MS) lock()
+        if (now - since >= BACKGROUND_GRACE_MS) lock(promptingBiometrics = true)
     }
 
     fun dismissError() = _state.update { it.copy(errorMessage = null) }
@@ -151,6 +165,8 @@ class VaultStore(
     internal suspend fun snapshot(vault: Vault): Pair<HostTree, AccountInfo?> =
         withContext(worker) { HostTree(vault.hosts(), vault.groups()) to vault.account() }
 
+    internal suspend fun openWith(action: () -> Vault) = open(action)
+
     private suspend fun open(action: () -> Vault) {
         if (!working.compareAndSet(false, true)) return
         val started = synchronized(guard) { generation }
@@ -160,17 +176,18 @@ class VaultStore(
             val fresh = withContext(worker) { action() }
             opened = fresh
             val (tree, account) = snapshot(fresh)
+            val biometric = biometrics.unlocked(fresh)
             val published = synchronized(guard) {
                 if (generation != started) return@synchronized false
                 vault = fresh
-                _state.value = State(Phase.UNLOCKED, tree, account = account)
+                _state.value = State(Phase.UNLOCKED, tree, account = account, biometric = biometric)
                 true
             }
             if (published) {
                 opened = null
             } else {
                 // Se bloqueó mientras tanto: la bóveda ya existe, pero queda cerrada.
-                _state.value = State(Phase.LOCKED)
+                _state.value = State(Phase.LOCKED, biometric = biometrics.locked(false))
             }
         } catch (error: TunelException) {
             _state.update { it.copy(isWorking = false, errorMessage = errorMessage(error)) }

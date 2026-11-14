@@ -109,6 +109,9 @@ dependencies {
     implementation(libs.androidx.browser)
     // La terminal: pinta lo que llega por SSH y convierte el teclado en bytes.
     implementation(libs.termlib)
+    // El desbloqueo con huella: BiometricPrompt necesita una FragmentActivity.
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)

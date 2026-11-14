@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import dev.tunel.android.core.BiometricState
 import uniffi.tunel_mobile.minPasswordLength
 
 /** Crear la bóveda la primera vez, o desbloquearla con la contraseña maestra. */
@@ -52,6 +54,8 @@ fun LockScreen(
     errorMessage: String?,
     onUnlock: (String) -> Unit,
     onCreate: (String, String) -> Unit,
+    biometric: BiometricState = BiometricState(),
+    onBiometricUnlock: () -> Unit = {},
 ) {
     // `remember`, no `rememberSaveable`: la contraseña no se guarda en el estado de la app.
     var password by remember { mutableStateOf("") }
@@ -66,7 +70,10 @@ fun LockScreen(
         password = ""
         confirmation = ""
     }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(Unit) {
+        // Tras estar fuera de la app (o al abrirla), la huella se pide sola; si no, el teclado.
+        if (biometric.ready && biometric.promptOnAppear) onBiometricUnlock() else focus.requestFocus()
+    }
     // Lo que se dejó escrito sin enviar tampoco se queda al salir de la app.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         password = ""
@@ -139,6 +146,14 @@ fun LockScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                if (biometric.waitsForPassword) {
+                    Text(
+                        "La primera vez de cada día se entra con la contraseña; después, con la huella.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 if (errorMessage != null) {
                     Text(
                         errorMessage,
@@ -158,6 +173,13 @@ fun LockScreen(
                     } else {
                         Text(if (isCreating) "Crear bóveda" else "Desbloquear")
                     }
+                }
+                if (biometric.ready) {
+                    OutlinedButton(
+                        onClick = onBiometricUnlock,
+                        enabled = !isWorking,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Desbloquear con huella") }
                 }
             }
         }

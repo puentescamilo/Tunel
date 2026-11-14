@@ -43,7 +43,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | en curso |
 | 9f3 | Android: terminal SSH | 0.15.0 | en curso |
-| 9f4 | Android: desbloqueo con huella | 0.15.0 | |
+| 9f4 | Android: desbloqueo con huella | 0.15.0 | en curso |
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
@@ -230,7 +230,12 @@ después.
     sobrevive a los giros de pantalla y se cierra al bloquear la bóveda; si se cortó con la
     app en segundo plano, se reconecta al volver. Las pruebas usan un servidor SSH de juguete
     (`ssh-de-pruebas`).
-  - **9f4** huella; **9f5** editar hosts.
+  - **9f4:** desbloqueo con huella. La clave que abre la bóveda (la misma del escritorio y
+    de iOS, `<bóveda>.biometria`) se guarda cifrada con una clave AES del almacén de Android
+    que solo se usa tras una huella (biometría fuerte), deja de servir si cambian las huellas
+    y exige el teléfono desbloqueado. Se activa en Ajustes; la primera vez de cada día se
+    entra con la contraseña, y tras estar fuera de la app se pide la huella sola.
+  - **9f5** editar hosts.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.

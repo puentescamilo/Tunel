@@ -22,6 +22,7 @@ fun TunelApp(
     onLock: () -> Unit,
     account: AccountCallbacks,
     terminal: TerminalCallbacks,
+    security: SecurityCallbacks,
 ) {
     when (state.phase) {
         VaultStore.Phase.NEEDS_SETUP, VaultStore.Phase.LOCKED -> LockScreen(
@@ -30,7 +31,9 @@ fun TunelApp(
             errorMessage = state.errorMessage,
             onUnlock = onUnlock,
             onCreate = onCreate,
+            biometric = state.biometric,
+            onBiometricUnlock = security.onBiometricUnlock,
         )
-        VaultStore.Phase.UNLOCKED -> HostsScreen(state = state, onLock = onLock, account = account, terminal = terminal)
+        VaultStore.Phase.UNLOCKED -> HostsScreen(state = state, onLock = onLock, account = account, terminal = terminal, security = security)
     }
 }
