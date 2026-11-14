@@ -41,10 +41,12 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | ✅ |
 | 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | ✅ |
-| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | en curso |
-| 9f3 | Android: terminal SSH | 0.15.0 | en curso |
-| 9f4 | Android: desbloqueo con huella | 0.15.0 | en curso |
-| 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | en curso |
+| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ (falta probarla con el servidor real) |
+| 9f3 | Android: terminal SSH | 0.15.0 | ✅ (falta probarla con el servidor real) |
+| 9f4 | Android: desbloqueo con huella | 0.15.0 | ✅ |
+| 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | ✅ |
+| 9h | Android: APK firmado para instalar fuera de Android Studio | por definir | pendiente |
+| 9i | Android: la terminal sigue conectada con la app en segundo plano | por definir | pendiente |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -239,6 +241,27 @@ después.
     desde el escritorio): nombre, dirección, puerto, protocolo, credencial existente o nueva,
     grupo, saltos en orden, etiquetas y notas. El formulario sobrevive a los giros y se
     descarta al bloquear; los cambios suben a la cuenta enseguida.
+- **9h. Distribución de Android:** hoy la app solo se instala desde el equipo de compilación,
+  en modo de depuración. Esta entrega añade:
+  - una clave de firma propia de Android, guardada como la de las versiones del escritorio
+    (si se pierde, una versión nueva no se puede instalar encima de la anterior);
+  - la compilación `release` firmada, con el código reducido por R8 y reglas que conservan
+    las clases que usa el núcleo de Rust (UniFFI y JNA);
+  - el núcleo compilado también para `x86_64` (el emulador) y, si hace falta, para
+    teléfonos de 32 bits;
+  - el APK en las versiones de GitHub, dentro de `SHA256SUMS.txt` y su firma, como los
+    paquetes del escritorio.
+
+  Google Play (cuenta de desarrollador) y F-Droid (compila desde el código fuente) quedan
+  para después; ninguno es necesario para instalar el APK.
+- **9i. Terminal en segundo plano en Android:** a diferencia de iOS, Android deja que una
+  app mantenga una conexión abierta con un servicio en primer plano, que muestra una
+  notificación mientras dure («Sesión SSH con …», con un botón para cerrarla). Así la
+  terminal no se corta al cambiar de app y no hace falta reconectar al volver. Hoy bloquear
+  la bóveda cierra la terminal; con el servicio, el bloqueo por tiempo solo tapa la pantalla:
+  la sesión sigue conectada y se vuelve a ver tras desbloquear (con la huella o la
+  contraseña). La sesión se cierra con `exit`, desde la terminal o con el botón de la
+  notificación. Se aprovecha para probar las teclas Ctrl y Alt con un teclado físico.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.
