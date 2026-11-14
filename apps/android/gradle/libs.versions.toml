@@ -10,6 +10,8 @@ jna = "5.19.1"
 junit = "4.13.2"
 browser = "1.10.0"
 termlib = "0.3.15"
+biometric = "1.1.0"
+fragment = "1.9.1"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -29,6 +31,8 @@ jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 junit = { module = "junit:junit", version.ref = "junit" }
 # Sin versión: la fija app/build.gradle.kts con la de Cargo.lock.
 rustls-platform-verifier = { module = "org.rustls:rustls-platform-verifier" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
+androidx-fragment = { module = "androidx.fragment:fragment-ktx", version.ref = "fragment" }
 # La terminal de ConnectBot (libvterm) para Compose.
 termlib = { module = "org.connectbot:termlib", version.ref = "termlib" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }

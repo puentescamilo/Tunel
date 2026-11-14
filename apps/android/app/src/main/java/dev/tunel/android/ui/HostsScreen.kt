@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -69,12 +70,14 @@ fun HostsScreen(
     onLock: () -> Unit,
     account: AccountCallbacks,
     terminal: TerminalCallbacks,
+    security: SecurityCallbacks,
 ) {
     val tree = state.tree
     // `null` es «Todos los hosts»; si no, el id de un grupo.
     var groupId by rememberSaveable { mutableStateOf<String?>(null) }
     var hostId by rememberSaveable { mutableStateOf<String?>(null) }
     var showingAccount by rememberSaveable { mutableStateOf(false) }
+    var showingSettings by rememberSaveable { mutableStateOf(false) }
     val selectedHost = hostId?.let { id -> tree.hosts.firstOrNull { it.id == id } }
 
     // Al abrir la bóveda, lo nuevo de la cuenta (si está unida; si no, no hace nada).
@@ -85,6 +88,18 @@ fun HostsScreen(
         BackHandler(onBack = terminal.onClose)
         TerminalScreen(screen, onBack = terminal.onClose)
         DisposableEffect(screen) { onDispose { terminal.onLeft(screen) } }
+        return
+    }
+
+    if (showingSettings) {
+        BackHandler { showingSettings = false }
+        SettingsScreen(
+            biometric = state.biometric,
+            isWorking = state.isWorking,
+            errorMessage = state.errorMessage,
+            security = security,
+            onBack = { showingSettings = false },
+        )
         return
     }
 
@@ -114,10 +129,18 @@ fun HostsScreen(
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val groups = @Composable {
-        GroupList(tree, groupId) {
-            groupId = it
-            scope.launch { drawer.close() }
-        }
+        GroupList(
+            tree,
+            groupId,
+            onSelect = {
+                groupId = it
+                scope.launch { drawer.close() }
+            },
+            onSettings = {
+                showingSettings = true
+                scope.launch { drawer.close() }
+            },
+        )
     }
     val content = @Composable {
         HostListScaffold(
@@ -143,7 +166,12 @@ fun HostsScreen(
 }
 
 @Composable
-private fun GroupList(tree: HostTree, selected: String?, onSelect: (String?) -> Unit) {
+private fun GroupList(
+    tree: HostTree,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    onSettings: () -> Unit,
+) {
     Column(
         Modifier
             .verticalScroll(rememberScrollState())
@@ -177,6 +205,13 @@ private fun GroupList(tree: HostTree, selected: String?, onSelect: (String?) -> 
                 )
             }
         }
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        NavigationDrawerItem(
+            label = { Text("Ajustes") },
+            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+            selected = false,
+            onClick = onSettings,
+        )
     }
 }
 

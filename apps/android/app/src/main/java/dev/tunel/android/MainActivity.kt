@@ -6,28 +6,31 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.getValue
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import dev.tunel.android.ui.AccountCallbacks
+import dev.tunel.android.ui.SecurityCallbacks
 import dev.tunel.android.ui.TerminalCallbacks
 import dev.tunel.android.ui.TunelApp
 import dev.tunel.android.ui.TunelTheme
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+// FragmentActivity: el diálogo de la huella (BiometricPrompt) la necesita.
+class MainActivity : FragmentActivity() {
     private val model: TunelViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        model.biometrics.attach(this)
         // En el selector de apps no se ven los hosts: la captura sale en blanco. Antes de
         // Android 13 solo se consigue impidiendo también las capturas de pantalla.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -47,6 +50,11 @@ class MainActivity : ComponentActivity() {
             onCancelProvider = model.store.account::cancelProvider,
             onSync = model::sync,
             onSignOut = model::signOut,
+        )
+        val security = SecurityCallbacks(
+            biometricAvailable = { model.store.biometrics.isAvailable },
+            onBiometricUnlock = model::unlockWithBiometrics,
+            onSetBiometric = model::setBiometricUnlock,
         )
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -69,6 +77,7 @@ class MainActivity : ComponentActivity() {
                         onClose = model::closeTerminal,
                         onLeft = model::terminalScreenLeft,
                     ),
+                    security = security,
                 )
             }
         }

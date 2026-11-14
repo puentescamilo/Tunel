@@ -25,8 +25,14 @@ import java.io.File
 
 /** Una sola bóveda para toda la app; sobrevive a los giros de pantalla. */
 class TunelViewModel(application: Application) : AndroidViewModel(application) {
+    /** La clave del desbloqueo con huella, en el almacén de Android. */
+    val biometrics = KeystoreBiometrics(application)
+
     // noBackupFilesDir: fuera de las copias de seguridad de Android.
-    val store = VaultStore(File(application.noBackupFilesDir, "vault.json").absolutePath)
+    val store = VaultStore(
+        File(application.noBackupFilesDir, "vault.json").absolutePath,
+        biometricDevice = biometrics,
+    )
 
     private val settings = application.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
 
@@ -49,7 +55,7 @@ class TunelViewModel(application: Application) : AndroidViewModel(application) {
             lockTimer?.cancel()
             lockTimer = viewModelScope.launch {
                 delay(VaultStore.BACKGROUND_GRACE_MS)
-                store.lock()
+                store.lock(promptingBiometrics = true)
             }
         }
 
@@ -71,6 +77,14 @@ class TunelViewModel(application: Application) : AndroidViewModel(application) {
 
     fun create(password: String, confirmation: String) {
         viewModelScope.launch { store.create(password, confirmation) }
+    }
+
+    fun unlockWithBiometrics() {
+        viewModelScope.launch { store.biometrics.unlock() }
+    }
+
+    fun setBiometricUnlock(enabled: Boolean) {
+        viewModelScope.launch { store.biometrics.setEnabled(enabled) }
     }
 
     fun loadOptions(server: String) {
