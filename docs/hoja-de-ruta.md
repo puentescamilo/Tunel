@@ -40,8 +40,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9d | iOS/iPadOS: terminal SSH | 0.15.0 | ✅ |
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | ✅ |
 | 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | ✅ |
-| 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | en curso |
-| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | |
+| 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | ✅ |
+| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | en curso |
 | 9f3 | Android: terminal SSH | 0.15.0 | |
 | 9f4 | Android: desbloqueo con huella | 0.15.0 | |
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | |
@@ -218,7 +218,13 @@ después.
     bloquea al salir de la app, el selector de apps no muestra su contenido y la bóveda queda
     fuera de las copias de seguridad de Android. Las pruebas de Kotlin corren contra el núcleo
     de verdad, compilado para el Mac.
-  - **9f2** cuenta y sincronización; **9f3** terminal; **9f4** huella; **9f5** editar hosts.
+  - **9f2:** unirse a la cuenta de Túnel con correo y contraseña o con un proveedor (Google,
+    Microsoft) en una pestaña del navegador que vuelve con `tunel://oauth`, y descargar lo
+    sincronizado al abrir la bóveda o deslizando la lista hacia abajo. HTTPS comprueba los
+    certificados con el almacén de Android (`rustls-platform-verifier`, iniciado por JNI). Como
+    en iOS, se bloquea tras 3 minutos fuera de la app, no al instante: si no, ir al navegador
+    del proveedor la cerraba. Las pruebas de Kotlin usan un servidor de Túnel en memoria.
+  - **9f3** terminal; **9f4** huella; **9f5** editar hosts.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.

@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- La sincronización con la cuenta de Túnel y, más adelante, SSH. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- La bóveda no sale del dispositivo por las copias de Android: viaja cifrada con la
          cuenta de Túnel. -->
     <application
+        android:name=".TunelApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/sin_copias"
@@ -15,10 +19,19 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- La vuelta del navegador al entrar con Google o Microsoft. `singleTask` hace que
+                 llegue a la ventana que ya estaba abierta, con el inicio de sesión a medias. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tunel" android:host="oauth" />
             </intent-filter>
         </activity>
     </application>

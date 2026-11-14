@@ -5,6 +5,8 @@
 //! sincronización salen de aquí, igual que en el escritorio.
 
 mod account;
+#[cfg(target_os = "android")]
+mod android;
 mod biometric;
 mod editor;
 mod error;
