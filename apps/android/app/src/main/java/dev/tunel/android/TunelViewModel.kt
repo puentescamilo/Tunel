@@ -87,6 +87,31 @@ class TunelViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { store.biometrics.setEnabled(enabled) }
     }
 
+    fun startNewHost(groupId: String?) {
+        viewModelScope.launch { store.editor.startNew(groupId) }
+    }
+
+    fun startEditingHost(host: HostSummary) {
+        viewModelScope.launch { store.editor.startEditing(host) }
+    }
+
+    /** Guarda el host del formulario; con cuenta, lo sube enseguida (si no hay red, queda en cola). */
+    fun saveHost(onSaved: (HostSummary) -> Unit) {
+        viewModelScope.launch {
+            val saved = store.editor.save() ?: return@launch
+            onSaved(saved)
+            store.account.sync()
+        }
+    }
+
+    fun deleteHost(onDeleted: () -> Unit) {
+        viewModelScope.launch {
+            if (!store.editor.delete()) return@launch
+            onDeleted()
+            store.account.sync()
+        }
+    }
+
     fun loadOptions(server: String) {
         lastServer = server
         viewModelScope.launch { store.account.loadOptions(server) }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,7 +27,13 @@ internal val HostSummary.canConnect: Boolean
 /** Los datos de un host y el botón para abrir su terminal. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HostDetailScreen(host: HostSummary, onBack: () -> Unit, onConnect: () -> Unit) {
+fun HostDetailScreen(
+    host: HostSummary,
+    onBack: () -> Unit,
+    onConnect: () -> Unit,
+    /** `null` si no se puede editar aquí (un host de Team). */
+    onEdit: (() -> Unit)?,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -34,6 +41,13 @@ fun HostDetailScreen(host: HostSummary, onBack: () -> Unit, onConnect: () -> Uni
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Atrás")
+                    }
+                },
+                actions = {
+                    if (onEdit != null) {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Editar")
+                        }
                     }
                 },
             )
@@ -59,7 +73,15 @@ fun HostDetailScreen(host: HostSummary, onBack: () -> Unit, onConnect: () -> Uni
             Field("Dirección", host.address)
             Field("Puerto", host.port.toString())
             Field("Protocolo", host.protocol)
-            host.team?.let { Field("Team", it) }
+            host.team?.let {
+                Field("Team", it)
+                Text(
+                    "Los hosts de un Team se editan desde Túnel en el escritorio.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             if (host.tags.isNotEmpty()) Field("Etiquetas", host.tags.joinToString(" · "))
         }
     }
