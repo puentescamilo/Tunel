@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import dev.tunel.android.ui.AccountCallbacks
+import dev.tunel.android.ui.EditorCallbacks
 import dev.tunel.android.ui.SecurityCallbacks
 import dev.tunel.android.ui.TerminalCallbacks
 import dev.tunel.android.ui.TunelApp
@@ -51,6 +52,18 @@ class MainActivity : FragmentActivity() {
             onSync = model::sync,
             onSignOut = model::signOut,
         )
+        val hostEditor = model.store.editor
+        val editor = EditorCallbacks(
+            onStartNew = model::startNewHost,
+            onStartEditing = model::startEditingHost,
+            canEdit = hostEditor::canEdit,
+            onEdit = hostEditor::edit,
+            onSave = { model.saveHost {} },
+            onDelete = { model.deleteHost {} },
+            onCancel = hostEditor::cancel,
+            onDismissError = hostEditor::dismissError,
+            onDismissNotice = hostEditor::dismissNotice,
+        )
         val security = SecurityCallbacks(
             biometricAvailable = { model.store.biometrics.isAvailable },
             onBiometricUnlock = model::unlockWithBiometrics,
@@ -65,6 +78,8 @@ class MainActivity : FragmentActivity() {
             TunelTheme {
                 val state by model.store.state.collectAsStateWithLifecycle()
                 val session by model.store.terminal.collectAsStateWithLifecycle()
+                val form by model.store.editor.form.collectAsStateWithLifecycle()
+                val editorNotice by model.store.editor.notice.collectAsStateWithLifecycle()
                 TunelApp(
                     state = state,
                     onUnlock = model::unlock,
@@ -78,6 +93,9 @@ class MainActivity : FragmentActivity() {
                         onLeft = model::terminalScreenLeft,
                     ),
                     security = security,
+                    editor = editor,
+                    form = form,
+                    editorNotice = editorNotice,
                 )
             }
         }

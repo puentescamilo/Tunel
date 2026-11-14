@@ -80,6 +80,9 @@ class VaultStore(
     /** La terminal abierta, si hay una. Al bloquear se cierra. */
     val terminal: StateFlow<TerminalModel?> = _terminal.asStateFlow()
 
+    /** Crear, editar y borrar hosts personales. */
+    val editor = HostEditor(this, worker)
+
     /** Unirse a la cuenta y sincronizar. */
     val account = AccountActions(this, worker, clock)
 
@@ -114,6 +117,7 @@ class VaultStore(
         // Sin esperar al recolector de basura: los secretos se borran ya.
         toClose.forEach { it.close() }
         closeTerminal()
+        editor.forget()
     }
 
     /**

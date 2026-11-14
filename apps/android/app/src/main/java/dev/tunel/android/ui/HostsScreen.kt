@@ -15,13 +15,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import dev.tunel.android.core.HostForm
 import dev.tunel.android.core.HostTree
 import dev.tunel.android.core.SyncStatus
 import dev.tunel.android.core.VaultStore
@@ -71,6 +76,9 @@ fun HostsScreen(
     account: AccountCallbacks,
     terminal: TerminalCallbacks,
     security: SecurityCallbacks,
+    editor: EditorCallbacks,
+    form: HostForm?,
+    editorNotice: String?,
 ) {
     val tree = state.tree
     // `null` es «Todos los hosts»; si no, el id de un grupo.
@@ -82,6 +90,22 @@ fun HostsScreen(
 
     // Al abrir la bóveda, lo nuevo de la cuenta (si está unida; si no, no hace nada).
     LaunchedEffect(Unit) { account.onSync() }
+
+    editorNotice?.let { message ->
+        AlertDialog(
+            onDismissRequest = editor.onDismissNotice,
+            title = { Text("No se puede editar") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = editor.onDismissNotice) { Text("Aceptar") } },
+        )
+    }
+
+    if (form != null) {
+        // Mientras guarda, atrás no hace nada: el cambio ya va camino del núcleo.
+        BackHandler(enabled = !form.isSaving, onBack = editor.onCancel)
+        HostEditorScreen(form, tree.hosts, editor)
+        return
+    }
 
     val screen = terminal.screen
     if (screen != null) {
@@ -121,6 +145,7 @@ fun HostsScreen(
             selectedHost,
             onBack = { hostId = null },
             onConnect = { terminal.onConnect(selectedHost) },
+            onEdit = if (editor.canEdit(selectedHost)) ({ editor.onStartEditing(selectedHost) }) else null,
         )
         return
     }
@@ -151,6 +176,7 @@ fun HostsScreen(
             onAccount = { showingAccount = true },
             onSync = account.onSync,
             onOpen = { hostId = it.id },
+            onAdd = { editor.onStartNew(groupId) },
         )
     }
 
@@ -225,6 +251,7 @@ private fun HostListScaffold(
     onAccount: () -> Unit,
     onSync: () -> Unit,
     onOpen: (HostSummary) -> Unit,
+    onAdd: () -> Unit,
 ) {
     val tree = state.tree
     val hasAccount = state.account != null
@@ -234,6 +261,11 @@ private fun HostListScaffold(
     val hosts = tree.hosts(groupId, query)
 
     Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(onClick = onAdd) {
+                Icon(Icons.Filled.Add, contentDescription = "Nuevo host")
+            }
+        },
         topBar = {
             TopAppBar(
                 title = { Text(title) },

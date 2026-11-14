@@ -44,7 +44,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | en curso |
 | 9f3 | Android: terminal SSH | 0.15.0 | en curso |
 | 9f4 | Android: desbloqueo con huella | 0.15.0 | en curso |
-| 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | |
+| 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | en curso |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -235,7 +235,10 @@ después.
     que solo se usa tras una huella (biometría fuerte), deja de servir si cambian las huellas
     y exige el teléfono desbloqueado. Se activa en Ajustes; la primera vez de cada día se
     entra con la contraseña, y tras estar fuera de la app se pide la huella sola.
-  - **9f5** editar hosts.
+  - **9f5:** crear, editar y borrar hosts de la bóveda personal, como en iOS (los de un Team,
+    desde el escritorio): nombre, dirección, puerto, protocolo, credencial existente o nueva,
+    grupo, saltos en orden, etiquetas y notas. El formulario sobrevive a los giros y se
+    descarta al bloquear; los cambios suben a la cuenta enseguida.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.
