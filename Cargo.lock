@@ -6474,7 +6474,9 @@ version = "0.14.0"
 dependencies = [
  "axum",
  "chrono",
+ "jni",
  "russh",
+ "rustls-platform-verifier",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

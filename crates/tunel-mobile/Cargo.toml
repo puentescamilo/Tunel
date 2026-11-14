@@ -17,8 +17,15 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 required-features = ["bindgen"]
 
+[[bin]]
+# Un servidor de Túnel en memoria con una cuenta de prueba, para las pruebas de las apps.
+name = "servidor-de-pruebas"
+path = "src/bin/servidor-de-pruebas.rs"
+required-features = ["servidor-de-pruebas"]
+
 [features]
 bindgen = ["uniffi/cli"]
+servidor-de-pruebas = ["dep:tunel-server", "dep:axum"]
 
 [dependencies]
 tunel-core.workspace = true
@@ -31,6 +38,8 @@ tokio.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true
 uniffi = "0.32"
+tunel-server = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -39,3 +48,9 @@ tunel-server.workspace = true
 axum.workspace = true
 # Un servidor SSH en memoria para las pruebas de la terminal.
 russh.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+# En Android, los certificados de HTTPS los comprueba el sistema a través de la JVM: la app
+# entrega su contexto al arrancar (ver `android.rs`). Las versiones son las que ya usa reqwest.
+jni = "0.22"
+rustls-platform-verifier = "0.7"

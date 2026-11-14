@@ -2,6 +2,7 @@ package dev.tunel.android.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,10 +14,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -34,8 +37,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +52,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.tunel.android.core.HostTree
+import dev.tunel.android.core.SyncStatus
+import dev.tunel.android.core.VaultStore
 import dev.tunel.android.core.endpoint
 import kotlinx.coroutines.launch
 import uniffi.tunel_mobile.HostSummary
@@ -56,11 +63,28 @@ private const val WIDE_SCREEN_DP = 840
 
 /** Grupos en el cajón lateral y los hosts del grupo elegido, con búsqueda. */
 @Composable
-fun HostsScreen(tree: HostTree, onLock: () -> Unit) {
+fun HostsScreen(state: VaultStore.State, onLock: () -> Unit, account: AccountCallbacks) {
+    val tree = state.tree
     // `null` es «Todos los hosts»; si no, el id de un grupo.
     var groupId by rememberSaveable { mutableStateOf<String?>(null) }
     var hostId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showingAccount by rememberSaveable { mutableStateOf(false) }
     val selectedHost = hostId?.let { id -> tree.hosts.firstOrNull { it.id == id } }
+
+    // Al abrir la bóveda, lo nuevo de la cuenta (si está unida; si no, no hace nada).
+    LaunchedEffect(Unit) { account.onSync() }
+
+    if (showingAccount) {
+        BackHandler { showingAccount = false }
+        AccountScreen(
+            account = state.account,
+            sync = state.sync,
+            signIn = state.signIn,
+            callbacks = account,
+            onBack = { showingAccount = false },
+        )
+        return
+    }
 
     if (selectedHost != null) {
         BackHandler { hostId = null }
@@ -79,10 +103,12 @@ fun HostsScreen(tree: HostTree, onLock: () -> Unit) {
     }
     val content = @Composable {
         HostListScaffold(
-            tree = tree,
+            state = state,
             groupId = groupId,
             onMenu = if (wide) null else ({ scope.launch { drawer.open() } }),
             onLock = onLock,
+            onAccount = { showingAccount = true },
+            onSync = account.onSync,
             onOpen = { hostId = it.id },
         )
     }
@@ -139,12 +165,16 @@ private fun GroupList(tree: HostTree, selected: String?, onSelect: (String?) -> 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HostListScaffold(
-    tree: HostTree,
+    state: VaultStore.State,
     groupId: String?,
     onMenu: (() -> Unit)?,
     onLock: () -> Unit,
+    onAccount: () -> Unit,
+    onSync: () -> Unit,
     onOpen: (HostSummary) -> Unit,
 ) {
+    val tree = state.tree
+    val hasAccount = state.account != null
     // `remember`: lo buscado (nombres, direcciones) no va al estado que Android guarda.
     var query by remember { mutableStateOf("") }
     val title = groupId?.let { tree.group(it)?.name } ?: "Todos los hosts"
@@ -162,6 +192,9 @@ private fun HostListScaffold(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onAccount) {
+                        Icon(Icons.Filled.AccountCircle, contentDescription = "Cuenta")
+                    }
                     IconButton(onClick = onLock) {
                         Icon(Icons.Filled.Lock, contentDescription = "Bloquear")
                     }
@@ -187,20 +220,42 @@ private fun HostListScaffold(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            if (hosts.isEmpty()) {
-                EmptyHosts(searching = query.isNotBlank())
-            } else {
-                LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                    items(hosts, key = { it.id }) { host -> HostRow(host) { onOpen(host) } }
+            if (hasAccount) {
+                SyncStatusText(state.sync, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            }
+            val list = @Composable {
+                if (hosts.isEmpty()) {
+                    EmptyHosts(searching = query.isNotBlank(), hasAccount, onAccount)
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+                        items(hosts, key = { it.id }) { host -> HostRow(host) { onOpen(host) } }
+                    }
                 }
+            }
+            // Deslizar hacia abajo sincroniza, si el dispositivo está unido a una cuenta.
+            if (hasAccount) {
+                PullToRefreshBox(
+                    isRefreshing = state.sync == SyncStatus.Syncing,
+                    onRefresh = onSync,
+                    modifier = Modifier.fillMaxSize(),
+                ) { list() }
+            } else {
+                list()
             }
         }
     }
 }
 
 @Composable
-private fun EmptyHosts(searching: Boolean) {
-    Column(Modifier.fillMaxWidth().padding(32.dp)) {
+private fun EmptyHosts(searching: Boolean, hasAccount: Boolean, onAccount: () -> Unit) {
+    // Desplazable: si no, deslizar hacia abajo no llega a sincronizar con la lista vacía.
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text(
             if (searching) "Ningún host coincide" else "No hay hosts",
             style = MaterialTheme.typography.titleMedium,
@@ -210,6 +265,9 @@ private fun EmptyHosts(searching: Boolean) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (!searching && !hasAccount) {
+            Button(onClick = onAccount) { Text("Iniciar sesión") }
+        }
     }
 }
 

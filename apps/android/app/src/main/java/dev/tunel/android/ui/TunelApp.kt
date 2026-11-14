@@ -10,6 +10,7 @@ fun TunelApp(
     onUnlock: (String) -> Unit,
     onCreate: (String, String) -> Unit,
     onLock: () -> Unit,
+    account: AccountCallbacks,
 ) {
     when (state.phase) {
         VaultStore.Phase.NEEDS_SETUP, VaultStore.Phase.LOCKED -> LockScreen(
@@ -19,6 +20,6 @@ fun TunelApp(
             onUnlock = onUnlock,
             onCreate = onCreate,
         )
-        VaultStore.Phase.UNLOCKED -> HostsScreen(tree = state.tree, onLock = onLock)
+        VaultStore.Phase.UNLOCKED -> HostsScreen(state = state, onLock = onLock, account = account)
     }
 }

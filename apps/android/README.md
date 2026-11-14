@@ -15,8 +15,8 @@ scripts/compilar-android.sh --debug   # más rápido mientras se desarrolla
 ```
 
 Deja la librería para Android en `app/src/main/jniLibs/arm64-v8a/`, el código Kotlin generado
-en `app/src/main/java/uniffi/` y la librería para este equipo en `nucleo-local/`, con la que
-corren las pruebas. Todo se genera: no se edita ni se guarda en git. Hay que volver a
+en `app/src/main/java/uniffi/` y, en `nucleo-local/`, la librería para este equipo y un
+servidor de Túnel en memoria, con los que corren las pruebas. Todo se genera: no se edita ni se guarda en git. Hay que volver a
 ejecutarlo cada vez que cambia `crates/tunel-mobile`.
 
 ## Compilar y probar
@@ -30,6 +30,9 @@ cd apps/android
 ./gradlew testDebugUnitTest    # pruebas de Kotlin contra el núcleo real
 ./gradlew installDebug         # instala en el teléfono o emulador conectado
 ```
+
+La parte en Kotlin de `rustls-platform-verifier` (HTTPS con los certificados del sistema) se
+descarga del repositorio Maven del proyecto en GitHub, en la versión que dice `Cargo.lock`.
 
 Solo se compila para `arm64-v8a`: los teléfonos actuales y el emulador de los Mac con Apple
 silicon. Si el emulador va muy lento o se reinicia solo, dale al menos 4 núcleos en su

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import uniffi.tunel_mobile.AccountInfo
 import uniffi.tunel_mobile.TunelException
 import uniffi.tunel_mobile.Vault
 import uniffi.tunel_mobile.errorMessage
@@ -16,8 +17,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Estado de la bóveda para la interfaz: si hay que crearla, desbloquearla o ya está abierta. */
 class VaultStore(
     private val path: String,
-    /** Dónde se deriva la clave (Argon2id tarda): nunca en el hilo principal. */
+    /** Dónde se deriva la clave (Argon2id tarda) y se habla con el servidor: nunca en el hilo principal. */
     private val worker: CoroutineDispatcher = Dispatchers.Default,
+    /** La hora de una sincronización, en milisegundos. */
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     enum class Phase {
         /** No hay bóveda en este dispositivo. */
@@ -32,6 +35,10 @@ class VaultStore(
         /** Mientras se deriva la clave: la interfaz desactiva el botón. */
         val isWorking: Boolean = false,
         val errorMessage: String? = null,
+        /** La cuenta a la que está unido el dispositivo; `null` si no lo está. */
+        val account: AccountInfo? = null,
+        val sync: SyncStatus = SyncStatus.Idle,
+        val signIn: SignInState = SignInState(),
     )
 
     private val _state = MutableStateFlow(
@@ -41,13 +48,21 @@ class VaultStore(
 
     private val working = AtomicBoolean(false)
 
-    /** Protege `vault` y `generation`: `lock()` llega del hilo principal mientras se abre. */
-    private val guard = Any()
+    /** Protege `vault`, `generation` y el inicio de sesión: `lock()` llega del hilo principal. */
+    internal val guard = Any()
 
-    /** Sube con cada bloqueo: una apertura que empezó antes ya no se publica. */
-    private var generation = 0L
+    /** Sube con cada bloqueo: lo que empezó antes ya no se publica. */
+    internal var generation = 0L
+        private set
 
-    private var vault: Vault? = null
+    internal var vault: Vault? = null
+        private set
+
+    /** Unirse a la cuenta y sincronizar. */
+    val account = AccountActions(this, worker, clock)
+
+    /** Desde cuándo está la app en segundo plano (reloj monótono), o `null` si está delante. */
+    private var backgroundSince: Long? = null
 
     suspend fun unlock(password: String) = open { Vault.unlock(path, password) }
 
@@ -69,13 +84,43 @@ class VaultStore(
             val open = vault
             vault = null
             if (open != null) _state.value = State(Phase.LOCKED)
-            open
+            listOfNotNull(open) + account.forget()
         }
         // Sin esperar al recolector de basura: los secretos se borran ya.
-        toClose?.close()
+        toClose.forEach { it.close() }
+    }
+
+    /** La app pasó a segundo plano en `now` (milisegundos de un reloj monótono). */
+    fun didEnterBackground(now: Long) {
+        backgroundSince = now
+    }
+
+    /**
+     * La app vuelve a primer plano: si estuvo fuera [BACKGROUND_GRACE_MS] o más, se bloquea.
+     * Así se puede ir al navegador para entrar con Google, o copiar algo de otra app, sin
+     * volver a escribir la contraseña maestra.
+     */
+    fun didBecomeActive(now: Long) {
+        val since = backgroundSince ?: return
+        backgroundSince = null
+        if (now - since >= BACKGROUND_GRACE_MS) lock()
     }
 
     fun dismissError() = _state.update { it.copy(errorMessage = null) }
+
+    internal fun update(transform: (State) -> State) = _state.update(transform)
+
+    /** Aplica `transform` solo si la bóveda sigue abierta desde `started`. */
+    internal fun publish(started: Long, transform: (State) -> State): Boolean =
+        synchronized(guard) {
+            if (generation != started || vault == null) return false
+            _state.update(transform)
+            true
+        }
+
+    /** Hosts, grupos y cuenta de `vault`, leídos fuera del hilo principal. */
+    internal suspend fun snapshot(vault: Vault): Pair<HostTree, AccountInfo?> =
+        withContext(worker) { HostTree(vault.hosts(), vault.groups()) to vault.account() }
 
     private suspend fun open(action: () -> Vault) {
         if (!working.compareAndSet(false, true)) return
@@ -85,11 +130,11 @@ class VaultStore(
         try {
             val fresh = withContext(worker) { action() }
             opened = fresh
-            val tree = withContext(worker) { HostTree(fresh.hosts(), fresh.groups()) }
+            val (tree, account) = snapshot(fresh)
             val published = synchronized(guard) {
                 if (generation != started) return@synchronized false
                 vault = fresh
-                _state.value = State(Phase.UNLOCKED, tree)
+                _state.value = State(Phase.UNLOCKED, tree, account = account)
                 true
             }
             if (published) {
@@ -106,5 +151,10 @@ class VaultStore(
             _state.update { if (it.isWorking) it.copy(isWorking = false) else it }
             working.set(false)
         }
+    }
+
+    companion object {
+        /** Cuánto puede estar la app en segundo plano sin bloquearse, como en iOS. */
+        const val BACKGROUND_GRACE_MS = 180_000L
     }
 }

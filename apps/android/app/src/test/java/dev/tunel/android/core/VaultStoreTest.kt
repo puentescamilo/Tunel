@@ -1,7 +1,5 @@
 package dev.tunel.android.core
 
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -16,7 +14,6 @@ import org.junit.rules.TemporaryFolder
 import uniffi.tunel_mobile.Vault
 import uniffi.tunel_mobile.minPasswordLength
 import uniffi.tunel_mobile.vaultExists
-import kotlin.coroutines.CoroutineContext
 
 /** Contra el núcleo de verdad, compilado para este equipo. */
 class VaultStoreTest {
@@ -143,24 +140,35 @@ class VaultStoreTest {
         assertFalse(store.state.value.isWorking)
     }
 
-    /** Alterna el trabajo del núcleo y el de la prueba hasta que la apertura acaba. */
-    private fun TestScope.finish(job: Job, worker: GatedDispatcher) {
-        while (job.isActive) {
-            worker.runAll()
-            runCurrent()
-        }
-    }
-}
+    @Test
+    fun aShortTripOutsideTheAppKeepsItOpen() = runTest {
+        val store = store()
+        store.create(password, password)
 
-/** Retiene el trabajo del núcleo hasta que la prueba lo suelta. */
-private class GatedDispatcher : CoroutineDispatcher() {
-    private val queue = ArrayDeque<Runnable>()
+        store.didEnterBackground(now = 1_000)
+        store.didBecomeActive(now = 1_000 + VaultStore.BACKGROUND_GRACE_MS - 1)
 
-    override fun dispatch(context: CoroutineContext, block: Runnable) {
-        queue.addLast(block)
+        assertEquals(VaultStore.Phase.UNLOCKED, store.state.value.phase)
     }
 
-    fun runAll() {
-        while (queue.isNotEmpty()) queue.removeFirst().run()
+    @Test
+    fun aLongTripOutsideTheAppLocksIt() = runTest {
+        val store = store()
+        store.create(password, password)
+
+        store.didEnterBackground(now = 1_000)
+        store.didBecomeActive(now = 1_000 + VaultStore.BACKGROUND_GRACE_MS)
+
+        assertEquals(VaultStore.Phase.LOCKED, store.state.value.phase)
+    }
+
+    @Test
+    fun comingBackWithoutHavingLeftDoesNotLock() = runTest {
+        val store = store()
+        store.create(password, password)
+
+        store.didBecomeActive(now = Long.MAX_VALUE)
+
+        assertEquals(VaultStore.Phase.UNLOCKED, store.state.value.phase)
     }
 }

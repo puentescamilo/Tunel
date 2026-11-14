@@ -8,6 +8,7 @@ core = "1.19.1"
 coroutines = "1.11.0"
 jna = "5.19.1"
 junit = "4.13.2"
+browser = "1.10.0"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -25,6 +26,9 @@ coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-androi
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 junit = { module = "junit:junit", version.ref = "junit" }
+# Sin versión: la fija app/build.gradle.kts con la de Cargo.lock.
+rustls-platform-verifier = { module = "org.rustls:rustls-platform-verifier" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
