@@ -80,6 +80,10 @@ android {
                 "tunel.servidorDePruebas",
                 rootDir.resolve("nucleo-local/servidor-de-pruebas").absolutePath,
             )
+            test.systemProperty(
+                "tunel.sshDePruebas",
+                rootDir.resolve("nucleo-local/ssh-de-pruebas").absolutePath,
+            )
             test.jvmArgs("--enable-native-access=ALL-UNNAMED")
         }
     }
@@ -103,6 +107,8 @@ dependencies {
     implementation(libs.rustls.platform.verifier)
     // El inicio de sesión con Google o Microsoft se abre en una pestaña del navegador.
     implementation(libs.androidx.browser)
+    // La terminal: pinta lo que llega por SSH y convierte el teclado en bytes.
+    implementation(libs.termlib)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)

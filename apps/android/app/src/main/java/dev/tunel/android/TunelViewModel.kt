@@ -2,6 +2,8 @@ package dev.tunel.android
 
 import android.app.Application
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
@@ -9,13 +11,16 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import dev.tunel.android.core.TerminalModel
 import dev.tunel.android.core.VaultStore
+import dev.tunel.android.ui.TerminalScreenState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import uniffi.tunel_mobile.HostSummary
 import java.io.File
 
 /** Una sola bóveda para toda la app; sobrevive a los giros de pantalla. */
@@ -32,11 +37,15 @@ class TunelViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lockTimer: Job? = null
 
+    /** La pantalla de la terminal abierta: sobrevive a los giros, como la sesión. */
+    private var screen: TerminalScreenState? = null
+
     // Fuera de la app más de unos minutos, se bloquea, como en iOS. El temporizador bloquea
     // aunque no se vuelva; el reloj monótono cubre el tiempo con el teléfono dormido.
     private val lockInBackground = object : DefaultLifecycleObserver {
         override fun onStop(owner: LifecycleOwner) {
             store.didEnterBackground(SystemClock.elapsedRealtime())
+            store.terminal.value?.didEnterBackground()
             lockTimer?.cancel()
             lockTimer = viewModelScope.launch {
                 delay(VaultStore.BACKGROUND_GRACE_MS)
@@ -47,6 +56,8 @@ class TunelViewModel(application: Application) : AndroidViewModel(application) {
         override fun onStart(owner: LifecycleOwner) {
             lockTimer?.cancel()
             store.didBecomeActive(SystemClock.elapsedRealtime())
+            // Si se bloqueó, ya no hay terminal; si no, se reconecta si se cortó.
+            store.terminal.value?.didBecomeActive()
         }
     }
 
@@ -101,7 +112,35 @@ class TunelViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { store.account.signOut() }
     }
 
+    /** La pantalla de `model`; la crea la primera vez y cierra la de una sesión anterior. */
+    fun terminalScreen(model: TerminalModel): TerminalScreenState {
+        screen?.takeIf { it.model === model }?.let { return it }
+        screen?.close()
+        return TerminalScreenState(model).also { screen = it }
+    }
+
+    fun openTerminal(host: HostSummary) {
+        store.openTerminal(host)
+    }
+
+    fun closeTerminal() = store.closeTerminal()
+
+    /**
+     * La pantalla de la terminal salió de la composición. Si fue por un giro, la sesión sigue
+     * y la pantalla también; si la sesión ya no está, se cierra ahora que nada la dibuja (la
+     * terminal no se puede cerrar mientras se muestra).
+     */
+    fun terminalScreenLeft(left: TerminalScreenState) {
+        if (store.terminal.value === left.model) return
+        // Un fotograma después: lo que la terminal dejó en cola al irse ya habrá corrido.
+        Handler(Looper.getMainLooper()).post {
+            left.close()
+            if (screen === left) screen = null
+        }
+    }
+
     override fun onCleared() {
+        screen?.close()
         ProcessLifecycleOwner.get().lifecycle.removeObserver(lockInBackground)
         store.lock()
     }

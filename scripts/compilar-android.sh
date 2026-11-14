@@ -3,8 +3,8 @@
 #   - app/src/main/jniLibs/arm64-v8a/libtunel_mobile.so: la librería para el teléfono y el
 #     emulador de los Mac con Apple silicon.
 #   - app/src/main/java/uniffi/tunel_mobile/tunel_mobile.kt: el código Kotlin de UniFFI.
-#   - nucleo-local/: la librería para este equipo, con la que corren las pruebas de Kotlin, y
-#     un servidor de Túnel en memoria para las pruebas de la cuenta.
+#   - nucleo-local/: la librería para este equipo, con la que corren las pruebas de Kotlin, un
+#     servidor de Túnel en memoria para las de la cuenta y uno SSH para las de la terminal.
 #
 # Necesita el NDK de Android Studio (Ajustes → Android SDK → SDK Tools → NDK).
 #
@@ -44,8 +44,10 @@ case "$host" in
 esac
 mkdir -p "$project/nucleo-local"
 cp "$local_lib" "$project/nucleo-local/"
-cargo build $flag -p tunel-mobile --features servidor-de-pruebas --bin servidor-de-pruebas --target "$host"
-cp "target/$host/$profile/servidor-de-pruebas" "$project/nucleo-local/"
+cargo build $flag -p tunel-mobile --features servidor-de-pruebas \
+  --bin servidor-de-pruebas --bin ssh-de-pruebas --target "$host"
+cp "target/$host/$profile/servidor-de-pruebas" "target/$host/$profile/ssh-de-pruebas" \
+  "$project/nucleo-local/"
 
 rm -rf "$project/app/src/main/java/uniffi"
 cargo run -q -p tunel-mobile --features bindgen --bin uniffi-bindgen -- \

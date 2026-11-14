@@ -40,6 +40,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,7 +64,12 @@ private const val WIDE_SCREEN_DP = 840
 
 /** Grupos en el cajón lateral y los hosts del grupo elegido, con búsqueda. */
 @Composable
-fun HostsScreen(state: VaultStore.State, onLock: () -> Unit, account: AccountCallbacks) {
+fun HostsScreen(
+    state: VaultStore.State,
+    onLock: () -> Unit,
+    account: AccountCallbacks,
+    terminal: TerminalCallbacks,
+) {
     val tree = state.tree
     // `null` es «Todos los hosts»; si no, el id de un grupo.
     var groupId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -73,6 +79,14 @@ fun HostsScreen(state: VaultStore.State, onLock: () -> Unit, account: AccountCal
 
     // Al abrir la bóveda, lo nuevo de la cuenta (si está unida; si no, no hace nada).
     LaunchedEffect(Unit) { account.onSync() }
+
+    val screen = terminal.screen
+    if (screen != null) {
+        BackHandler(onBack = terminal.onClose)
+        TerminalScreen(screen, onBack = terminal.onClose)
+        DisposableEffect(screen) { onDispose { terminal.onLeft(screen) } }
+        return
+    }
 
     if (showingAccount) {
         BackHandler { showingAccount = false }
@@ -88,7 +102,11 @@ fun HostsScreen(state: VaultStore.State, onLock: () -> Unit, account: AccountCal
 
     if (selectedHost != null) {
         BackHandler { hostId = null }
-        HostDetailScreen(selectedHost, onBack = { hostId = null })
+        HostDetailScreen(
+            selectedHost,
+            onBack = { hostId = null },
+            onConnect = { terminal.onConnect(selectedHost) },
+        )
         return
     }
 

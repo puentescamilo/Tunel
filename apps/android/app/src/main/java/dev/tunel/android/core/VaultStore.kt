@@ -1,5 +1,7 @@
 package dev.tunel.android.core
 
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -8,10 +10,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import uniffi.tunel_mobile.AccountInfo
+import uniffi.tunel_mobile.HostSummary
 import uniffi.tunel_mobile.TunelException
 import uniffi.tunel_mobile.Vault
 import uniffi.tunel_mobile.errorMessage
 import uniffi.tunel_mobile.vaultExists
+import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Estado de la bóveda para la interfaz: si hay que crearla, desbloquearla o ya está abierta. */
@@ -21,6 +25,8 @@ class VaultStore(
     private val worker: CoroutineDispatcher = Dispatchers.Default,
     /** La hora de una sincronización, en milisegundos. */
     private val clock: () -> Long = System::currentTimeMillis,
+    /** El hilo principal: ahí llega lo que cuenta una sesión de terminal. */
+    private val main: Executor = MainThreadExecutor,
 ) {
     enum class Phase {
         /** No hay bóveda en este dispositivo. */
@@ -58,6 +64,11 @@ class VaultStore(
     internal var vault: Vault? = null
         private set
 
+    private val _terminal = MutableStateFlow<TerminalModel?>(null)
+
+    /** La terminal abierta, si hay una. Al bloquear se cierra. */
+    val terminal: StateFlow<TerminalModel?> = _terminal.asStateFlow()
+
     /** Unirse a la cuenta y sincronizar. */
     val account = AccountActions(this, worker, clock)
 
@@ -88,6 +99,24 @@ class VaultStore(
         }
         // Sin esperar al recolector de basura: los secretos se borran ya.
         toClose.forEach { it.close() }
+        closeTerminal()
+    }
+
+    /**
+     * Abre la terminal de `host` (sin conectar todavía: lo hace la pantalla con su tamaño) y
+     * cierra la que hubiera. `null` si la bóveda está bloqueada.
+     */
+    fun openTerminal(host: HostSummary): TerminalModel? {
+        if (synchronized(guard) { vault } == null) return null
+        _terminal.value?.close()
+        return TerminalModel(host, { synchronized(guard) { vault } }, main).also {
+            _terminal.value = it
+        }
+    }
+
+    fun closeTerminal() {
+        _terminal.value?.close()
+        _terminal.value = null
     }
 
     /** La app pasó a segundo plano en `now` (milisegundos de un reloj monótono). */
@@ -156,5 +185,14 @@ class VaultStore(
     companion object {
         /** Cuánto puede estar la app en segundo plano sin bloquearse, como en iOS. */
         const val BACKGROUND_GRACE_MS = 180_000L
+    }
+}
+
+/** El hilo principal de Android. Se crea al usarlo: las pruebas en el Mac pasan el suyo. */
+private object MainThreadExecutor : Executor {
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
+
+    override fun execute(command: Runnable) {
+        handler.post(command)
     }
 }

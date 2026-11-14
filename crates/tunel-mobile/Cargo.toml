@@ -23,9 +23,15 @@ name = "servidor-de-pruebas"
 path = "src/bin/servidor-de-pruebas.rs"
 required-features = ["servidor-de-pruebas"]
 
+[[bin]]
+# Un servidor SSH de juguete, para las pruebas de la terminal de las apps.
+name = "ssh-de-pruebas"
+path = "src/bin/ssh-de-pruebas.rs"
+required-features = ["servidor-de-pruebas"]
+
 [features]
 bindgen = ["uniffi/cli"]
-servidor-de-pruebas = ["dep:tunel-server", "dep:axum"]
+servidor-de-pruebas = ["dep:tunel-server", "dep:axum", "dep:russh"]
 
 [dependencies]
 tunel-core.workspace = true
@@ -40,6 +46,7 @@ thiserror.workspace = true
 uniffi = "0.32"
 tunel-server = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
+russh = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

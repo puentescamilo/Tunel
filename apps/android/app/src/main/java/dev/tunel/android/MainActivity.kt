@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import dev.tunel.android.ui.AccountCallbacks
+import dev.tunel.android.ui.TerminalCallbacks
 import dev.tunel.android.ui.TunelApp
 import dev.tunel.android.ui.TunelTheme
 import kotlinx.coroutines.launch
@@ -55,12 +56,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             TunelTheme {
                 val state by model.store.state.collectAsStateWithLifecycle()
+                val session by model.store.terminal.collectAsStateWithLifecycle()
                 TunelApp(
                     state = state,
                     onUnlock = model::unlock,
                     onCreate = model::create,
                     onLock = model.store::lock,
                     account = account,
+                    terminal = TerminalCallbacks(
+                        screen = session?.let(model::terminalScreen),
+                        onConnect = model::openTerminal,
+                        onClose = model::closeTerminal,
+                        onLeft = model::terminalScreenLeft,
+                    ),
                 )
             }
         }
