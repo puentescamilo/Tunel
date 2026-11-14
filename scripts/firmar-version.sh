@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Escribe dist/SHA256SUMS.txt con los cuatro paquetes de una versión y lo firma en
-# dist/SHA256SUMS.txt.sig. Túnel solo instala por su cuenta lo que está en una lista firmada.
+# Escribe dist/SHA256SUMS.txt con los paquetes de una versión (los cuatro del escritorio y el
+# APK de Android, de scripts/empaquetar-android.sh) y lo firma en dist/SHA256SUMS.txt.sig.
+# Túnel solo instala por su cuenta lo que está en una lista firmada.
 #
 # Uso: scripts/firmar-version.sh 0.8.1
 # La clave privada se toma de $TUNEL_CLAVE_FIRMA o de ~/.config/tunel-publicacion/firma_ed25519.
@@ -15,6 +16,7 @@ packages=(
   "tunel_${version}_amd64.deb"
   "tunel_${version}_x64_es-ES.msi"
   "tunel_${version}_x64-setup.exe"
+  "tunel_${version}_android.apk"
 )
 
 for package in "${packages[@]}"; do
