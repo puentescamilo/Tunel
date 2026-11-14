@@ -42,7 +42,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | en curso |
-| 9f3 | Android: terminal SSH | 0.15.0 | |
+| 9f3 | Android: terminal SSH | 0.15.0 | en curso |
 | 9f4 | Android: desbloqueo con huella | 0.15.0 | |
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
@@ -224,7 +224,13 @@ después.
     certificados con el almacén de Android (`rustls-platform-verifier`, iniciado por JNI). Como
     en iOS, se bloquea tras 3 minutos fuera de la app, no al instante: si no, ir al navegador
     del proveedor la cerraba. Las pruebas de Kotlin usan un servidor de Túnel en memoria.
-  - **9f3** terminal; **9f4** huella; **9f5** editar hosts.
+  - **9f3:** la terminal SSH con la terminal de ConnectBot (`termlib`, libvterm, para
+    Compose) y una barra con Esc, Ctrl, Tab y flechas. La conexión, la pregunta por la clave
+    del servidor y el inicio de sesión interactivo son los del núcleo, como en iOS. La sesión
+    sobrevive a los giros de pantalla y se cierra al bloquear la bóveda; si se cortó con la
+    app en segundo plano, se reconecta al volver. Las pruebas usan un servidor SSH de juguete
+    (`ssh-de-pruebas`).
+  - **9f4** huella; **9f5** editar hosts.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.

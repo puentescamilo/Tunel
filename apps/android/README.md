@@ -16,7 +16,7 @@ scripts/compilar-android.sh --debug   # más rápido mientras se desarrolla
 
 Deja la librería para Android en `app/src/main/jniLibs/arm64-v8a/`, el código Kotlin generado
 en `app/src/main/java/uniffi/` y, en `nucleo-local/`, la librería para este equipo y un
-servidor de Túnel en memoria, con los que corren las pruebas. Todo se genera: no se edita ni se guarda en git. Hay que volver a
+servidor de Túnel en memoria y uno SSH de juguete, con los que corren las pruebas. Todo se genera: no se edita ni se guarda en git. Hay que volver a
 ejecutarlo cada vez que cambia `crates/tunel-mobile`.
 
 ## Compilar y probar
