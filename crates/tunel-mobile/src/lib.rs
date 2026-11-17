@@ -11,6 +11,7 @@ mod biometric;
 mod editor;
 mod error;
 mod runtime;
+mod snippets;
 mod terminal;
 mod vault;
 
@@ -20,6 +21,7 @@ pub use account::{
 pub use biometric::{BiometricKey, biometric_id, biometric_ready};
 pub use editor::{HostDraft, IdentitySummary};
 pub use error::{TunelError, error_message};
+pub use snippets::{SnippetSummary, SnippetVariable, snippet_preview};
 pub use terminal::{
     HostKeyQuestion, LoginPrompt, LoginQuestion, TerminalListener, TerminalSession,
 };

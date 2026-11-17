@@ -30,6 +30,8 @@ pub enum TunelError {
     Sync { detail: String },
     #[error("Ese host ya no está en la bóveda")]
     HostNotFound,
+    #[error("Ese snippet ya no está en la bóveda")]
+    SnippetNotFound,
     #[error("Los hosts {name} todavía no se pueden abrir en este dispositivo")]
     UnsupportedProtocol { name: String },
     /// No se puede conectar con la configuración del host, con el motivo.

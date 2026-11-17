@@ -41,12 +41,16 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | ✅ |
 | 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | ✅ |
-| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ (falta probarla con el servidor real) |
-| 9f3 | Android: terminal SSH | 0.15.0 | ✅ (falta probarla con el servidor real) |
+| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
+| 9f3 | Android: terminal SSH | 0.15.0 | ✅ |
 | 9f4 | Android: desbloqueo con huella | 0.15.0 | ✅ |
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9h | Android: APK firmado para instalar fuera de Android Studio | por definir | pendiente |
 | 9i | Android: la terminal sigue conectada con la app en segundo plano | por definir | pendiente |
+| 9k1 | iOS/iPadOS: snippets en la terminal, con variables, y el snippet al conectar | por definir | en curso |
+| 9k2 | Android: snippets en la terminal, con variables, y el snippet al conectar | por definir | pendiente |
+| 9k3 | Móvil: crear, editar y borrar snippets (iOS y Android) | por definir | pendiente |
+| 9j | Móvil: una sola contraseña; la de la cuenta abre la bóveda en cada dispositivo | por definir | pendiente |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
 
 ## 1. Administración del servidor
@@ -262,6 +266,25 @@ después.
   la sesión sigue conectada y se vuelve a ver tras desbloquear (con la huella o la
   contraseña). La sesión se cierra con `exit`, desde la terminal o con el botón de la
   notificación. Se aprovecha para probar las teclas Ctrl y Alt con un teclado físico.
+- **9k. Snippets en el móvil:** los snippets ya llegan al móvil con la sincronización (los
+  personales y los de los Teams), pero no se podían usar. El núcleo los lista, con búsqueda
+  por nombre, comando o etiqueta, y resuelve sus variables (`{{servicio}}`) igual que el
+  escritorio: quita los caracteres de control de los valores y recuerda el último valor de
+  cada variable mientras la bóveda está abierta.
+  - **9k1. iOS/iPadOS:** un botón en la terminal abre la lista; un snippet sin variables se
+    envía al tocarlo y uno con variables pide antes los valores, con el comando tal como se
+    enviará. El snippet al conectar de cada host se ejecuta también en el móvil.
+  - **9k2. Android:** lo mismo en Compose.
+  - **9k3. Editar:** crear, editar y borrar snippets personales desde el móvil, y elegir el
+    snippet al conectar en el editor de hosts. Los de los Teams se siguen editando en el
+    escritorio, como sus hosts.
+- **9j. Una sola contraseña:** hoy el móvil pide dos: la de su bóveda, que se inventa al
+  instalar, y la maestra de la cuenta al entrar con un proveedor. En el escritorio son la
+  misma. Con esta entrega, un dispositivo nuevo que entra con la cuenta crea su bóveda con
+  la contraseña maestra de la cuenta; uno que ya tenía bóveda con otra contraseña la vuelve
+  a cifrar con la de la cuenta. Si la contraseña cambia en otro equipo, el dispositivo lo
+  nota al sincronizar y pide la nueva. Cada dispositivo sigue guardando su propia copia
+  cifrada (para abrirla sin conexión), y Face ID o la huella siguen siendo de cada uno.
 
 Para instalar en un iPhone propio basta una cuenta de Apple gratuita (la firma caduca a los 7
 días). TestFlight y la App Store necesitan la cuenta de Apple Developer de la entrega 2b.

@@ -3,11 +3,12 @@ import SwiftUI
 import TunelCore
 
 /// La terminal de un host. La barra sobre el teclado (Esc, Ctrl, Tab y flechas) es la de
-/// SwiftTerm.
+/// SwiftTerm; el botón de snippets envía comandos guardados.
 struct TerminalScreen: View {
     let terminal: TerminalModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var started = false
+    @State private var showsSnippets = false
 
     var body: some View {
         TerminalSurface(terminal: terminal)
@@ -15,6 +16,11 @@ struct TerminalScreen: View {
             .navigationTitle(terminal.host.label)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if terminal.state == .connected {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Snippets", systemImage: "text.page") { showsSnippets = true }
+                    }
+                }
                 if case .closed = terminal.state {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Reconectar", systemImage: "arrow.clockwise", action: terminal.connect)
@@ -31,6 +37,9 @@ struct TerminalScreen: View {
                 Button("Cancelar", role: .cancel) { terminal.answerHostKey(accept: false) }
             } message: { question in
                 Text(hostKeyMessage(question))
+            }
+            .sheet(isPresented: $showsSnippets) {
+                SnippetsSheet(terminal: terminal)
             }
             .sheet(isPresented: loginShown) {
                 if let question = terminal.loginQuestion {

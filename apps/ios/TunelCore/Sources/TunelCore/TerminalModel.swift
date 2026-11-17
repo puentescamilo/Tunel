@@ -67,6 +67,27 @@ public final class TerminalModel {
         session?.send(data: data)
     }
 
+    // MARK: - Snippets
+
+    /// Los snippets de la bóveda (personales y de los Teams) que contienen `query` en el
+    /// nombre, el comando o una etiqueta; todos si está vacío.
+    public func snippets(matching query: String = "") -> [SnippetSummary] {
+        vault?.snippets(query: query) ?? []
+    }
+
+    /// Las variables de `snippet`, con el valor que se usó la última vez.
+    public func variables(of snippet: SnippetSummary) throws -> [SnippetVariable] {
+        guard let vault else { throw VaultLockedError() }
+        return try vault.snippetVariables(snippetId: snippet.id)
+    }
+
+    /// Envía `snippet` a la sesión, con `values` en sus variables, y lo ejecuta.
+    public func run(_ snippet: SnippetSummary, values: [String: String] = [:]) throws {
+        guard let vault else { throw VaultLockedError() }
+        let command = try vault.snippetCommand(snippetId: snippet.id, values: values)
+        send(Data(command.utf8))
+    }
+
     public func resize(cols: Int, rows: Int) {
         guard cols > 0, rows > 0 else { return }
         let newSize = (UInt16(clamping: cols), UInt16(clamping: rows))
@@ -145,6 +166,11 @@ extension VaultStore {
     public func terminal(for host: HostSummary) -> TerminalModel? {
         vault.map { TerminalModel(host: host, vault: $0) }
     }
+}
+
+/// La bóveda se bloqueó con la terminal abierta: sin ella no se leen los snippets.
+public struct VaultLockedError: LocalizedError {
+    public var errorDescription: String? { "La bóveda está bloqueada" }
 }
 
 enum TerminalEvent: Sendable {

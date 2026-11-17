@@ -113,3 +113,38 @@ private func drainMainQueue() async {
 
     #expect(store.state == .locked)
 }
+
+@MainActor
+@Test func aVaultWithoutSnippetsListsNone() async throws {
+    let store = try await unlockedStore()
+    let terminal = try #require(store.terminal(for: missingHost))
+
+    #expect(terminal.snippets().isEmpty)
+    #expect(terminal.snippets(matching: "df").isEmpty)
+}
+
+@MainActor
+@Test func aSnippetThatIsNoLongerInTheVaultIsExplained() async throws {
+    let store = try await unlockedStore()
+    let terminal = try #require(store.terminal(for: missingHost))
+    let gone = SnippetSummary(
+        id: UUID().uuidString, label: "disco", script: "df -h", team: nil, tags: [],
+        variables: [])
+
+    #expect(throws: TunelError.SnippetNotFound) { try terminal.run(gone) }
+    #expect(throws: TunelError.SnippetNotFound) { try terminal.variables(of: gone) }
+}
+
+@MainActor
+@Test func withTheVaultLockedTheSnippetsAreNotRead() async throws {
+    let store = try await unlockedStore()
+    let terminal = try #require(store.terminal(for: missingHost))
+    store.lock()
+    let snippet = SnippetSummary(
+        id: UUID().uuidString, label: "disco", script: "df -h", team: nil, tags: [],
+        variables: [])
+
+    #expect(terminal.snippets().isEmpty)
+    #expect(throws: VaultLockedError.self) { try terminal.run(snippet) }
+    #expect(userMessage(for: VaultLockedError()) == "La bóveda está bloqueada")
+}
