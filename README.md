@@ -258,15 +258,33 @@ cargo packager --release -p tunel-app --formats wix,nsis
 
 cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` en `dist/`.
 
-### Firmar la versión
+### Generar el APK de Android
 
-Con los cuatro paquetes en `dist/`, en el equipo que tiene la clave privada:
+En el Mac, con Android Studio (el NDK y las Command-line Tools) y la clave de firma de Android:
 
 ```bash
-./scripts/firmar-version.sh 0.14.0
+./scripts/empaquetar-android.sh 0.15.0
 ```
 
-Escribe `SHA256SUMS.txt` con los cuatro, lo firma con `ssh-keygen -Y sign` en
+Compila el núcleo para `arm64-v8a`, `armeabi-v7a` y `x86_64`, pasa las pruebas de Kotlin,
+reduce el código con R8, firma el APK y lo deja en `dist/tunel_<versión>_android.apk` con la
+huella SHA-256 del certificado, que va en las notas de la versión. Deja también
+`tunel_<versión>_android-mapping.txt`, que no se publica: se guarda para leer los fallos de
+esa versión, porque R8 renombra las clases. La clave se crea una sola
+vez con `./scripts/crear-clave-android.sh` en `~/.config/tunel-publicacion/` (`android.p12`
+y `android-firma.properties`, o la ruta de `$TUNEL_ANDROID_FIRMA`). Si se pierde, una
+versión nueva no se instala encima de la anterior: hay que desinstalar la app, y con ella la
+bóveda del teléfono.
+
+### Firmar la versión
+
+Con los cinco paquetes en `dist/`, en el equipo que tiene la clave privada:
+
+```bash
+./scripts/firmar-version.sh 0.15.0
+```
+
+Escribe `SHA256SUMS.txt` con los cinco, lo firma con `ssh-keygen -Y sign` en
 `SHA256SUMS.txt.sig` y comprueba la firma con la clave pública que lleva la app. Los dos
 archivos se suben a la versión junto a los paquetes. La clave privada se lee de
 `~/.config/tunel-publicacion/firma_ed25519` o de `$TUNEL_CLAVE_FIRMA`; si se pierde, las apps

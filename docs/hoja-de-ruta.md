@@ -45,7 +45,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9f3 | Android: terminal SSH | 0.15.0 | ✅ |
 | 9f4 | Android: desbloqueo con huella | 0.15.0 | ✅ |
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | ✅ |
-| 9h | Android: APK firmado para instalar fuera de Android Studio | por definir | pendiente |
+| 9h | Android: APK firmado para instalar fuera de Android Studio | 0.15.0 | en curso |
 | 9i | Android: la terminal sigue conectada con la app en segundo plano | por definir | pendiente |
 | 9k1 | iOS/iPadOS: snippets en la terminal, con variables, y el snippet al conectar | por definir | en curso |
 | 9k2 | Android: snippets en la terminal, con variables, y el snippet al conectar | por definir | pendiente |
@@ -251,10 +251,12 @@ después.
     (si se pierde, una versión nueva no se puede instalar encima de la anterior);
   - la compilación `release` firmada, con el código reducido por R8 y reglas que conservan
     las clases que usa el núcleo de Rust (UniFFI y JNA);
-  - el núcleo compilado también para `x86_64` (el emulador) y, si hace falta, para
-    teléfonos de 32 bits;
+  - el núcleo compilado también para `armeabi-v7a` (teléfonos de 32 bits) y `x86_64`
+    (emuladores de PC); el APK solo declara las arquitecturas para las que lleva núcleo;
   - el APK en las versiones de GitHub, dentro de `SHA256SUMS.txt` y su firma, como los
-    paquetes del escritorio.
+    paquetes del escritorio (`scripts/empaquetar-android.sh` y `scripts/crear-clave-android.sh`);
+  - los pánicos del núcleo van al registro de Android (logcat): en una versión publicada no
+    hay depurador y, sin eso, un fallo en una conexión no dejaba rastro.
 
   Google Play (cuenta de desarrollador) y F-Droid (compila desde el código fuente) quedan
   para después; ninguno es necesario para instalar el APK.
