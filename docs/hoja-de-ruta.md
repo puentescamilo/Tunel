@@ -41,8 +41,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9e | iOS/iPadOS: desbloqueo con Face ID o Touch ID | 0.15.0 | ✅ |
 | 9g | iOS/iPadOS: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9f1 | Android: app Compose con la bóveda y la lista de hosts | 0.15.0 | ✅ |
-| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ (falta probarla con el servidor real) |
-| 9f3 | Android: terminal SSH | 0.15.0 | ✅ (falta probarla con el servidor real) |
+| 9f2 | Android: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
+| 9f3 | Android: terminal SSH | 0.15.0 | ✅ |
 | 9f4 | Android: desbloqueo con huella | 0.15.0 | ✅ |
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9h | Android: APK firmado para instalar fuera de Android Studio | por definir | pendiente |
