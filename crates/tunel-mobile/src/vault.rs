@@ -1,6 +1,7 @@
 //! La bóveda vista desde las apps: abrirla o crearla y leer hosts y grupos.
 
 use crate::TunelError;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tunel_core::crypto::KdfParams;
 use tunel_core::{Group, Host, Protocol, UnlockedVault, VaultData};
@@ -42,6 +43,8 @@ pub fn vault_exists(path: String) -> bool {
 #[derive(uniffi::Object)]
 pub struct Vault {
     inner: Mutex<UnlockedVault>,
+    /// El último valor de cada variable de los snippets, mientras la bóveda está abierta.
+    snippet_values: Mutex<BTreeMap<String, String>>,
 }
 
 #[uniffi::export]
@@ -101,6 +104,7 @@ impl Vault {
     pub(crate) fn wrap(vault: UnlockedVault) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(vault),
+            snippet_values: Mutex::default(),
         })
     }
 
@@ -108,6 +112,20 @@ impl Vault {
     /// sigue usando.
     pub(crate) fn lock(&self) -> MutexGuard<'_, UnlockedVault> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(crate) fn remembered_values(&self) -> BTreeMap<String, String> {
+        self.snippet_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn remember_values(&self, values: BTreeMap<String, String>) {
+        self.snippet_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(values);
     }
 }
 

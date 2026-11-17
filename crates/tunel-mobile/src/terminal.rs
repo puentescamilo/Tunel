@@ -174,9 +174,15 @@ impl Vault {
         let id = Uuid::from_str(&host_id)
             .map(HostId)
             .map_err(|_| TunelError::HostNotFound)?;
-        let (target, jumps) = {
+        let (target, jumps, startup_script) = {
             let vault = self.lock();
-            (vault.data.resolve(id)?, vault.data.resolve_jump_chain(id)?)
+            let target = vault.data.resolve(id)?;
+            // El snippet al conectar del host, como en el escritorio.
+            let startup = vault
+                .data
+                .startup_snippet(&target.host)
+                .map(|s| s.script.clone());
+            (target, vault.data.resolve_jump_chain(id)?, startup)
         };
         let notice = protocol_notice(target.host.protocol.as_ref())?;
 
@@ -203,7 +209,7 @@ impl Vault {
             env: Default::default(),
             agent_forwarding: false,
             x11_display: None,
-            startup_script: None,
+            startup_script,
             command: None,
         };
         if let Some(notice) = notice {

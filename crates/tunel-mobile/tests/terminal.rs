@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tunel_core::crypto::KdfParams;
-use tunel_core::{Host, Identity, KnownHost, Protocol, UnlockedVault, VaultData};
+use tunel_core::{Host, Identity, KnownHost, Protocol, Snippet, UnlockedVault, VaultData};
 use tunel_mobile::{
     HostKeyQuestion, LoginQuestion, TerminalListener, TerminalSession, TunelError, Vault,
 };
@@ -304,6 +304,48 @@ fn the_shell_answers_what_is_typed_and_closes_on_exit() {
     assert!(question.fingerprint.starts_with("SHA256:"));
     assert_eq!(question.expected, None);
     assert!(matches!(next(&events), Event::Closed(None)));
+}
+
+#[test]
+fn the_startup_snippet_of_the_host_runs_on_connecting() {
+    let w = World::new();
+    let (host, identity) = w.host(Some(PASSWORD));
+    let snippet = Snippet::new("disco", "df -h");
+    let host = Host {
+        startup_snippet: Some(snippet.id),
+        ..host
+    };
+    let mut data = data_with(&host, &identity);
+    data.snippets.push(snippet);
+    let vault = w.vault(data);
+    let (session, events) = open(&vault, &host);
+
+    accept_key(&session, &events);
+    expect_connected(&events);
+
+    // El servidor de prueba devuelve en mayúsculas lo que recibe.
+    output_until(&events, "DF -H");
+}
+
+#[test]
+fn a_snippet_with_variables_reaches_the_shell() {
+    let w = World::new();
+    let (host, identity) = w.host(Some(PASSWORD));
+    let snippet = Snippet::new("Reiniciar", "systemctl restart {{servicio}}");
+    let id = snippet.id.0.to_string();
+    let mut data = data_with(&host, &identity);
+    data.snippets.push(snippet);
+    let vault = w.vault(data);
+    let (session, events) = open(&vault, &host);
+    accept_key(&session, &events);
+    expect_connected(&events);
+    output_until(&events, "bienvenida");
+
+    let values = std::collections::HashMap::from([("servicio".into(), "nginx".into())]);
+    let command = vault.snippet_command(id, values).unwrap();
+    session.send(command.into_bytes());
+
+    output_until(&events, "SYSTEMCTL RESTART NGINX");
 }
 
 #[test]
