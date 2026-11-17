@@ -11,6 +11,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import uniffi.tunel_mobile.HostSummary
+import uniffi.tunel_mobile.SnippetSummary
 
 /** La terminal contra el núcleo y un servidor SSH de verdad. */
 class TerminalModelTest {
@@ -214,5 +215,39 @@ class TerminalModelTest {
         store.lock()
 
         assertNull(store.openTerminal(host))
+    }
+
+    private fun snippet(id: String = java.util.UUID.randomUUID().toString()) =
+        SnippetSummary(id, "disco", "df -h", null, emptyList(), emptyList())
+
+    @Test
+    fun aVaultWithoutSnippetsListsNone() = runTest {
+        val store = openStore()
+        val terminal = checkNotNull(store.openTerminal(store.addHost()))
+
+        assertTrue(terminal.snippets().isEmpty())
+        assertTrue(terminal.snippets("df").isEmpty())
+    }
+
+    @Test
+    fun aSnippetThatIsNoLongerInTheVaultIsExplained() = runTest {
+        val store = openStore()
+        val terminal = checkNotNull(store.openTerminal(store.addHost()))
+
+        val sent = terminal.run(snippet())
+        val variables = terminal.variables(snippet())
+
+        assertEquals("Ese snippet ya no está en la bóveda", sent.exceptionOrNull()?.message)
+        assertEquals("Ese snippet ya no está en la bóveda", variables.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun withTheVaultLockedTheSnippetsAreNotRead() = runTest {
+        val store = openStore()
+        val terminal = checkNotNull(store.openTerminal(store.addHost()))
+        store.lock()
+
+        assertTrue(terminal.snippets().isEmpty())
+        assertEquals("La bóveda está bloqueada", terminal.run(snippet()).exceptionOrNull()?.message)
     }
 }

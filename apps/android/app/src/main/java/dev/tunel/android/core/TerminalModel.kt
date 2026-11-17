@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.update
 import uniffi.tunel_mobile.HostKeyQuestion
 import uniffi.tunel_mobile.HostSummary
 import uniffi.tunel_mobile.LoginQuestion
+import uniffi.tunel_mobile.SnippetSummary
+import uniffi.tunel_mobile.SnippetVariable
 import uniffi.tunel_mobile.TerminalListener
 import uniffi.tunel_mobile.TerminalSession
 import uniffi.tunel_mobile.TunelException
@@ -23,6 +25,9 @@ sealed interface TerminalPhase {
     /** Terminó; `error` es `null` si se cerró con normalidad (por ejemplo, con `exit`). */
     data class Closed(val error: String?) : TerminalPhase
 }
+
+/** No se pudo usar un snippet; `message` es para mostrarlo tal cual. */
+class SnippetException(message: String) : Exception(message)
 
 data class TerminalState(
     val phase: TerminalPhase = TerminalPhase.Connecting,
@@ -106,6 +111,34 @@ class TerminalModel internal constructor(
 
     fun send(data: ByteArray) {
         session?.send(data)
+    }
+
+    /**
+     * Los snippets de la bóveda (personales y de los Teams) que contienen `query` en el
+     * nombre, el comando o una etiqueta; todos si está vacío.
+     */
+    fun snippets(query: String = ""): List<SnippetSummary> =
+        withVault { it.snippets(query) }.getOrDefault(emptyList())
+
+    /** Las variables de `snippet`, con el valor que se usó la última vez. */
+    fun variables(snippet: SnippetSummary): Result<List<SnippetVariable>> =
+        withVault { it.snippetVariables(snippet.id) }
+
+    /** Envía `snippet` a la sesión, con `values` en sus variables, y lo ejecuta. */
+    fun run(snippet: SnippetSummary, values: Map<String, String> = emptyMap()): Result<Unit> =
+        withVault { it.snippetCommand(snippet.id, values) }.map { send(it.encodeToByteArray()) }
+
+    /** Los errores del núcleo llegan con su mensaje; una bóveda bloqueada, con el suyo. */
+    private fun <T> withVault(action: (Vault) -> T): Result<T> {
+        val open = vault() ?: return Result.failure(SnippetException(LOCKED))
+        return try {
+            Result.success(action(open))
+        } catch (error: TunelException) {
+            Result.failure(SnippetException(errorMessage(error)))
+        } catch (_: IllegalStateException) {
+            // El núcleo ya soltó la bóveda: se bloqueó.
+            Result.failure(SnippetException(LOCKED))
+        }
     }
 
     fun resize(cols: Int, rows: Int) {

@@ -47,8 +47,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9f5 | Android: crear, editar y borrar hosts | 0.15.0 | ✅ |
 | 9h | Android: APK firmado para instalar fuera de Android Studio | por definir | pendiente |
 | 9i | Android: la terminal sigue conectada con la app en segundo plano | por definir | pendiente |
-| 9k1 | iOS/iPadOS: snippets en la terminal, con variables, y el snippet al conectar | por definir | en curso |
-| 9k2 | Android: snippets en la terminal, con variables, y el snippet al conectar | por definir | pendiente |
+| 9k1 | iOS/iPadOS: snippets en la terminal, con variables, y el snippet al conectar | 0.15.0 | ✅ |
+| 9k2 | Android: snippets en la terminal, con variables, y el snippet al conectar | 0.15.0 | en curso |
 | 9k3 | Móvil: crear, editar y borrar snippets (iOS y Android) | por definir | pendiente |
 | 9j | Móvil: una sola contraseña; la de la cuenta abre la bóveda en cada dispositivo | por definir | pendiente |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
@@ -274,7 +274,8 @@ después.
   - **9k1. iOS/iPadOS:** un botón en la terminal abre la lista; un snippet sin variables se
     envía al tocarlo y uno con variables pide antes los valores, con el comando tal como se
     enviará. El snippet al conectar de cada host se ejecuta también en el móvil.
-  - **9k2. Android:** lo mismo en Compose.
+  - **9k2. Android:** lo mismo en Compose: un botón «Snippets» en la terminal abre una hoja
+    con la lista y, si el snippet tiene variables, sus casillas y el comando que se enviará.
   - **9k3. Editar:** crear, editar y borrar snippets personales desde el móvil, y elegir el
     snippet al conectar en el editor de hosts. Los de los Teams se siguen editando en el
     escritorio, como sus hosts.
