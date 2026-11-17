@@ -118,7 +118,10 @@ class TerminalScreenState(val model: TerminalModel) : AutoCloseable {
     }
 }
 
-/** La terminal de un host, con una barra de teclas que el teclado del teléfono no tiene. */
+/**
+ * La terminal de un host, con una barra de teclas que el teclado del teléfono no tiene y un
+ * botón para enviar snippets.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(screen: TerminalScreenState, onBack: () -> Unit) {
@@ -126,6 +129,7 @@ fun TerminalScreen(screen: TerminalScreenState, onBack: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(model) { model.start() }
+    var showsSnippets by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -137,6 +141,9 @@ fun TerminalScreen(screen: TerminalScreenState, onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    if (state.phase == TerminalPhase.Connected) {
+                        TextButton(onClick = { showsSnippets = true }) { Text("Snippets") }
+                    }
                     if (state.phase is TerminalPhase.Closed) {
                         IconButton(onClick = model::connect) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Reconectar")
@@ -173,6 +180,7 @@ fun TerminalScreen(screen: TerminalScreenState, onBack: () -> Unit) {
         }
     }
 
+    if (showsSnippets) SnippetsSheet(model) { showsSnippets = false }
     state.hostKey?.let { HostKeyDialog(it, model::answerHostKey) }
     state.login?.let { question -> LoginDialog(question) { model.answerLogin(it) } }
 }
