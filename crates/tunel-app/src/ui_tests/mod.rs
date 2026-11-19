@@ -4,6 +4,7 @@
 
 mod editing;
 mod enable;
+mod hosts_file;
 mod lock;
 mod navigation;
 mod panes;

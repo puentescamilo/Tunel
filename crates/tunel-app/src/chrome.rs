@@ -108,7 +108,7 @@ fn section_count(data: &tunel_core::VaultData, section: Section) -> usize {
         Section::Forwarding => data.forwards.len(),
         Section::Snippets => data.snippets.len(),
         Section::KnownHosts => data.known_hosts.len(),
-        Section::Containers | Section::Settings => 0,
+        Section::Containers | Section::HostsFile | Section::Settings => 0,
     }
 }
 
