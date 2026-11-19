@@ -10,6 +10,7 @@ mod panes;
 mod prompts;
 mod tabs;
 mod vaultwarden;
+mod wheel;
 
 use crate::app::TunelApp;
 use egui_kittest::kittest::{By, Queryable, by};

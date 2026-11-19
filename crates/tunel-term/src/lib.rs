@@ -7,5 +7,6 @@ pub mod palette;
 pub mod serial;
 pub mod telnet;
 pub mod theme_import;
+pub mod wheel;
 
 pub use emulator::{CursorKind, Emulator, InputModes, Screen, ScreenCell, TermEvent};

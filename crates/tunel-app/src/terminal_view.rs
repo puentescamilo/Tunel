@@ -5,6 +5,7 @@ use crate::session::TerminalSession;
 use egui::{Align2, Color32, CornerRadius, EventFilter, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use tunel_term::keys::{self, Key, Modifiers};
 use tunel_term::palette::{Rgb, Theme};
+use tunel_term::wheel::WheelAction;
 use tunel_term::{CursorKind, Screen, ScreenCell};
 
 const PADDING: f32 = 12.0;
@@ -183,6 +184,33 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
         session.send_typed(output);
     }
     if own { commands } else { Vec::new() }
+}
+
+/// La rueda recorre el historial o, en nano, less y demás, llega al programa (ver
+/// [`tunel_term::wheel`]).
+fn wheel(
+    ui: &egui::Ui,
+    session: &mut TerminalSession,
+    rect: Rect,
+    m: CellMetrics,
+    screen: &Screen,
+) {
+    let points = ui.input(|i| i.smooth_scroll_delta().y);
+    if points == 0.0 {
+        return;
+    }
+    let lines = session.wheel_lines(points, SCROLL_POINTS_PER_LINE);
+    if lines == 0 {
+        return;
+    }
+    let (row, col) = ui
+        .input(|i| i.pointer.hover_pos())
+        .map_or((0, 0), |pos| cell_at(rect, m, pos, screen));
+    match tunel_term::wheel::wheel(lines, row, col, session.emulator.input_modes()) {
+        WheelAction::Scrollback(lines) => session.emulator.scroll(lines),
+        // Como lo tecleado, pero solo a esta terminal: no se repite en las demás marcadas.
+        WheelAction::Send(bytes) => session.send(bytes),
+    }
 }
 
 fn cell_at(rect: Rect, m: CellMetrics, pos: Pos2, screen: &Screen) -> (usize, usize) {
@@ -479,11 +507,7 @@ pub fn show(
 
     let screen = session.emulator.screen(theme);
     if response.hovered() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta().y);
-        let lines = (scroll / SCROLL_POINTS_PER_LINE).round() as i32;
-        if lines != 0 && !session.emulator.input_modes().alt_screen {
-            session.emulator.scroll(lines);
-        }
+        wheel(ui, session, rect, m, &screen);
     }
     if let Some(pos) = response.interact_pointer_pos() {
         let (row, col) = cell_at(rect, m, pos, &screen);
