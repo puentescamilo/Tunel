@@ -22,7 +22,13 @@ desde una sola aplicación nativa, sin Electron ni WebView.
   carpeta, y su tarjeta dice cuántos subgrupos y hosts tiene.
 - **Llavero**: identidades (usuario + contraseña, clave o agente SSH) y claves privadas
   OpenSSH/PEM, cifradas o no, con certificados OpenSSH opcionales. Las contraseñas se ven
-  con un ojo: las tuyas siempre; las de un Team, solo sus admins.
+  con un ojo: las tuyas siempre; las de un Team, solo sus admins. En los detalles del host,
+  un botón la copia sin mostrarla; no entra en el historial del portapapeles y se borra a
+  los 30 segundos.
+- **Archivo hosts del equipo**: en la sección **Archivo hosts** se edita `/etc/hosts` (o el de
+  Windows) con aviso de líneas mal escritas. Al guardar pide permiso de administrador, deja
+  una copia de seguridad (las 20 últimas, para recuperarlas desde la app) y vacía la caché
+  de DNS.
 - **Claves SSH**: genera claves Ed25519, ECDSA o RSA de 4096 bits, con frase de paso
   opcional, e instálalas en un host como `ssh-copy-id`, sin duplicarlas. El llavero avisa
   de las claves RSA de menos de 3072 bits, de las DSA y de las claves de `~/.ssh` sin frase
@@ -177,7 +183,7 @@ Descarga `tunel_<versión>_amd64.deb` desde [Releases](https://github.com/puente
 e instálalo con:
 
 ```bash
-sudo apt install ./tunel_0.14.0_amd64.deb
+sudo apt install ./tunel_0.15.0_amd64.deb
 ```
 
 Funciona en Ubuntu 22.04, Debian 12 o posteriores, en equipos x86_64. Para elegir archivos
@@ -263,7 +269,7 @@ cargo-packager descarga WiX y NSIS la primera vez y deja el `.msi` y el `.exe` e
 Con los cuatro paquetes en `dist/`, en el equipo que tiene la clave privada:
 
 ```bash
-./scripts/firmar-version.sh 0.14.0
+./scripts/firmar-version.sh 0.15.0
 ```
 
 Escribe `SHA256SUMS.txt` con los cuatro, lo firma con `ssh-keygen -Y sign` en
