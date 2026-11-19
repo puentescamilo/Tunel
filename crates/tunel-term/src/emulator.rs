@@ -128,7 +128,11 @@ pub struct InputModes {
     pub app_cursor: bool,
     pub bracketed_paste: bool,
     pub mouse_reporting: bool,
+    /// El programa quiere las coordenadas del ratón en el formato SGR (1006).
+    pub sgr_mouse: bool,
     pub alt_screen: bool,
+    /// En la pantalla alterna, la rueda se envía como flechas (1007; activado por omisión).
+    pub alternate_scroll: bool,
 }
 
 pub struct Emulator {
@@ -213,7 +217,9 @@ impl Emulator {
             app_cursor: mode.contains(TermMode::APP_CURSOR),
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
             mouse_reporting: mode.intersects(TermMode::MOUSE_MODE),
+            sgr_mouse: mode.contains(TermMode::SGR_MOUSE),
             alt_screen: mode.contains(TermMode::ALT_SCREEN),
+            alternate_scroll: mode.contains(TermMode::ALTERNATE_SCROLL),
         }
     }
 
@@ -429,11 +435,37 @@ mod tests {
     #[test]
     fn app_cursor_and_bracketed_paste_modes_are_tracked() {
         let mut emu = Emulator::new(10, 2, 0);
-        assert_eq!(emu.input_modes(), InputModes::default());
+        assert_eq!(
+            emu.input_modes(),
+            InputModes {
+                alternate_scroll: true,
+                ..InputModes::default()
+            }
+        );
         emu.feed(b"\x1b[?1h\x1b[?2004h");
         let modes = emu.input_modes();
         assert!(modes.app_cursor);
         assert!(modes.bracketed_paste);
+    }
+
+    #[test]
+    fn nano_on_the_alternate_screen_gets_the_wheel_as_arrows() {
+        let mut emu = Emulator::new(10, 2, 0);
+        emu.feed(b"\x1b[?1049h");
+
+        let modes = emu.input_modes();
+
+        assert!(modes.alt_screen && modes.alternate_scroll && !modes.mouse_reporting);
+    }
+
+    #[test]
+    fn the_mouse_modes_are_tracked() {
+        let mut emu = Emulator::new(10, 2, 0);
+        emu.feed(b"\x1b[?1000h\x1b[?1006h");
+
+        let modes = emu.input_modes();
+
+        assert!(modes.mouse_reporting && modes.sgr_mouse);
     }
 
     #[test]

@@ -57,6 +57,15 @@ pub struct TerminalSession {
     pub line: crate::autocomplete::LineTracker,
     /// Lo que falta del comando sugerido, si se está mostrando.
     pub suggestion: Option<crate::autocomplete::Suggestion>,
+    /// Lo que movió la rueda sin llegar a una línea entera: un trackpad mueve poco a poco.
+    wheel_rest: f32,
+}
+
+/// Suma `points` a lo que sobró y separa las líneas enteras de lo que vuelve a sobrar.
+fn whole_lines(rest: f32, points: f32, points_per_line: f32) -> (i32, f32) {
+    let total = rest + points / points_per_line;
+    let lines = total.trunc();
+    (lines as i32, total - lines)
 }
 
 impl TerminalSession {
@@ -87,6 +96,7 @@ impl TerminalSession {
             playback: None,
             program: None,
             remote_command: None,
+            wheel_rest: 0.0,
             line: crate::autocomplete::LineTracker::new(),
             suggestion: None,
         }
@@ -329,6 +339,14 @@ impl TerminalSession {
         self.is_alive() && !self.is_watching()
     }
 
+    /// Las líneas enteras que suman `points` de rueda con lo que sobró antes; positivo es
+    /// hacia arriba.
+    pub fn wheel_lines(&mut self, points: f32, points_per_line: f32) -> i32 {
+        let (lines, rest) = whole_lines(self.wheel_rest, points, points_per_line);
+        self.wheel_rest = rest;
+        lines
+    }
+
     pub fn send(&self, bytes: Vec<u8>) {
         if !bytes.is_empty() {
             let _ = self.io.input.send(SessionInput::Data(bytes));
@@ -385,6 +403,19 @@ impl Drop for TerminalSession {
 mod tests {
     use super::*;
     use tunel_core::io::session_pair;
+
+    #[test]
+    fn a_trackpad_adds_up_small_movements_into_lines() {
+        let (mut session, _backend) = session();
+
+        let moved: Vec<i32> = [9.0, 9.0, 9.0, 9.0]
+            .into_iter()
+            .map(|points| session.wheel_lines(points, 18.0))
+            .collect();
+
+        assert_eq!(moved, [0, 1, 0, 1]);
+        assert_eq!(session.wheel_lines(-30.0, 18.0), -1);
+    }
 
     fn session() -> (TerminalSession, tunel_core::io::BackendIo) {
         let (io, backend) = session_pair();
