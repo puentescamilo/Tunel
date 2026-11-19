@@ -25,6 +25,8 @@ pub enum Section {
     Forwarding,
     Snippets,
     KnownHosts,
+    /// El archivo hosts de este equipo; no se guarda en la bóveda.
+    HostsFile,
     Settings,
     /// Contenedores y pods de este equipo y de los servidores; no se guardan en la bóveda.
     Containers,
@@ -32,13 +34,14 @@ pub enum Section {
 
 impl Section {
     /// En el orden del menú lateral.
-    pub const ALL: [Section; 7] = [
+    pub const ALL: [Section; 8] = [
         Section::Hosts,
         Section::Containers,
         Section::Keychain,
         Section::Forwarding,
         Section::Snippets,
         Section::KnownHosts,
+        Section::HostsFile,
         Section::Settings,
     ];
 
@@ -49,6 +52,7 @@ impl Section {
             Section::Forwarding => "Túneles",
             Section::Snippets => "Snippets",
             Section::KnownHosts => "Known hosts",
+            Section::HostsFile => "Archivo hosts",
             Section::Settings => "Ajustes",
             Section::Containers => "Contenedores",
         }
@@ -62,6 +66,7 @@ impl Section {
             Section::Forwarding => icons::TUNNEL,
             Section::Snippets => icons::CODE,
             Section::KnownHosts => icons::SHIELD,
+            Section::HostsFile => icons::FILE_TEXT,
             Section::Settings => icons::GEAR,
             Section::Containers => icons::COLUMNS,
         }
@@ -183,6 +188,8 @@ pub struct TunelApp {
     pub cloud_import: Option<crate::views::cloud_import::CloudImport>,
     /// Contenedores y pods de este equipo, según la última consulta.
     pub containers: crate::views::containers::ContainersView,
+    /// El archivo hosts de este equipo mientras se edita.
+    pub hosts_file: crate::hosts_file::HostsFileEditor,
     /// Pestaña a la que se está cambiando el nombre.
     pub tab_rename: Option<crate::tabs::TabRename>,
     /// Snippet con variables esperando sus valores.
@@ -260,6 +267,7 @@ impl TunelApp {
             Ok("forwarding") => Section::Forwarding,
             Ok("snippets") => Section::Snippets,
             Ok("known_hosts") => Section::KnownHosts,
+            Ok("hosts_file") => Section::HostsFile,
             Ok("settings") => Section::Settings,
             _ => Section::Hosts,
         };
@@ -439,6 +447,7 @@ impl TunelApp {
             quick_connect: None,
             cloud_import: None,
             containers: Default::default(),
+            hosts_file: Default::default(),
             tab_rename: None,
             snippet_prompt: None,
             snippet_values: HashMap::new(),
@@ -907,6 +916,7 @@ impl TunelApp {
             Section::Forwarding => views::forwards::show(self, ui),
             Section::Snippets => views::snippets::show(self, ui),
             Section::KnownHosts => views::known_hosts::show(self, ui),
+            Section::HostsFile => views::hosts_file::show(self, ui),
             Section::Settings => views::settings::show(self, ui),
             Section::Containers => views::containers::show(self, ui),
         }

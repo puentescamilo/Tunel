@@ -35,6 +35,8 @@ serde.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 uuid.workspace = true
+# El archivo hosts se escribe desde una copia temporal, con permisos de administrador.
+tempfile.workspace = true
 # Ya la trae egui; aquí comprueba que una fuente descargada es válida antes de cargarla.
 skrifa = "0.44"
 

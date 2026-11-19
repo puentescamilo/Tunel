@@ -5,6 +5,7 @@ pub mod containers;
 pub mod fonts;
 pub mod forwards;
 pub mod hosts;
+pub mod hosts_file;
 pub mod key_audit;
 pub mod keychain;
 pub mod known_hosts;
