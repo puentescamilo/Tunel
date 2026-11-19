@@ -1014,6 +1014,9 @@ impl eframe::App for TunelApp {
         crate::vaultwarden::import::show(self, &ctx);
         crate::tabs::rename_dialog(self, &ctx);
         views::snippets::prompt_dialog(self, &ctx);
+        if let Some(message) = crate::clipboard::take_failure(&ctx) {
+            self.notify(message);
+        }
         crate::chrome::notices(self, &ctx);
     }
 }

@@ -9,6 +9,7 @@ mod autocomplete;
 mod biometric;
 mod broadcast;
 mod chrome;
+mod clipboard;
 mod cloud;
 mod containers;
 mod editor;

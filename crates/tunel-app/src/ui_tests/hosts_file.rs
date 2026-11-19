@@ -20,7 +20,10 @@ fn an_edited_hosts_file_is_saved_with_a_backup_of_the_previous_one() {
     let (mut app, path) = with_hosts_file("127.0.0.1 localhost\n");
     assert!(app.exists(&field(EDITOR)));
 
-    app.fill(&field(EDITOR), "127.0.0.1 localhost\n10.0.0.15 web-01.lab\n");
+    app.fill(
+        &field(EDITOR),
+        "127.0.0.1 localhost\n10.0.0.15 web-01.lab\n",
+    );
     assert!(app.exists(&text("Cambios sin guardar")));
     app.click(&button("Guardar…"));
     for _ in 0..50 {
@@ -61,5 +64,8 @@ fn discarding_goes_back_to_what_is_on_disk() {
     app.click(&button("Descartar"));
 
     assert_eq!(app.harness.state().hosts_file.text, "127.0.0.1 localhost\n");
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "127.0.0.1 localhost\n");
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "127.0.0.1 localhost\n"
+    );
 }

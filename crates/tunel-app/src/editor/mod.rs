@@ -803,19 +803,40 @@ pub fn show(app: &mut TunelApp, ctx: &egui::Context) {
     }
 }
 
-/// Anota en el registro del Team las contraseñas guardadas que se acaban de mostrar.
+/// Anota en el registro del Team las contraseñas guardadas que se acaban de mostrar, y
+/// copia (y anota) las que se pidió copiar.
 fn record_revealed(app: &mut TunelApp, ctx: &egui::Context, data: &VaultData) {
     for field in crate::ui::take_revealed(ctx) {
-        let identity = match (field.as_str(), app.editor.as_ref()) {
-            // Solo si lo que se ve es la guardada, no una que se está escribiendo.
-            ("identidad", Some(Editor::Identity(i))) => data
-                .identity(i.id)
-                .filter(|saved| saved.password == i.password),
-            ("host-identidad", Some(Editor::Host(form))) => effective_identity(form, data),
-            _ => None,
-        };
-        if let Some(identity) = identity.filter(|i| i.password.is_some()).cloned() {
+        if let Some(identity) = saved_secret(app, data, &field) {
             crate::audit::secret_viewed(app, &identity);
         }
     }
+    for field in crate::ui::take_copied(ctx) {
+        let Some(identity) = saved_secret(app, data, &field) else {
+            continue;
+        };
+        let Some(password) = identity.password.clone() else {
+            continue;
+        };
+        crate::clipboard::copy_secret(ctx, Zeroizing::new(password));
+        // Quien copia la contraseña puede verla: para el Team es lo mismo.
+        crate::audit::secret_viewed(app, &identity);
+        app.notify(format!(
+            "Contraseña copiada; se borrará del portapapeles en {} s",
+            crate::clipboard::CLEAR_AFTER.as_secs()
+        ));
+    }
+}
+
+/// La identidad guardada cuya contraseña muestra el campo `field`, si tiene contraseña.
+fn saved_secret(app: &TunelApp, data: &VaultData, field: &str) -> Option<Identity> {
+    let identity = match (field, app.editor.as_ref()) {
+        // Solo si lo que se ve es la guardada, no una que se está escribiendo.
+        ("identidad", Some(Editor::Identity(i))) => data
+            .identity(i.id)
+            .filter(|saved| saved.password == i.password),
+        ("host-identidad", Some(Editor::Host(form))) => effective_identity(form, data),
+        _ => None,
+    };
+    identity.filter(|i| i.password.is_some()).cloned()
 }
