@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 10 de noviembre de 2026, con Túnel 0.14.0.
+Actualizada el 19 de noviembre de 2026, con Túnel 0.15.0.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -34,6 +34,9 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 8f | Vaultwarden: contraseña *enable* desde la pestaña | 0.14.0 | ✅ |
 | — | La ventana cabe en la pantalla al pasarla a otra con distinta escala (Windows) | 0.14.0 | ✅ |
 | 8f | Vaultwarden: contraseña *enable* | 0.14.0 | ✅ |
+| — | Editar el archivo hosts del equipo, con copias de seguridad | 0.15.0 | ✅ |
+| — | Copiar la contraseña de un host sin verla | 0.15.0 | ✅ |
+| — | La rueda del ratón en nano, less y demás programas de pantalla completa | 0.15.0 | ✅ |
 | 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
@@ -48,7 +51,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | 9h | Android: APK firmado para instalar fuera de Android Studio | por definir | pendiente |
 | 9i | Android: la terminal sigue conectada con la app en segundo plano | por definir | pendiente |
 | 9k1 | iOS/iPadOS: snippets en la terminal, con variables, y el snippet al conectar | 0.15.0 | ✅ |
-| 9k2 | Android: snippets en la terminal, con variables, y el snippet al conectar | 0.15.0 | en curso |
+| 9k2 | Android: snippets en la terminal, con variables, y el snippet al conectar | 0.15.0 | ✅ |
 | 9k3 | Móvil: crear, editar y borrar snippets (iOS y Android) | por definir | pendiente |
 | 9j | Móvil: una sola contraseña; la de la cuenta abre la bóveda en cada dispositivo | por definir | pendiente |
 | 2b | Paquetes firmados por Apple y Microsoft | cuando estén los certificados | bloqueada |
