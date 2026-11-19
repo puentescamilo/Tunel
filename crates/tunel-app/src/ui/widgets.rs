@@ -254,11 +254,29 @@ pub fn password_field(
     response
 }
 
-/// Una contraseña guardada que no se edita aquí: puntos y, con `can_reveal`, un ojo.
+/// Una contraseña guardada que no se edita aquí: puntos y, con `can_reveal`, un ojo para
+/// verla y un botón para copiarla sin verla.
 pub fn password_label(ui: &mut Ui, field: &str, text: &str, can_reveal: bool) {
     let revealed = can_reveal && is_revealed(ui, field);
     ui.label(RichText::new(masked(text, revealed)).monospace());
     reveal_toggle(ui, field, can_reveal);
+    if can_reveal && icon_button(ui, super::icons::COPY, "Copiar contraseña").clicked() {
+        ui.data_mut(|d| {
+            d.get_temp_mut_or_default::<Vec<String>>(just_copied_id())
+                .push(field.to_string())
+        });
+    }
+}
+
+fn just_copied_id() -> egui::Id {
+    egui::Id::unique("contraseñas-recién-copiadas")
+}
+
+/// Los campos cuya contraseña se pidió copiar; los olvida. La copia la hace quien sabe
+/// de qué elemento es, para anotarla en el registro del Team.
+pub fn take_copied(ctx: &egui::Context) -> Vec<String> {
+    ctx.data_mut(|d| d.remove_temp::<Vec<String>>(just_copied_id()))
+        .unwrap_or_default()
 }
 
 /// Un dato que se muestra como puntos hasta que se pulsa el ojo.

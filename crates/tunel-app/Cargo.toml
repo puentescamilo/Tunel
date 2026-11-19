@@ -22,6 +22,7 @@ tunel-sync.workspace = true
 tunel-vaultwarden.workspace = true
 base64.workspace = true
 eframe.workspace = true
+arboard = { version = "3.7", default-features = false }
 egui.workspace = true
 rfd.workspace = true
 tokio.workspace = true

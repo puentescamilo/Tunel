@@ -2,6 +2,7 @@
 //! accesibilidad como lo haría una persona (buscar un texto, pulsar, escribir). Cada prueba
 //! usa una bóveda nueva en una carpeta temporal y no sale a internet.
 
+mod copy_password;
 mod editing;
 mod enable;
 mod hosts_file;
