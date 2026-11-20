@@ -160,6 +160,8 @@ impl Tab {
 pub struct TunelApp {
     pub engine: Engine,
     pub lock: LockScreen,
+    /// Entrar con la cuenta en un equipo sin bóveda.
+    pub join: crate::join::JoinState,
     pub vault: Option<UnlockedVault>,
     pub section: Section,
     pub tabs: Vec<Tab>,
@@ -428,6 +430,7 @@ impl TunelApp {
         Ok(Self {
             engine: Engine::new(cc.egui_ctx.clone())?,
             lock: LockScreen::new(vault_path),
+            join: Default::default(),
             vault: None,
             section: Section::Hosts,
             tabs: Vec::new(),
@@ -954,7 +957,14 @@ impl eframe::App for TunelApp {
         let ctx = ui.ctx().clone();
         crate::window_fit::tick(&ctx);
         if self.vault.is_none() {
-            if let Some(vault) = self.lock.show(ui) {
+            let opened = if self.lock.joining {
+                // Entrando con la cuenta: hay que atender al servidor y al navegador.
+                self.process_background();
+                crate::join::show(self, ui)
+            } else {
+                self.lock.show(ui)
+            };
+            if let Some(vault) = opened {
                 self.vault = Some(vault);
                 crate::sync::on_unlock(self);
                 crate::vaultwarden::on_unlock(self);
