@@ -193,7 +193,7 @@ pub fn finish(app: &mut TunelApp) {
     app.sync.status = SyncStatus::Linking;
     let round = app.sync.begin(data.clone());
     app.engine
-        .oauth_complete(round, sign_in, master, data, check);
+        .oauth_complete(round, sign_in, master, data, Some(check));
 }
 
 /// Pasa la cuenta al proveedor. La contraseña maestra se vuelve la que cifra la

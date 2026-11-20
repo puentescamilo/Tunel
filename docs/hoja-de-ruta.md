@@ -37,6 +37,7 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | — | Editar el archivo hosts del equipo, con copias de seguridad | 0.15.0 | ✅ |
 | — | Copiar la contraseña de un host sin verla | 0.15.0 | ✅ |
 | — | La rueda del ratón en nano, less y demás programas de pantalla completa | 0.15.0 | ✅ |
+| — | Escritorio: entrar con la cuenta desde la pantalla de bienvenida | por definir | en curso |
 | 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |

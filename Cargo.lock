@@ -6409,6 +6409,7 @@ version = "0.15.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "axum",
  "base64 0.22.1",
  "block2 0.6.2",
  "chrono",
@@ -6433,6 +6434,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tunel-core",
+ "tunel-server",
  "tunel-ssh",
  "tunel-sync",
  "tunel-term",

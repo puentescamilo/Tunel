@@ -17,6 +17,7 @@ mod enable;
 mod engine;
 mod fonts;
 mod hosts_file;
+mod join;
 mod layout;
 mod live;
 mod lock;

@@ -302,6 +302,11 @@ contraseña para la cuenta (de al menos 12 caracteres):
 - **Iniciar sesión**, en los demás. Lo que ya tuvieras en ese equipo se combina con la bóveda
   de la cuenta.
 
+En un equipo recién instalado no hace falta crear antes una bóveda: en la pantalla de
+bienvenida, **Entrar con tu cuenta** pide el servidor y entra con correo y contraseña o con
+Google o Microsoft. La bóveda de ese equipo se crea con la misma contraseña con la que
+entraste (la de la cuenta o, con un proveedor, la maestra) y se descarga todo lo de la cuenta.
+
 Los cambios se suben unos segundos después de hacerlos y cada equipo descarga lo nuevo cada
 5 minutos, o al pulsar **Sincronizar ahora**.
 

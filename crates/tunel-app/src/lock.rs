@@ -18,6 +18,8 @@ pub struct LockScreen {
     biometric: Option<Pending<Unlocked>>,
     /// Al abrir Túnel se pide la huella sin esperar al botón, una sola vez.
     auto_biometric: bool,
+    /// En un equipo sin bóveda, la persona eligió entrar con su cuenta (ver `crate::join`).
+    pub joining: bool,
 }
 
 impl LockScreen {
@@ -29,11 +31,10 @@ impl LockScreen {
             error: None,
             biometric: None,
             auto_biometric: true,
+            joining: false,
         }
     }
 
-    /// Solo lo usan los ganchos de desarrollo (`TUNEL_DEV_*`).
-    #[cfg(debug_assertions)]
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
@@ -189,6 +190,23 @@ impl LockScreen {
                             // Lo que responda después la huella ya no hace falta.
                             self.biometric = None;
                         }
+                    }
+                    if creating {
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new("¿Ya usas Túnel en otro equipo?").color(p.muted));
+                            ui.add_space(4.0);
+                            let button = egui::Button::new(ui::with_icon(icons::USER, "Entrar con tu cuenta"))
+                                .corner_radius(CornerRadius::same(8))
+                                .min_size(Vec2::new(ui.available_width(), 34.0));
+                            if ui.add(button).clicked() {
+                                self.error = None;
+                                self.clear();
+                                self.joining = true;
+                            }
+                        });
                     }
                     if biometric_ready {
                         ui.add_space(8.0);
