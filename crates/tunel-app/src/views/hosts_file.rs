@@ -1,5 +1,6 @@
 //! El archivo hosts de este equipo, como texto: resalta direcciones, nombres y comentarios,
-//! avisa de las líneas que el sistema no entiende y guarda con permisos de administrador.
+//! y guarda con permisos de administrador. Las líneas que el sistema no entiende se avisan
+//! al pulsar Guardar, no mientras se escribe.
 
 use crate::app::TunelApp;
 use crate::biometric::Pending;
@@ -8,7 +9,7 @@ use crate::ui::{self, icons};
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, RichText};
 use std::path::PathBuf;
-use tunel_core::hosts_file::{line_parts, problems};
+use tunel_core::hosts_file::{Problem, line_parts};
 
 const FONT_SIZE: f32 = 13.0;
 /// Cuántos avisos se listan; el resto se resume.
@@ -56,12 +57,24 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
     if editor.show_backups {
         backups_panel(ui, editor);
     }
-    problems_panel(ui, &editor.text, p.warning);
-    let save = actions(ui, editor, saving, p.muted);
+    let mut save = actions(ui, editor, saving, p.muted) && editor.check_before_saving();
+    if let Some(found) = editor.problems() {
+        match review_panel(ui, found, p.warning) {
+            Some(Choice::SaveAnyway) => save = true,
+            Some(Choice::KeepEditing) => editor.keep_editing(),
+            None => {}
+        }
+    }
     text_editor(ui, editor, saving, &p);
     if save {
+        app.hosts_file.keep_editing();
         start_saving(app, ui.ctx(), backups);
     }
+}
+
+enum Choice {
+    SaveAnyway,
+    KeepEditing,
 }
 
 fn backups_panel(ui: &mut egui::Ui, editor: &mut HostsFileEditor) {
@@ -104,12 +117,17 @@ fn backups_panel(ui: &mut egui::Ui, editor: &mut HostsFileEditor) {
     }
 }
 
-fn problems_panel(ui: &mut egui::Ui, text: &str, color: Color32) {
-    let found = problems(text);
-    if found.is_empty() {
-        return;
-    }
+/// Las líneas mal escritas que se encontraron al pulsar Guardar, con qué hacer.
+fn review_panel(ui: &mut egui::Ui, found: &[Problem], color: Color32) -> Option<Choice> {
+    let mut choice = None;
     ui.add_space(6.0);
+    ui.label(
+        RichText::new(
+            "Antes de guardar, revisa estas líneas: el sistema ignora las que no entiende.",
+        )
+        .color(color)
+        .strong(),
+    );
     for problem in found.iter().take(MAX_PROBLEMS_SHOWN) {
         ui.label(
             RichText::new(format!("Línea {}: {}", problem.line, problem.message)).color(color),
@@ -118,14 +136,22 @@ fn problems_panel(ui: &mut egui::Ui, text: &str, color: Color32) {
     if found.len() > MAX_PROBLEMS_SHOWN {
         ui.label(
             RichText::new(format!(
-                "…y {} líneas más. El sistema ignora las líneas que no entiende.",
+                "…y {} líneas más.",
                 found.len() - MAX_PROBLEMS_SHOWN
             ))
             .color(color),
         );
-    } else {
-        ui.label(RichText::new("El sistema ignora las líneas que no entiende.").color(color));
     }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if ui::secondary_button(ui, "Seguir editando").clicked() {
+            choice = Some(Choice::KeepEditing);
+        }
+        if ui::secondary_button(ui, "Guardar de todos modos").clicked() {
+            choice = Some(Choice::SaveAnyway);
+        }
+    });
+    choice
 }
 
 /// Descartar y Guardar. Devuelve si se pidió guardar.
@@ -176,6 +202,9 @@ fn text_editor(ui: &mut egui::Ui, editor: &mut HostsFileEditor, saving: bool, p:
             let response = ui.add_enabled(
                 !saving,
                 egui::TextEdit::multiline(&mut editor.text)
+                    // Un id fijo: si cambia lo que hay encima (avisos, copias), el editor
+                    // no pierde el foco ni lo que se está escribiendo.
+                    .id_salt("contenido-archivo-hosts")
                     .code_editor()
                     .desired_width(f32::INFINITY)
                     .desired_rows(24)

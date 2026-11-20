@@ -6,7 +6,7 @@ mod elevate;
 use crate::biometric::Pending;
 use chrono::NaiveDateTime;
 use std::path::{Path, PathBuf};
-use tunel_core::hosts_file::{self, HostsText};
+use tunel_core::hosts_file::{self, HostsText, Problem, problems};
 
 /// Se guardan las últimas copias; las más viejas se borran.
 const MAX_BACKUPS: usize = 20;
@@ -23,6 +23,15 @@ pub struct HostsFileEditor {
     pub saving: Option<Pending<Result<HostsText, String>>>,
     pub backups: Vec<Backup>,
     pub show_backups: bool,
+    /// Las líneas mal escritas que se encontraron al pulsar Guardar. Mientras se escribe no
+    /// se avisa: una línea a medias («ui.») no es un error todavía.
+    review: Option<Review>,
+}
+
+/// La revisión de un texto antes de guardarlo.
+struct Review {
+    text: String,
+    problems: Vec<Problem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +56,7 @@ impl HostsFileEditor {
             saving: None,
             backups: Vec::new(),
             show_backups: false,
+            review: None,
         }
     }
 
@@ -58,6 +68,7 @@ impl HostsFileEditor {
                 self.text = read.text.clone();
                 self.saved = Some(read);
                 self.load_error = None;
+                self.review = None;
             }
             Err(e) => {
                 self.saved = None;
@@ -75,6 +86,32 @@ impl HostsFileEditor {
         if let Some(saved) = &self.saved {
             self.text = saved.text.clone();
         }
+        self.review = None;
+    }
+
+    /// Revisa el texto antes de guardarlo. Devuelve `true` si no hay nada que avisar; si
+    /// no, guarda los avisos para [`Self::problems`].
+    pub fn check_before_saving(&mut self) -> bool {
+        let found = problems(&self.text);
+        let clean = found.is_empty();
+        self.review = (!clean).then(|| Review {
+            text: self.text.clone(),
+            problems: found,
+        });
+        clean
+    }
+
+    /// Los avisos de la última revisión, mientras el texto siga siendo el revisado.
+    pub fn problems(&mut self) -> Option<&[Problem]> {
+        if self.review.as_ref().is_some_and(|r| r.text != self.text) {
+            self.review = None;
+        }
+        self.review.as_ref().map(|r| r.problems.as_slice())
+    }
+
+    /// Se vuelve a editar sin guardar: los avisos se van.
+    pub fn keep_editing(&mut self) {
+        self.review = None;
     }
 
     /// Lo que se escribiría: el texto editado con los finales de línea del archivo.
