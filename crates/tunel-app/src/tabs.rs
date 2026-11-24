@@ -99,6 +99,7 @@ enum TabAction {
     Reconnect(usize),
     Duplicate(usize),
     Rename(usize),
+    Move { from: usize, to: usize },
     Broadcast(usize),
     SendEnable(usize),
 }
@@ -123,10 +124,16 @@ fn tab(ui: &mut egui::Ui, spec: TabSpec) -> (egui::Response, bool) {
     } else {
         HOME_TAB_WIDTH
     };
+    // Las pestañas de sesiones se arrastran para cambiarlas de sitio; «Bóveda» va fija.
+    let sense = if spec.closable {
+        Sense::click_and_drag()
+    } else {
+        Sense::click()
+    };
     let (rect, response) = ui.allocate_exact_size(
         // Todo el alto que deja el panel, para que el borde inferior no quede recortado.
         Vec2::new(width, ui.available_height()),
-        Sense::click(),
+        sense,
     );
     let hovered = response.hovered();
     let painter = ui.painter();
@@ -202,12 +209,48 @@ fn tab(ui: &mut egui::Ui, spec: TabSpec) -> (egui::Response, bool) {
         spec.selected.is_some(),
         spec.title,
     );
+    let cursor = if response.dragged() {
+        egui::CursorIcon::Grabbing
+    } else {
+        egui::CursorIcon::PointingHand
+    };
     (
-        response
-            .on_hover_text(spec.title)
-            .on_hover_cursor(egui::CursorIcon::PointingHand),
+        response.on_hover_text(spec.title).on_hover_cursor(cursor),
         close_clicked,
     )
+}
+
+/// Posición en la que queda la pestaña `from` si se suelta en `x`: tantas como pestañas
+/// tenga a su izquierda, contando por el centro de cada una.
+fn drop_index(rects: &[Rect], from: usize, x: f32) -> usize {
+    rects
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| *i != from && r.center().x < x)
+        .count()
+}
+
+/// Raya donde caería la pestaña que se arrastra.
+fn drop_marker(ui: &egui::Ui, rects: &[Rect], from: usize, to: usize, color: Color32) {
+    let (Some(first), Some(last)) = (rects.first(), rects.last()) else {
+        return;
+    };
+    // Las demás pestañas en orden, sin la que se mueve: se cae delante de la `to`-ésima.
+    let others: Vec<&Rect> = rects
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| (i != from).then_some(r))
+        .collect();
+    let x = match others.get(to) {
+        Some(r) => r.left() - 2.0,
+        None => others.last().map_or(last.right(), |r| r.right()) + 2.0,
+    };
+    let top = first.top() + 4.0;
+    let bottom = first.bottom() - 4.0;
+    ui.painter().line_segment(
+        [egui::pos2(x, top), egui::pos2(x, bottom)],
+        Stroke::new(2.0, color),
+    );
 }
 
 /// Fondo de la pestaña `t` seleccionada: el de su terminal, o el de la interfaz para SFTP.
@@ -295,6 +338,24 @@ fn context_menu(
         }
     };
     item(ui, icons::PENCIL, "Renombrar", TabAction::Rename(i));
+    if i > 0 {
+        let to = i - 1;
+        item(
+            ui,
+            icons::ARROW_LEFT,
+            "Mover a la izquierda",
+            TabAction::Move { from: i, to },
+        );
+    }
+    if i + 1 < app.tabs.len() {
+        let to = i + 1;
+        item(
+            ui,
+            icons::ARROW_RIGHT,
+            "Mover a la derecha",
+            TabAction::Move { from: i, to },
+        );
+    }
     if app.can_reopen(i) {
         item(ui, icons::REFRESH, "Reconectar", TabAction::Reconnect(i));
         item(ui, icons::COPY, "Duplicar", TabAction::Duplicate(i));
@@ -373,6 +434,9 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                         if tab(ui, home).0.clicked() {
                             action = Some(TabAction::Select(None));
                         }
+                        let mut rects = Vec::with_capacity(app.tabs.len());
+                        let mut dragging = None;
+                        let mut dropped = None;
                         for (i, t) in app.tabs.iter().enumerate() {
                             let in_view = app.shown_layout().is_some_and(|l| l.contains(i));
                             let selected = app.active == Some(i) || in_view;
@@ -391,6 +455,13 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                                 closable: true,
                             };
                             let (response, close) = tab(ui, spec);
+                            rects.push(response.rect);
+                            if response.dragged() {
+                                dragging = Some(i);
+                            }
+                            if response.drag_stopped() {
+                                dropped = Some(i);
+                            }
                             if close || response.middle_clicked() {
                                 action = Some(TabAction::Close(i));
                             } else if response.clicked() {
@@ -399,6 +470,15 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
                             response.context_menu(|ui| {
                                 context_menu(ui, app, i, &teams, &mut action);
                             });
+                        }
+                        let pointer = ui.ctx().pointer_interact_pos();
+                        if let (Some(from), Some(pointer)) = (dragging.or(dropped), pointer) {
+                            let to = drop_index(&rects, from, pointer.x);
+                            if dropped.is_some() {
+                                action = Some(TabAction::Move { from, to });
+                            } else if to != from {
+                                drop_marker(ui, &rects, from, to, p.accent);
+                            }
                         }
                         if ui::icon_button(
                             ui,
@@ -419,6 +499,7 @@ pub fn tab_bar(app: &mut TunelApp, ui: &mut egui::Ui) {
         Some(TabAction::StopSharing(tab)) => crate::live::stop_sharing(app, tab),
         Some(TabAction::Reconnect(i)) => app.reconnect_tab(i),
         Some(TabAction::Duplicate(i)) => app.duplicate_tab(i),
+        Some(TabAction::Move { from, to }) => app.move_tab(from, to),
         Some(TabAction::Broadcast(i)) => crate::broadcast::toggle(app, i),
         Some(TabAction::SendEnable(i)) => crate::enable::send(app, i),
         Some(TabAction::Rename(i)) => {
@@ -547,6 +628,29 @@ mod tests {
         let look = selected_look(Color32::WHITE, Some([0x3b, 0x82, 0xf6]));
         assert_eq!(look.border, Color32::from_rgb(0x3b, 0x82, 0xf6));
         assert_eq!(look.text, DARK_TEXT);
+    }
+
+    fn row(n: usize) -> Vec<Rect> {
+        (0..n)
+            .map(|i| {
+                let left = i as f32 * 100.0;
+                Rect::from_min_max(egui::pos2(left, 0.0), egui::pos2(left + 96.0, 40.0))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_dragged_tab_lands_past_the_tabs_whose_middle_it_crosses() {
+        let rects = row(4);
+        assert_eq!(drop_index(&rects, 0, 10.0), 0, "sin pasar ninguna");
+        assert_eq!(
+            drop_index(&rects, 0, 160.0),
+            1,
+            "pasa el centro de la segunda"
+        );
+        assert_eq!(drop_index(&rects, 0, 900.0), 3, "al final");
+        assert_eq!(drop_index(&rects, 3, -50.0), 0, "al principio");
+        assert_eq!(drop_index(&rects, 2, 140.0), 1, "una a la izquierda");
     }
 
     #[test]

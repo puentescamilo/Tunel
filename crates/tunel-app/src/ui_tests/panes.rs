@@ -5,7 +5,7 @@ use crate::layout::{Direction, Layout};
 use egui_kittest::kittest::NodeT;
 
 /// La app con `n` terminales locales llamadas «uno», «dos»…; la última, activa.
-fn terminals(n: usize) -> TestApp {
+pub(super) fn terminals(n: usize) -> TestApp {
     const NAMES: [&str; 5] = ["uno", "dos", "tres", "cuatro", "cinco"];
     let mut app = TestApp::unlocked(VaultData::default());
     for name in &NAMES[..n] {
@@ -17,18 +17,18 @@ fn terminals(n: usize) -> TestApp {
     app
 }
 
-fn tab(title: &'static str) -> By<'static> {
+pub(super) fn tab(title: &'static str) -> By<'static> {
     by().role(egui::accesskit::Role::Tab).label(title)
 }
 
 /// Abre el menú de la pestaña y elige `option`.
-fn menu(app: &mut TestApp, title: &'static str, option: &'static str) {
+pub(super) fn menu(app: &mut TestApp, title: &'static str, option: &'static str) {
     app.get(&tab(title)).click_secondary();
     app.settle();
     app.click(&button(option));
 }
 
-fn panes(app: &TestApp) -> Vec<usize> {
+pub(super) fn panes(app: &TestApp) -> Vec<usize> {
     app.harness
         .state()
         .layout

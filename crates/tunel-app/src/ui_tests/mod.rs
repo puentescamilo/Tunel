@@ -10,6 +10,7 @@ mod lock;
 mod navigation;
 mod panes;
 mod prompts;
+mod reorder_tabs;
 mod tabs;
 mod vaultwarden;
 mod wheel;
