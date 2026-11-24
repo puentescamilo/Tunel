@@ -674,6 +674,20 @@ impl TunelApp {
         }
     }
 
+    /// Lleva la pestaña `from` a la posición `to` de la barra. La vista dividida, las
+    /// ventanas propias y la pestaña activa siguen a sus pestañas.
+    pub fn move_tab(&mut self, from: usize, to: usize) {
+        let len = self.tabs.len();
+        if from >= len || to >= len || from == to {
+            return;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        let moved = |t: usize| moved_index(t, from, to);
+        self.reindex(|t| Some(moved(t)));
+        self.active = self.active.map(moved);
+    }
+
     pub fn open_tab(&mut self, tab: Tab) {
         self.push_tab(tab);
     }
@@ -932,6 +946,17 @@ impl TunelApp {
             }
             Err(e) => self.notify(format!("No se pudo abrir la shell: {e:#}")),
         }
+    }
+}
+
+/// Posición nueva de la pestaña `t` cuando la de `from` pasa a `to`: las de en medio se
+/// corren un sitio hacia donde quedó el hueco.
+pub(crate) fn moved_index(t: usize, from: usize, to: usize) -> usize {
+    match t {
+        t if t == from => to,
+        t if from < to && (from + 1..=to).contains(&t) => t - 1,
+        t if to < from && (to..from).contains(&t) => t + 1,
+        t => t,
     }
 }
 

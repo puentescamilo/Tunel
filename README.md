@@ -83,8 +83,9 @@ desde una sola aplicación nativa, sin Electron ni WebView.
 
 - Emulación basada en `alacritty_terminal`: 256 colores y truecolor, negrita, cursiva,
   subrayado, caracteres de doble ancho, historial desplazable y selección con copiar y pegar.
-- Pestañas con indicador de estado y reconexión con un clic. Con clic derecho en una pestaña:
-  reconectar, duplicar, compartir con un Team o cerrar, y también:
+- Pestañas con indicador de estado y reconexión con un clic. Se cambian de sitio
+  arrastrándolas en la barra. Con clic derecho en una pestaña: reconectar, duplicar, moverla a
+  la izquierda o a la derecha, compartir con un Team o cerrar, y también:
   - **Dividir a la derecha** o **Dividir abajo**: hasta cuatro terminales a la vista a la vez,
     de hosts distintos. La franja entre paneles se arrastra para repartir el espacio, y el
     panel en el que pulsas es el que recibe el teclado.
