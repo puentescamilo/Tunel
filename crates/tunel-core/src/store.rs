@@ -412,6 +412,24 @@ impl UnlockedVault {
         write_atomically(&side_path(&self.path, suffix), &json)
     }
 
+    /// Borra de este equipo la bóveda y todo lo que guarda a su lado: la sincronización,
+    /// las pestañas, el historial, Vaultwarden y el desbloqueo biométrico. La bóveda va
+    /// la última: si algo falla antes, sigue ahí y se puede volver a intentar. Lo que el
+    /// sistema guarde para el desbloqueo biométrico se borra aparte, antes de llamar aquí.
+    pub fn destroy(self) -> Result<(), StoreError> {
+        for side in [SYNC_FILE, WORKSPACE_FILE, HISTORY_FILE, VAULTWARDEN_FILE] {
+            self.delete_side(side)?;
+        }
+        crate::biometric::forget(&self.path)?;
+        std::fs::remove_file(&self.path)?;
+        let lock = lock_path(&self.path);
+        drop(self);
+        match std::fs::remove_file(lock) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        }
+    }
+
     fn delete_side(&self, (suffix, _): (&str, &[u8])) -> Result<(), StoreError> {
         match std::fs::remove_file(side_path(&self.path, suffix)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
@@ -523,6 +541,31 @@ mod tests {
 
         let reopened = UnlockedVault::unlock(vault_path(&dir), PW).unwrap();
         assert_eq!(reopened.data.hosts[0].label, "web");
+    }
+
+    #[test]
+    fn destroying_leaves_room_for_a_new_vault_and_keeps_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = UnlockedVault::create(vault_path(&dir), PW, KdfParams::FAST_FOR_TESTS).unwrap();
+        vault.save_history(&CommandHistory::default()).unwrap();
+        vault.save_workspace(&Workspace::default()).unwrap();
+        std::fs::write(side_path(&vault_path(&dir), crate::biometric::FILE), "{}").unwrap();
+        std::fs::write(dir.path().join("otro.txt"), "no es de la bóveda").unwrap();
+
+        vault.destroy().unwrap();
+
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(left, ["otro.txt"]);
+        let fresh = UnlockedVault::create(
+            vault_path(&dir),
+            "otra-contraseña",
+            KdfParams::FAST_FOR_TESTS,
+        )
+        .unwrap();
+        assert_eq!(fresh.load_history().unwrap(), None);
     }
 
     #[test]

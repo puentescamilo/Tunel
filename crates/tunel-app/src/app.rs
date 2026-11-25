@@ -185,6 +185,8 @@ pub struct TunelApp {
     pub password_change: crate::views::settings::PasswordChange,
     /// Activación del desbloqueo biométrico, mientras el sistema pide la huella o el PIN.
     pub biometric_setup: Option<crate::biometric::Setup>,
+    /// Confirmación abierta para cerrar la sesión en este equipo.
+    pub sign_out: Option<crate::sign_out::SignOut>,
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     /// Importación de máquinas de la nube en curso.
     pub cloud_import: Option<crate::views::cloud_import::CloudImport>,
@@ -447,6 +449,7 @@ impl TunelApp {
             forward_errors: HashMap::new(),
             password_change: Default::default(),
             biometric_setup: None,
+            sign_out: None,
             quick_connect: None,
             cloud_import: None,
             containers: Default::default(),
@@ -1048,6 +1051,7 @@ impl eframe::App for TunelApp {
         crate::views::cloud_import::show(self, &ctx);
         crate::vaultwarden::import::show(self, &ctx);
         crate::tabs::rename_dialog(self, &ctx);
+        crate::sign_out::dialog(self, &ctx);
         views::snippets::prompt_dialog(self, &ctx);
         if let Some(message) = crate::clipboard::take_failure(&ctx) {
             self.notify(message);

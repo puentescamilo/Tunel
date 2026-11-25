@@ -132,6 +132,12 @@ pub fn unlock(path: std::path::PathBuf) -> Unlocked {
     }
 }
 
+/// Borra lo que guarda el sistema para el desbloqueo biométrico; el archivo de la bóveda
+/// lo borra el núcleo.
+pub fn forget_system(enrollment: &Enrollment) {
+    platform::forget(enrollment);
+}
+
 /// Quita el desbloqueo biométrico de la bóveda de `path`, también lo que guarda el sistema.
 pub fn disable(path: &std::path::Path) -> Result<(), StoreError> {
     // Un archivo ilegible no impide quitarlo: no hay secreto del sistema que se pueda nombrar.

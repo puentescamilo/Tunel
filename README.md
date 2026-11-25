@@ -311,6 +311,14 @@ entraste (la de la cuenta o, con un proveedor, la maestra) y se descarga todo lo
 Los cambios se suben unos segundos después de hacerlos y cada equipo descarga lo nuevo cada
 5 minutos, o al pulsar **Sincronizar ahora**.
 
+**Desvincular este equipo** deja de sincronizar, pero la bóveda se queda en el equipo. Para
+dejarlo limpio está **Ajustes → Seguridad → Cerrar sesión…**: pide la contraseña maestra y
+borra de este equipo la bóveda, la conexión con la cuenta, las pestañas guardadas, el
+historial de comandos, la cuenta de Vaultwarden y el desbloqueo con Touch ID o Windows Hello.
+Túnel vuelve a la bienvenida, desde donde se puede crear una bóveda nueva o entrar con una
+cuenta. Si quedan cambios sin subir, o el equipo no está unido a ninguna cuenta, lo avisa
+antes: lo que no esté en la cuenta se pierde.
+
 La contraseña de la cuenta no sale del equipo: de ella se derivan una clave para cifrar y otra
 para identificarse ante el servidor. Si la olvidas, los datos de la cuenta no se pueden
 recuperar, pero la bóveda local de cada equipo sigue intacta.

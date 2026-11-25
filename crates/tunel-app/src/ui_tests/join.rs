@@ -6,12 +6,12 @@ use tunel_server::{AppState, Config, Db, router};
 use tunel_sync::ServerUrl;
 use zeroize::Zeroizing;
 
-const EMAIL: &str = "ana@ejemplo.com";
-const ACCOUNT_PASSWORD: &str = "Cuenta-de-prueba-2026";
+pub(super) const EMAIL: &str = "ana@ejemplo.com";
+pub(super) const ACCOUNT_PASSWORD: &str = "Cuenta-de-prueba-2026";
 
 /// Un servidor en memoria con una cuenta que ya tiene el host «web-01», como si se hubiera
 /// creado en otro equipo. El runtime se devuelve para que el servidor siga en marcha.
-fn server_with_account() -> (tokio::runtime::Runtime, ServerUrl) {
+pub(super) fn server_with_account() -> (tokio::runtime::Runtime, ServerUrl) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let server = runtime.block_on(async {
         let config = Config {
@@ -42,7 +42,7 @@ fn server_with_account() -> (tokio::runtime::Runtime, ServerUrl) {
     (runtime, server)
 }
 
-fn sign_in(app: &mut TestApp, server: &ServerUrl, password: &str) {
+pub(super) fn sign_in(app: &mut TestApp, server: &ServerUrl, password: &str) {
     app.click(&button("Entrar con tu cuenta"));
     assert!(app.exists(&text("Entra con tu cuenta")));
     app.harness.check_accessibility();
@@ -53,7 +53,7 @@ fn sign_in(app: &mut TestApp, server: &ServerUrl, password: &str) {
 }
 
 /// Deja correr la app hasta que se cumpla `done`, con un tope.
-fn wait_for(app: &mut TestApp, mut done: impl FnMut(&TestApp) -> bool) -> bool {
+pub(super) fn wait_for(app: &mut TestApp, mut done: impl FnMut(&TestApp) -> bool) -> bool {
     for _ in 0..200 {
         if done(app) {
             return true;
