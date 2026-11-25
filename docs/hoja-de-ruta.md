@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 25 de noviembre de 2026, con Túnel 0.16.0.
+Actualizada el 25 de noviembre de 2026, con Túnel 0.16.1.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -41,6 +41,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | — | Cambiar de sitio las pestañas arrastrándolas o desde su menú | 0.16.0 | ✅ |
 | — | Cerrar sesión en este equipo y volver a la bienvenida | 0.16.0 | ✅ |
 | — | El archivo hosts avisa de las líneas mal escritas al guardar | 0.16.0 | ✅ |
+| — | Icono de Windows más grande, como los de las demás apps | 0.16.1 | ✅ |
+| — | La ventana cabe en la pantalla a la que se arrastra aunque estuviera maximizada (Windows) | 0.16.1 | ✅ |
 | 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
