@@ -27,6 +27,7 @@ mod prompts;
 mod quick_connect;
 mod recording;
 mod session;
+mod sign_out;
 mod sync;
 mod tabs;
 mod terminal_view;

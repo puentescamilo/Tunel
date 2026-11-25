@@ -307,6 +307,17 @@ pub fn show(app: &mut TunelApp, ui: &mut egui::Ui) {
                 ui.add_space(6.0);
                 ui.label(RichText::new(format!("Bóveda: {}", vault.path().display())).size(12.0).color(p.muted));
             }
+            ui.add_space(8.0);
+            let help = if app.sync.account().is_some() {
+                "Borra la bóveda de este equipo; tus hosts siguen en la cuenta. Después puedes entrar con una cuenta o crear una bóveda nueva."
+            } else {
+                "Borra la bóveda de este equipo para empezar de nuevo o entrar con una cuenta. Sin cuenta, no se puede recuperar."
+            };
+            setting_row(ui, "Cerrar sesión en este equipo", help, |ui| {
+                if ui::danger_button(ui, "Cerrar sesión…").clicked() {
+                    crate::sign_out::ask(app);
+                }
+            });
         });
     });
 }
