@@ -708,15 +708,19 @@ impl Engine {
         sign_in: tunel_sync::oauth::OAuthSignIn,
         master: Zeroizing<String>,
         data: VaultData,
-        check: tunel_core::PasswordCheck,
+        check: Option<tunel_core::PasswordCheck>,
     ) {
         let events = self.events_tx.clone();
         let ctx = self.ctx.clone();
         self.spawn(async move {
+            // Sin `check`, el equipo aún no tiene bóveda: se creará con esta contraseña.
             let password = master.clone();
-            let matches = tokio::task::spawn_blocking(move || check.matches(&password))
-                .await
-                .unwrap_or(false);
+            let matches = match check {
+                Some(check) => tokio::task::spawn_blocking(move || check.matches(&password))
+                    .await
+                    .unwrap_or(false),
+                None => true,
+            };
             let result = if matches {
                 tunel_sync::oauth::complete(sign_in, master, &data)
                     .await

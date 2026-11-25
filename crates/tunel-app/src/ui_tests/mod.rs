@@ -6,6 +6,7 @@ mod copy_password;
 mod editing;
 mod enable;
 mod hosts_file;
+mod join;
 mod lock;
 mod navigation;
 mod panes;

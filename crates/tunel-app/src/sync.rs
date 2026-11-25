@@ -119,6 +119,10 @@ impl Default for SyncController {
 }
 
 impl SyncController {
+    pub(crate) fn set_status(&mut self, status: SyncStatus) {
+        self.status = status;
+    }
+
     pub fn status(&self) -> &SyncStatus {
         &self.status
     }
@@ -152,7 +156,7 @@ impl SyncController {
     }
 
     /// Empieza una tarea y devuelve su número.
-    fn begin(&mut self, snapshot: VaultData) -> u64 {
+    pub(crate) fn begin(&mut self, snapshot: VaultData) -> u64 {
         let round = NEXT_ROUND.fetch_add(1, Ordering::Relaxed);
         self.running = Some(Running { round, snapshot });
         round
@@ -160,7 +164,7 @@ impl SyncController {
 
     /// Termina la tarea `round` y devuelve su bóveda inicial; `None` si el resultado es de
     /// una tarea que ya no es la actual (por ejemplo, de antes de bloquear la bóveda).
-    fn finish(&mut self, round: u64) -> Option<VaultData> {
+    pub(crate) fn finish(&mut self, round: u64) -> Option<VaultData> {
         match &self.running {
             Some(running) if running.round == round => self.running.take().map(|r| r.snapshot),
             _ => None,
@@ -223,7 +227,7 @@ pub fn on_unlock(app: &mut TunelApp) {
     }
 }
 
-fn save(app: &mut TunelApp) {
+pub(crate) fn save(app: &mut TunelApp) {
     let (Some(vault), Some(local)) = (app.vault.as_ref(), app.sync.local.as_ref()) else {
         return;
     };
@@ -322,7 +326,7 @@ pub fn sync_now(app: &mut TunelApp) {
     app.sync.schedule_in(Duration::ZERO);
 }
 
-fn describe(error: &SyncError) -> String {
+pub(crate) fn describe(error: &SyncError) -> String {
     match error {
         SyncError::Unauthorized => {
             "El servidor ya no acepta la clave de esta cuenta (¿se cambió la contraseña en otro \
@@ -450,6 +454,10 @@ pub fn link(app: &mut TunelApp, how: LinkAccount) {
 }
 
 pub fn on_linked(app: &mut TunelApp, round: u64, result: Result<Box<SyncLocal>, SyncError>) {
+    if app.vault.is_none() {
+        // Un equipo nuevo que entra con la cuenta desde la pantalla de bienvenida.
+        return crate::join::on_linked(app, round, result);
+    }
     let Some(snapshot) = app.sync.finish(round) else {
         return;
     };
