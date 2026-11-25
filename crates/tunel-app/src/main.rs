@@ -79,7 +79,13 @@ fn window_icon(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
         // está abierta; el vacío le dice que no toque el que hay.
         return viewport.with_icon(egui::IconData::default());
     }
-    match eframe::icon_data::from_png_bytes(include_bytes!("../assets/icons/256x256.png")) {
+    // En Windows, la versión casi sin margen, como los demás iconos de la barra de tareas.
+    let png: &[u8] = if cfg!(windows) {
+        include_bytes!("../assets/icons/windows-256.png")
+    } else {
+        include_bytes!("../assets/icons/256x256.png")
+    };
+    match eframe::icon_data::from_png_bytes(png) {
         Ok(icon) => viewport.with_icon(icon),
         Err(err) => {
             tracing::warn!("no se pudo cargar el icono de la ventana: {err}");
