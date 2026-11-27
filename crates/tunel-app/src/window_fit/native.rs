@@ -56,7 +56,8 @@ fn hook(hwnd: HWND) {
     // SAFETY: `hwnd` es una ventana de este hilo; `window_proc` cumple la firma de WNDPROC y
     // llama al procedimiento anterior, que se guarda aquí mismo antes de que llegue ningún
     // mensaje (cambiar GWLP_WNDPROC no envía mensajes a la ventana).
-    let original = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, window_proc as usize as isize) };
+    let original =
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, window_proc as *const () as isize) };
     if original == 0 {
         tracing::warn!("no se pudo vigilar la escala de la ventana");
         return;
