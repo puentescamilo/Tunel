@@ -7,12 +7,15 @@
 //!
 //! Aquí, cuando cambia la escala de una ventana, se encoge si no cabe en su pantalla.
 //!
-//! En Windows eso no bastaba (0.14.0): la ventana se arrastra a menudo maximizada, y en el
-//! instante del cambio de escala egui aún la daba por maximizada, así que no se tocaba y
-//! luego ya no se volvía a mirar. Allí se hace con las funciones del sistema ([`native`]):
-//! se anota el cambio de escala de cada ventana y, cuando se suelta el ratón, se mete entera
-//! en el área útil de su pantalla, moviéndola si hace falta.
+//! En Windows eso no bastaba (0.14.0 y 0.16.1). Mientras se arrastra, la escala rebota entre
+//! las dos pantallas y la ventana salta de sitio ([`dpi_move`]); el ajuste contaba como fuera
+//! de la pantalla el borde invisible que Windows deja alrededor de la ventana; y deshacía el
+//! acople a media pantalla. Allí se hace con las funciones del sistema ([`native`]): los
+//! cambios de escala se aplican una sola vez, al soltar la ventana, y entonces se mete la
+//! parte visible de la ventana en el área útil de su pantalla.
 
+#[cfg_attr(not(windows), allow(dead_code))]
+mod dpi_move;
 #[cfg(windows)]
 mod native;
 
@@ -88,6 +91,24 @@ pub fn fitted_rect(window: ScreenRect, work: ScreenRect) -> Option<ScreenRect> {
         top,
         right: left + width,
         bottom: top + height,
+    })
+}
+
+/// Como [`fitted_rect`], pero mirando solo la parte visible de la ventana, `frame`. En
+/// Windows 10 y 11 la ventana tiene alrededor un borde invisible de unos píxeles, para poder
+/// agarrarla; una ventana acoplada a media pantalla lo tiene fuera de ella y aun así cabe.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn fitted_window(
+    window: ScreenRect,
+    frame: ScreenRect,
+    work: ScreenRect,
+) -> Option<ScreenRect> {
+    let target = fitted_rect(frame, work)?;
+    Some(ScreenRect {
+        left: target.left - (frame.left - window.left),
+        top: target.top - (frame.top - window.top),
+        right: target.right + (window.right - frame.right),
+        bottom: target.bottom + (window.bottom - frame.bottom),
     })
 }
 
@@ -173,6 +194,38 @@ mod tests {
     fn only_the_side_that_does_not_fit_shrinks() {
         let fitted = fitted_rect(rect(2000, 0, 1000, 1500), MONITOR).unwrap();
         assert_eq!(fitted, rect(2000, 0, 1000, 928));
+    }
+
+    /// El borde invisible de Windows: 7 píxeles a los lados y abajo, ninguno arriba.
+    fn with_border(frame: ScreenRect) -> ScreenRect {
+        ScreenRect {
+            left: frame.left - 7,
+            top: frame.top,
+            right: frame.right + 7,
+            bottom: frame.bottom + 7,
+        }
+    }
+
+    #[test]
+    fn a_window_snapped_to_half_the_screen_fits_despite_its_invisible_border() {
+        // Del registro: acoplada a la mitad izquierda del monitor, la 0.16.1 la encogía.
+        let work = rect(0, 0, 1920, 1032);
+        let frame = rect(0, 0, 960, 1032);
+        assert_eq!(fitted_window(with_border(frame), frame, work), None);
+    }
+
+    #[test]
+    fn the_visible_part_of_a_window_too_big_is_what_fits_in_the_screen() {
+        // Del registro: la ventana llega al portátil al 150 % más alta que su pantalla.
+        let laptop = ScreenRect {
+            left: 1920,
+            top: -118,
+            right: 3840,
+            bottom: 1010,
+        };
+        let frame = rect(2383, -118, 1451, 1513);
+        let fitted = fitted_window(with_border(frame), frame, laptop).unwrap();
+        assert_eq!(fitted, with_border(rect(2383, -118, 1451, 1015)));
     }
 
     const LAPTOP: egui::Vec2 = egui::Vec2::new(1280.0, 720.0);
