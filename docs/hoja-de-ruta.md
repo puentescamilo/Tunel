@@ -1,6 +1,6 @@
 # Hoja de ruta de Túnel
 
-Actualizada el 25 de noviembre de 2026, con Túnel 0.16.1.
+Actualizada el 27 de noviembre de 2026, con Túnel 0.16.2.
 
 Cada entrega es un PR propio, con pruebas, que se fusiona y se publica en una versión. Las
 entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
@@ -43,6 +43,8 @@ entregas de un mismo bloque van en orden; los bloques se pueden intercalar.
 | — | El archivo hosts avisa de las líneas mal escritas al guardar | 0.16.0 | ✅ |
 | — | Icono de Windows más grande, como los de las demás apps | 0.16.1 | ✅ |
 | — | La ventana cabe en la pantalla a la que se arrastra aunque estuviera maximizada (Windows) | 0.16.1 | ✅ |
+| — | Ctrl+C y Ctrl+X llegan al programa de la terminal (Windows y Linux) | 0.16.2 | ✅ |
+| — | La ventana ya no rebota al pasar entre pantallas con distinta escala (Windows) | 0.16.2 | ✅ |
 | 9a | Móvil: núcleo compartido para iOS y Android (UniFFI) | 0.15.0 | ✅ |
 | 9b | iOS/iPadOS: app SwiftUI con la bóveda y la lista de hosts | 0.15.0 | ✅ |
 | 9c | iOS/iPadOS: iniciar sesión en la cuenta y sincronizar | 0.15.0 | ✅ |
