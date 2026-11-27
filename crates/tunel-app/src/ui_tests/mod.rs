@@ -13,6 +13,7 @@ mod panes;
 mod prompts;
 mod reorder_tabs;
 mod sign_out;
+mod tab_border;
 mod tabs;
 mod vaultwarden;
 mod wheel;

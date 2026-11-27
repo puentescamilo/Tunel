@@ -98,6 +98,25 @@ fn line_edit(key: egui::Key, m: &egui::Modifiers) -> Edit<'static> {
     }
 }
 
+/// En Windows y Linux, egui convierte Ctrl+C y Ctrl+X en copiar y cortar, y la tecla ya no
+/// llega como tal. En la terminal, como en Windows Terminal, Ctrl+C copia si hay texto
+/// seleccionado y si no llega al programa (interrumpe `tail -f`); Ctrl+X llega siempre (sale
+/// de nano). En macOS copiar y cortar van con Cmd, así que Ctrl+C ya llega como tecla.
+fn clipboard_as_key(
+    event: &egui::Event,
+    held: &egui::Modifiers,
+    selected: bool,
+) -> Option<egui::Key> {
+    if !held.ctrl || held.mac_cmd || held.shift || held.alt {
+        return None;
+    }
+    match event {
+        egui::Event::Copy if !selected => Some(egui::Key::C),
+        egui::Event::Cut => Some(egui::Key::X),
+        _ => None,
+    }
+}
+
 /// Envía lo que teclea el usuario y devuelve los comandos que ejecutó con Enter.
 fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
     let modes = session.emulator.input_modes();
@@ -111,7 +130,24 @@ fn handle_input(ui: &egui::Ui, session: &mut TerminalSession) -> Vec<String> {
         session.line = crate::autocomplete::LineTracker::new();
         session.suggestion = None;
     }
+    let held = ui.input(|i| i.modifiers);
     for event in events {
+        let event = match &event {
+            egui::Event::Copy | egui::Event::Cut => {
+                let selected = session.emulator.selection_text().is_some();
+                match clipboard_as_key(&event, &held, selected) {
+                    Some(key) => egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: held,
+                    },
+                    None => event,
+                }
+            }
+            _ => event,
+        };
         // → acepta la sugerencia solo si sigue siendo la de lo que hay escrito.
         let accepted = match &event {
             egui::Event::Key {
@@ -616,5 +652,24 @@ mod tests {
             line_edit(egui::Key::Backspace, &egui::Modifiers::ALT),
             Edit::Other
         );
+    }
+
+    #[test]
+    fn ctrl_c_and_ctrl_x_reach_the_program_when_egui_turns_them_into_copy_and_cut() {
+        use egui::Event::{Copy, Cut};
+        // En Windows y Linux, Ctrl lleva también `command`.
+        let ctrl = egui::Modifiers::COMMAND | egui::Modifiers::CTRL;
+        assert_eq!(clipboard_as_key(&Copy, &ctrl, false), Some(egui::Key::C));
+        assert_eq!(clipboard_as_key(&Cut, &ctrl, false), Some(egui::Key::X));
+        assert_eq!(clipboard_as_key(&Cut, &ctrl, true), Some(egui::Key::X));
+        // Con texto seleccionado, Ctrl+C copia.
+        assert_eq!(clipboard_as_key(&Copy, &ctrl, true), None);
+        // Cmd+C en macOS y Ctrl+Mayús+C son siempre copiar.
+        assert_eq!(
+            clipboard_as_key(&Copy, &egui::Modifiers::MAC_CMD, false),
+            None
+        );
+        let ctrl_shift = ctrl | egui::Modifiers::SHIFT;
+        assert_eq!(clipboard_as_key(&Copy, &ctrl_shift, false), None);
     }
 }
